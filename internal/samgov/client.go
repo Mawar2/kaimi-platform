@@ -361,7 +361,7 @@ type opportunityData struct {
 	PlaceOfPerformance        placeOfPerformance `json:"placeOfPerformance"`
 	AdditionalInfoLink        string             `json:"additionalInfoLink"`
 	UILink                    string             `json:"uiLink"`
-	ResourceLinks             []resourceLink     `json:"resourceLinks"`
+	ResourceLinks             json.RawMessage    `json:"resourceLinks,omitempty"`
 }
 
 type placeOfPerformance struct {
@@ -414,10 +414,21 @@ func transformOpportunity(data *opportunityData) (*opportunity.Opportunity, erro
 	// Build place of performance string
 	placeOfPerformance := formatPlaceOfPerformance(&data.PlaceOfPerformance)
 
-	// Extract attachment URLs
+	// Extract attachment URLs - handle both array and string responses
 	var attachments []string
-	for _, link := range data.ResourceLinks {
-		attachments = append(attachments, link.URL)
+	if len(data.ResourceLinks) > 0 {
+		// Try to parse as array first
+		var links []resourceLink
+		if err := json.Unmarshal(data.ResourceLinks, &links); err == nil {
+			// Successfully parsed as array
+			for _, link := range links {
+				if link.URL != "" {
+					attachments = append(attachments, link.URL)
+				}
+			}
+		}
+		// If it's a string or parsing failed, ignore it and use empty array
+		// This prevents the entire opportunity from failing to parse
 	}
 
 	// Determine NAICS description (SAM.gov doesn't always provide this, we'd need a lookup table)

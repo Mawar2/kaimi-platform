@@ -236,6 +236,9 @@ func TestCachedClient_FetchByID(t *testing.T) {
 // TestTransformOpportunity verifies that SAM.gov API data is correctly transformed
 // to internal Opportunity structs.
 func TestTransformOpportunity(t *testing.T) {
+	// Create resource links as JSON
+	resourceLinksJSON := []byte(`[{"name":"RFP.pdf","url":"https://sam.gov/rfp.pdf"}]`)
+
 	data := &opportunityData{
 		NoticeID:           "test-123",
 		Title:              "Test Opportunity",
@@ -254,9 +257,7 @@ func TestTransformOpportunity(t *testing.T) {
 			City:  locationInfo{Name: "Washington"},
 			State: locationInfo{Code: "DC", Name: "District of Columbia"},
 		},
-		ResourceLinks: []resourceLink{
-			{Name: "RFP.pdf", URL: "https://sam.gov/rfp.pdf"},
-		},
+		ResourceLinks: resourceLinksJSON,
 	}
 
 	opp, err := transformOpportunity(data)
@@ -304,6 +305,77 @@ func TestTransformOpportunity(t *testing.T) {
 	}
 	if opp.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt should not be zero")
+	}
+}
+
+// TestTransformOpportunity_ResourceLinksVariants verifies that resourceLinks can be parsed
+// as both array and string (handling SAM.gov API inconsistency).
+func TestTransformOpportunity_ResourceLinksVariants(t *testing.T) {
+	baseData := opportunityData{
+		NoticeID:           "test-123",
+		Title:              "Test Opportunity",
+		SolicitationNumber: "SOL-001",
+		Department:         "Department of Test",
+		Office:             "Test Office",
+		PostedDate:         "2026-05-15",
+		ResponseDeadLine:   "2026-07-15T16:00:00-05:00",
+		NAICSCode:          "541512",
+		TypeOfSetAside:     "SBA",
+		Description:        "Test description",
+		Type:               "Solicitation",
+		UILink:             "https://sam.gov/opp/test-123/view",
+		PlaceOfPerformance: placeOfPerformance{
+			City:  locationInfo{Name: "Washington"},
+			State: locationInfo{Code: "DC"},
+		},
+	}
+
+	tests := []struct {
+		name              string
+		resourceLinks     []byte
+		expectedAttachments int
+	}{
+		{
+			name:              "resourceLinks as array",
+			resourceLinks:     []byte(`[{"name":"RFP.pdf","url":"https://sam.gov/rfp.pdf"},{"name":"Addendum.pdf","url":"https://sam.gov/addendum.pdf"}]`),
+			expectedAttachments: 2,
+		},
+		{
+			name:              "resourceLinks as string (should not fail)",
+			resourceLinks:     []byte(`"some string value"`),
+			expectedAttachments: 0,
+		},
+		{
+			name:              "resourceLinks as empty array",
+			resourceLinks:     []byte(`[]`),
+			expectedAttachments: 0,
+		},
+		{
+			name:              "resourceLinks as null",
+			resourceLinks:     []byte(`null`),
+			expectedAttachments: 0,
+		},
+		{
+			name:              "resourceLinks empty",
+			resourceLinks:     nil,
+			expectedAttachments: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := baseData
+			data.ResourceLinks = tt.resourceLinks
+
+			opp, err := transformOpportunity(&data)
+			if err != nil {
+				t.Fatalf("transformOpportunity should not fail: %v", err)
+			}
+
+			if len(opp.Attachments) != tt.expectedAttachments {
+				t.Errorf("Expected %d attachments, got %d", tt.expectedAttachments, len(opp.Attachments))
+			}
+		})
 	}
 }
 
