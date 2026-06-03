@@ -220,9 +220,14 @@ func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string) ([]
 	offset := 0
 
 	for {
+		// Calculate date range (last 30 days)
+		now := time.Now()
+		postedTo := now.Format("01/02/2006")
+		postedFrom := now.AddDate(0, 0, -30).Format("01/02/2006")
+
 		// Build query URL
-		url := fmt.Sprintf("%s/search?naics=%s&limit=%d&offset=%d&api_key=%s",
-			l.baseURL, naicsCode, limit, offset, l.apiKey)
+		url := fmt.Sprintf("%s/search?naics=%s&limit=%d&offset=%d&postedFrom=%s&postedTo=%s&api_key=%s",
+			l.baseURL, naicsCode, limit, offset, postedFrom, postedTo, l.apiKey)
 
 		// Make HTTP request
 		req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
