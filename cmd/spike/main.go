@@ -5,8 +5,8 @@
 //
 // Usage:
 //
-//	go run ./cmd/spike run --prompt "Hello from Kaimi!"
-//	go run ./cmd/spike console
+//	echo "Hello from Kaimi!" | go run ./cmd/spike   // non-interactive, single prompt
+//	go run ./cmd/spike                               // interactive (Ctrl+Z to exit on Windows)
 package main
 
 import (
