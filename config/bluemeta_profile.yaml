@@ -1,0 +1,179 @@
+# BlueMeta Technologies Capability Profile
+# This file defines BlueMeta's capabilities, certifications, and past performance
+# for use by the Hunter (eligibility gating) and Scorer (fit reasoning) agents.
+#
+# Last updated: 2026-06-06
+
+# Company Identifiers
+uei: "XVUEA59LY579"
+cage: "9RY40"
+company: "BlueMeta Technologies"
+address: "2 HOPKINS PLAZA, UNIT 1908, BALTIMORE, MD 21201-2946 USA"
+
+# NAICS Codes (organized by tier)
+# Primary = strongest match, Secondary = moderate match, Tertiary = weaker match
+# The Scorer agent weights matches by tier when calculating fit scores.
+naics_codes:
+  # Primary NAICS Codes
+  - code: "541519"
+    description: "Other Computer Related Services"
+    tier: "primary"
+  - code: "541512"
+    description: "Computer Systems Design Services"
+    tier: "primary"
+  - code: "541511"
+    description: "Custom Computer Programming Services"
+    tier: "primary"
+
+  # Secondary NAICS Codes
+  - code: "518210"
+    description: "Computing Infrastructure Providers, Data Processing, Web Hosting, and Related Services"
+    tier: "secondary"
+  - code: "513210"
+    description: "Software Publishers"
+    tier: "secondary"
+  - code: "541715"
+    description: "Research and Development in the Physical, Engineering, and Life Sciences (except Nanotechnology and Biotechnology)"
+    tier: "secondary"
+
+  # Tertiary NAICS Codes
+  - code: "541690"
+    description: "Other Scientific and Technical Consulting Services"
+    tier: "tertiary"
+  - code: "561621"
+    description: "Security Systems Services (Except Locksmiths)"
+    tier: "tertiary"
+  - code: "541513"
+    description: "Computer Facilities Management Services"
+    tier: "tertiary"
+  - code: "611420"
+    description: "Computer Training"
+    tier: "tertiary"
+  - code: "519290"
+    description: "Web Search Portals and All Other Information Services"
+    tier: "tertiary"
+
+# Set-Aside Eligibility
+# These determine which federal set-aside opportunities we can legally bid on.
+# The Hunter agent uses these for hard eligibility gates.
+set_aside:
+  small_business: true   # Small business certified
+  sdb: true              # Small Disadvantaged Business (self-certified)
+  minority_owned: true   # Minority-owned business (self-certified)
+  eight_a: false         # Not 8(a) certified
+  sdvosb: false          # Not Service-Disabled Veteran-Owned
+  wosb: false            # Not Women-Owned Small Business
+  hubzone: false         # Not HUBZone certified
+
+# Security Clearance
+# Founder has Public Trust clearance, enabling work on sensitive federal projects.
+clearance: "Public Trust"
+
+# Core Competencies
+# These are the technical and domain capabilities BlueMeta can deliver.
+# The Scorer agent uses these to match opportunity requirements.
+competencies:
+  - "AI/ML"
+  - "Federal Systems"
+  - "Identity Verification"
+  - "Federal Authentication"
+  - "Cloud Infrastructure (GCP)"
+  - "Mobile Development (iOS/Android)"
+  - "Data Visualization"
+  - "API Development"
+  - "Multilingual Systems"
+  - "Fintech/Banking Integration"
+  - "Geospatial Technology"
+  - "Environmental Justice Technology"
+  - "Automation and Workflow Optimization"
+  - "Federal Compliance and Security"
+  - "Community Engagement Platforms"
+  - "Agentic Development (AI-Human Hybrid)"
+
+# Past Performance
+# Lightweight facts (client, scope, value, what it proves).
+# Full narratives and embeddings will be added in Phase 3 knowledge base.
+# The Scorer agent uses these to assess relevant experience.
+past_performance:
+  # Federal / Research Projects
+  - client: "U.S. Census Bureau"
+    scope: "AI-powered multilingual communication platform for local governments (SpeakEase)"
+    value: "2024 Opportunity Project Sprint Partnership"
+    what_it_proves:
+      - "Federal experience"
+      - "AI/ML capability"
+      - "Multilingual systems"
+      - "Data-driven development"
+      - "Community engagement"
+
+  - client: "Justice40 Initiative (Federal)"
+    scope: "Federal funding tracking tool for disadvantaged communities"
+    value: "Academic publication partnership (Jan 2022 - Jun 2022)"
+    what_it_proves:
+      - "Federal compliance"
+      - "Data visualization"
+      - "Environmental justice focus"
+      - "Policy impact"
+
+  - client: "Bullard Center for Environmental Justice, Texas Southern University"
+    scope: "Enhanced Climate and Economic Justice Screening Tool (CEJST) with racial demographic data integration"
+    value: "Research partnership (May 2022 - Dec 2022)"
+    what_it_proves:
+      - "GIS expertise"
+      - "API development"
+      - "Database engineering"
+      - "Environmental justice technology"
+
+  - client: "Center for Community Engagement, Environmental Justice, and Health (CEEJH)"
+    scope: "MyBlockCounts mobile app (iOS/Android) for geospatial data collection"
+    value: "Research project (50-100 employee organization)"
+    what_it_proves:
+      - "Mobile development (React Native)"
+      - "Geospatial technology"
+      - "Research support"
+      - "Firebase/Cloud integration"
+
+  # High-Value Commercial Projects (prove technical depth)
+  - client: "ByBlack"
+    scope: "Fintech platform with banking integration (Plaid, 12k+ institutions), AI merchant categorization, spending analytics"
+    value: "$54,000 (Feb 2025 - May 2025, delivered in 8 weeks)"
+    what_it_proves:
+      - "Fintech expertise"
+      - "Banking integration"
+      - "PCI compliance"
+      - "AI/ML"
+      - "Agentic development innovation"
+      - "Scalability (100k+ concurrent users)"
+
+  - client: "Synergee AI"
+    scope: "Two AI chatbot systems (YouTube content automation, website lead vetting)"
+    value: "Commercial client"
+    what_it_proves:
+      - "AI/ML"
+      - "Chatbot development"
+      - "Google Cloud Platform"
+      - "API integration"
+
+  - client: "Baltimore City Board of School Commissioners"
+    scope: "Automated data entry system for meeting logs and budgeting spreadsheets"
+    value: "Government client (large organization)"
+    what_it_proves:
+      - "Government experience"
+      - "Data automation"
+      - "Process optimization"
+
+  - client: "Five Rings Marketing"
+    scope: "SalesFlow to Google Looker data automation pipeline"
+    value: "Commercial client (35-40 employees)"
+    what_it_proves:
+      - "API development"
+      - "Data pipeline engineering"
+      - "Google Apps Script"
+
+  - client: "WebPuzzle Master"
+    scope: "Dual chatbot system (website + marketing) with CRM integration"
+    value: "Commercial client (5-10 employees)"
+    what_it_proves:
+      - "Multi-platform chatbot development"
+      - "CRM integration"
+      - "Google Webhooks"
