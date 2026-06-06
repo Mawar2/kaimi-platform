@@ -390,18 +390,15 @@ jobs:
 
           FILE_CONTENT=$(cat "$FILE")
 
-          # Call Gemini to generate specific fix
-          PROMPT=$(cat <<EOF
-Fix this issue in the code. Return ONLY the complete fixed file content, no explanations, no markdown code blocks.
-
-File: $FILE
-Issue at line $LINE: $DESCRIPTION
-Suggested fix: $SUGGESTED_FIX
-
-Current file content:
-$FILE_CONTENT
-EOF
-)
+          # Call Gemini to generate specific fix using printf for proper multi-line handling
+          PROMPT=$(printf '%s\n\n%s\n%s\n%s\n%s\n\n%s\n%s' \
+            "Fix this issue in the code. Return ONLY the complete fixed file content, no explanations, no markdown code blocks." \
+            "File: $FILE" \
+            "Issue at line $LINE: $DESCRIPTION" \
+            "Suggested fix: $SUGGESTED_FIX" \
+            "" \
+            "Current file content:" \
+            "$FILE_CONTENT")
 
           PAYLOAD=$(jq -n \
             --arg prompt "$PROMPT" \

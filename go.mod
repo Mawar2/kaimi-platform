@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	google.golang.org/adk v1.4.0
 	google.golang.org/genai v1.59.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
