@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// StubAgent is a minimal agent implementation that proves the AgentResult contract works.
+// StubAgent is a minimal agent implementation that proves the Result contract works.
 // It's used for testing and as a reference for building real agents.
 //
 // Real agents will follow this pattern:
 //  1. Take input (Opportunity, config, etc.)
 //  2. Do work (call APIs, run LLM, etc.)
-//  3. Return AgentResult with status and output
+//  3. Return Result with status and output
 type StubAgent struct {
 	name string
 }
@@ -22,13 +22,13 @@ func NewStubAgent(name string) *StubAgent {
 	return &StubAgent{name: name}
 }
 
-// Execute runs the stub agent and returns a successful AgentResult.
+// Execute runs the stub agent and returns a successful Result.
 // This proves the contract shape works without doing real work.
-func (a *StubAgent) Execute(ctx context.Context, noticeID string) (*AgentResult, error) {
+func (a *StubAgent) Execute(ctx context.Context, noticeID string) (*Result, error) {
 	// Simulate some work
 	select {
 	case <-ctx.Done():
-		return &AgentResult{
+		return &Result{
 			AgentName:   a.name,
 			Status:      StatusFailed,
 			NoticeID:    noticeID,
@@ -40,7 +40,7 @@ func (a *StubAgent) Execute(ctx context.Context, noticeID string) (*AgentResult,
 	}
 
 	// Return successful result
-	return &AgentResult{
+	return &Result{
 		AgentName:   a.name,
 		Status:      StatusSuccess,
 		NoticeID:    noticeID,
@@ -53,8 +53,8 @@ func (a *StubAgent) Execute(ctx context.Context, noticeID string) (*AgentResult,
 
 // ExecuteWithError simulates an agent failure.
 // Useful for testing error handling in the Manager.
-func (a *StubAgent) ExecuteWithError(ctx context.Context, noticeID, errMsg string) (*AgentResult, error) {
-	return &AgentResult{
+func (a *StubAgent) ExecuteWithError(ctx context.Context, noticeID, errMsg string) (*Result, error) {
+	return &Result{
 		AgentName:   a.name,
 		Status:      StatusFailed,
 		NoticeID:    noticeID,
@@ -65,8 +65,8 @@ func (a *StubAgent) ExecuteWithError(ctx context.Context, noticeID, errMsg strin
 
 // ExecuteNeedsHuman simulates an agent that requires human intervention.
 // Useful for testing the Manager's human review gate.
-func (a *StubAgent) ExecuteNeedsHuman(ctx context.Context, noticeID, reason string) (*AgentResult, error) {
-	return &AgentResult{
+func (a *StubAgent) ExecuteNeedsHuman(ctx context.Context, noticeID, reason string) (*Result, error) {
+	return &Result{
 		AgentName:   a.name,
 		Status:      StatusNeedsHuman,
 		NoticeID:    noticeID,

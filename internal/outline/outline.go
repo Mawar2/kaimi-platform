@@ -63,16 +63,16 @@ func New() *Agent {
 	return &Agent{}
 }
 
-// Run takes a selected Opportunity and produces a structured Outline and an AgentResult.
+// Run takes a selected Opportunity and produces a structured Outline and a Result.
 //
-// Returns a non-nil Outline on success. Returns a failed AgentResult (and nil Outline)
+// Returns a non-nil Outline on success. Returns a failed Result (and nil Outline)
 // on unrecoverable errors. Sparse opportunities get a best-effort outline rather than
 // a failure.
 //
 // TODO(phase-3): Replace buildSections with a Gemini call once LLM integration lands.
-func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline, *agent.AgentResult, error) {
+func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline, *agent.Result, error) {
 	if opp == nil {
-		return nil, &agent.AgentResult{
+		return nil, &agent.Result{
 			AgentName: agentName,
 			Status:    agent.StatusFailed,
 			Summary:   "opportunity must not be nil",
@@ -90,7 +90,7 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline
 		GeneratedAt:     time.Now().UTC(),
 	}
 
-	result := &agent.AgentResult{
+	result := &agent.Result{
 		AgentName: agentName,
 		Status:    agent.StatusSuccess,
 		Summary:   fmt.Sprintf("generated %d sections for opportunity %s", len(sections), opp.ID),

@@ -1,6 +1,6 @@
 // Package agent provides the core interface contract for all Kaimi agents.
 //
-// The AgentResult type is the standardized return value for every agent in both
+// The Result type is the standardized return value for every agent in both
 // Zone 1 (scheduled pipeline) and Zone 2 (per-proposal orchestration). This contract
 // enables the Manager agent to coordinate specialist agents without tight coupling.
 //
@@ -32,14 +32,14 @@ const (
 	StatusReadyToSubmit Status = "ready_to_submit"
 )
 
-// AgentResult is the standardized return type for all Kaimi agents.
+// Result is the standardized return type for all Kaimi agents.
 //
-// Every agent (Hunter, Scorer, Outline, Writer, Final Review) returns an AgentResult
+// Every agent (Hunter, Scorer, Outline, Writer, Final Review) returns a Result
 // to communicate its outcome, output location, and any metadata or errors.
 //
 // Example usage (Scorer agent):
 //
-//	result := &agent.AgentResult{
+//	result := &agent.Result{
 //	    AgentName:  "scorer",
 //	    Status:     agent.StatusSuccess,
 //	    NoticeID:   "ABC-123-2026",
@@ -51,13 +51,13 @@ const (
 //
 // Example usage (agent failure):
 //
-//	result := &agent.AgentResult{
+//	result := &agent.Result{
 //	    AgentName: "hunter",
 //	    Status:    agent.StatusFailed,
 //	    Error:     "SAM.gov API returned 429 (rate limit exceeded)",
 //	    CompletedAt: time.Now(),
 //	}
-type AgentResult struct {
+type Result struct {
 	// AgentName identifies which agent produced this result.
 	// Examples: "hunter", "scorer", "outline", "writer", "final-review"
 	AgentName string `json:"agent_name"`
@@ -101,16 +101,16 @@ type AgentResult struct {
 }
 
 // IsSuccess returns true if the agent completed successfully.
-func (r *AgentResult) IsSuccess() bool {
+func (r *Result) IsSuccess() bool {
 	return r.Status == StatusSuccess || r.Status == StatusReadyToSubmit
 }
 
 // IsFailed returns true if the agent failed.
-func (r *AgentResult) IsFailed() bool {
+func (r *Result) IsFailed() bool {
 	return r.Status == StatusFailed
 }
 
 // NeedsHuman returns true if the agent requires human intervention.
-func (r *AgentResult) NeedsHuman() bool {
+func (r *Result) NeedsHuman() bool {
 	return r.Status == StatusNeedsHuman
 }

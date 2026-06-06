@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestAgentResult_IsSuccess(t *testing.T) {
+func TestResult_IsSuccess(t *testing.T) {
 	tests := []struct {
 		name   string
 		status Status
@@ -19,7 +19,7 @@ func TestAgentResult_IsSuccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := &AgentResult{Status: tt.status}
+			result := &Result{Status: tt.status}
 			if got := result.IsSuccess(); got != tt.want {
 				t.Errorf("IsSuccess() = %v, want %v", got, tt.want)
 			}
@@ -27,7 +27,7 @@ func TestAgentResult_IsSuccess(t *testing.T) {
 	}
 }
 
-func TestAgentResult_IsFailed(t *testing.T) {
+func TestResult_IsFailed(t *testing.T) {
 	tests := []struct {
 		name   string
 		status Status
@@ -40,7 +40,7 @@ func TestAgentResult_IsFailed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := &AgentResult{Status: tt.status}
+			result := &Result{Status: tt.status}
 			if got := result.IsFailed(); got != tt.want {
 				t.Errorf("IsFailed() = %v, want %v", got, tt.want)
 			}
@@ -48,7 +48,7 @@ func TestAgentResult_IsFailed(t *testing.T) {
 	}
 }
 
-func TestAgentResult_NeedsHuman(t *testing.T) {
+func TestResult_NeedsHuman(t *testing.T) {
 	tests := []struct {
 		name   string
 		status Status
@@ -61,7 +61,7 @@ func TestAgentResult_NeedsHuman(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := &AgentResult{Status: tt.status}
+			result := &Result{Status: tt.status}
 			if got := result.NeedsHuman(); got != tt.want {
 				t.Errorf("NeedsHuman() = %v, want %v", got, tt.want)
 			}
@@ -69,9 +69,9 @@ func TestAgentResult_NeedsHuman(t *testing.T) {
 	}
 }
 
-func TestAgentResult_SuccessfulResult(t *testing.T) {
+func TestResult_SuccessfulResult(t *testing.T) {
 	// Test creating a complete successful result (as Scorer would)
-	result := &AgentResult{
+	result := &Result{
 		AgentName:   "scorer",
 		Status:      StatusSuccess,
 		NoticeID:    "ABC-123-2026",
@@ -98,9 +98,9 @@ func TestAgentResult_SuccessfulResult(t *testing.T) {
 	}
 }
 
-func TestAgentResult_FailedResult(t *testing.T) {
+func TestResult_FailedResult(t *testing.T) {
 	// Test creating a failed result (as Hunter would on API error)
-	result := &AgentResult{
+	result := &Result{
 		AgentName:   "hunter",
 		Status:      StatusFailed,
 		Error:       "SAM.gov API returned 429 (rate limit exceeded)",
@@ -121,9 +121,9 @@ func TestAgentResult_FailedResult(t *testing.T) {
 	}
 }
 
-func TestAgentResult_NeedsHumanResult(t *testing.T) {
+func TestResult_NeedsHumanResult(t *testing.T) {
 	// Test creating a needs_human result (as Outline would when requirements are ambiguous)
-	result := &AgentResult{
+	result := &Result{
 		AgentName:   "outline",
 		Status:      StatusNeedsHuman,
 		NoticeID:    "XYZ-456-2026",
@@ -146,9 +146,9 @@ func TestAgentResult_NeedsHumanResult(t *testing.T) {
 	}
 }
 
-func TestAgentResult_ReadyToSubmitResult(t *testing.T) {
+func TestResult_ReadyToSubmitResult(t *testing.T) {
 	// Test creating a ready_to_submit result (as Final Review would)
-	result := &AgentResult{
+	result := &Result{
 		AgentName:   "final-review",
 		Status:      StatusReadyToSubmit,
 		NoticeID:    "DEF-789-2026",
