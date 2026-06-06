@@ -28,13 +28,24 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full system design and [WORKFLOW.md
 
 ## Current Status
 
-**Phase 0**: Foundation and project structure
-- Go module initialized
-- Project structure created
-- Core interfaces defined (Store, SAM.gov Client)
-- Opportunity schema designed for all phases
+**Phase 0-1 Complete**: Foundation, Hunter, and Capability Profile
+- ✅ Go module initialized with full project structure
+- ✅ Core interfaces defined (Store, SAM.gov Client, AgentResult contract)
+- ✅ Opportunity schema designed for all phases
+- ✅ **Hunter Agent** implemented with SAM.gov integration and eligibility gating
+- ✅ **CapabilityProfile** implemented with real BlueMeta data (Issue #9)
+  - UEI: XVUEA59LY579, CAGE: 9RY40
+  - 11 NAICS codes (3 primary, 3 secondary, 5 tertiary)
+  - Self-certified: Small Business, SDB, Minority-Owned
+  - 16 core competencies, 9 past performance projects
+- ✅ **Scorer Agent** implemented with Gemini 2.5 Pro integration (Issue #11)
+- ✅ **Outline Agent** skeleton and formatting rules extraction (Issues #2, #4)
+- ✅ **CI/CD Pipeline** with AI code review and auto-fix bot
+- ✅ GitHub API caching layer for performance
 
-**Next**: Hunter agent implementation (Phase 0 continuation)
+**In Progress**: Zone 2 agent development (Writer, Final Review)
+
+**Total Closed Issues**: 9 (including foundation, Hunter, Scorer, Outline, CI/CD)
 
 ## Tech Stack
 
@@ -120,13 +131,24 @@ make help       # Show all available targets
 ```
 .
 ├── cmd/
-│   └── hunter/              # Hunter agent entry point
+│   ├── hunter/              # Hunter agent entry point
+│   ├── scorer/              # Scorer agent entry point
+│   └── outline/             # Outline agent entry point
 ├── internal/
+│   ├── agent/               # AgentResult contract and interfaces
+│   ├── capability/          # CapabilityProfile for company capabilities
 │   ├── opportunity/         # Opportunity schema
 │   ├── store/               # Store interface for persistence
-│   └── samgov/              # SAM.gov API client
+│   ├── samgov/              # SAM.gov API client
+│   ├── scorer/              # Scoring logic and Gemini integration
+│   ├── outline/             # Outline generation and formatting rules
+│   └── github/              # GitHub API caching layer
+├── config/
+│   └── bluemeta_profile.yaml  # BlueMeta capability profile
 ├── test/
 │   └── fixtures/            # Test fixtures (cached SAM.gov responses)
+├── docs/                    # Additional documentation
+├── .github/workflows/       # CI/CD pipeline (AI review + auto-fix)
 ├── ARCHITECTURE.md          # System architecture and design
 ├── WORKFLOW.md              # Engineering workflow contract
 ├── .golangci.yml            # Linter configuration

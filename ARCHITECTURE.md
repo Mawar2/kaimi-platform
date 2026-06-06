@@ -131,6 +131,16 @@ Zone 2 specialists for proposal generation. Phase 3+. See kaimi_timm_tickets.md 
 
 - **Store interface** — Abstraction for persistence (`Save(opp)`, `Load(id)`, `List()`). JSON file implementation in Phase 0 (`internal/store/json.go`), swaps to Firestore in Phase 1+ without touching Hunter code. This is the "provision lazily, design eagerly" pattern in action.
 
+- **CapabilityProfile** — Structured representation of BlueMeta Technologies' capabilities, certifications, and past performance for federal contracting. Loaded from YAML config file (`config/bluemeta_profile.yaml`). Used by Hunter agent for hard eligibility gates and Scorer agent for fit reasoning. Schema lives in `internal/capability/profile.go`. Contains:
+  - Company identifiers (UEI: XVUEA59LY579, CAGE: 9RY40)
+  - NAICS codes organized by tier (Primary/Secondary/Tertiary) for weighted matching
+  - Set-aside eligibility status (small business, SDB, minority-owned)
+  - Security clearance level (Public Trust)
+  - Core competencies (16 technical and domain capabilities)
+  - Past performance entries (9 projects with client, scope, value, and what each proves)
+
+  The profile is designed to be forward-compatible with Phase 3 knowledge base enhancements (full narratives, embeddings, RAG). Current implementation provides lightweight facts sufficient for Phase 1 hard gates and scoring logic.
+
 - **AgentResult** — Return type for all agents (Zone 1 and Zone 2). Every agent returns an `AgentResult` to communicate outcome and output location. Defined in `internal/agent/result.go`. Fields:
   - `agent_name` (string) - identifies which agent produced the result
   - `status` (enum) - outcome: `success`, `failed`, `needs_human`, or `ready_to_submit`
