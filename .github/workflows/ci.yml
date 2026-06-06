@@ -162,6 +162,9 @@ jobs:
   ai-code-review:
     name: AI Code Review
     runs-on: ubuntu-latest
+    outputs:
+      review_json: ${{ steps.parse.outputs.review_json }}
+      fixable_count: ${{ steps.parse.outputs.fixable_count }}
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
@@ -214,7 +217,7 @@ jobs:
             contents: [{
               role: "user",
               parts: [{
-                text: "Review this PR diff. Report ONLY specific issues found. Skip introductions, summaries, and praise.\n\nFor each issue:\n- File path and line number\n- Category: Bug | Security | Performance | Best Practice | Test Coverage\n- Description and fix\n\nIf no issues: respond with only \"No issues found.\"\n\nPR Diff:\n\($diff)"
+                text: "Review this PR diff and respond with ONLY a JSON object (no markdown, no code blocks, just raw JSON).\n\nSchema:\n{\n  \"issues\": [\n    {\n      \"file\": \"path/to/file.go\",\n      \"line\": 42,\n      \"type\": \"Bug | Security | Performance | Best Practice | Test Coverage\",\n      \"severity\": \"high | medium | low\",\n      \"description\": \"Clear description of the issue\",\n      \"suggestedFix\": \"Specific fix recommendation\",\n      \"autoFixable\": true | false\n    }\n  ]\n}\n\nGuidelines:\n- Mark as autoFixable=true ONLY for simple, unambiguous fixes (unused vars, formatting, simple best practices)\n- Mark as autoFixable=false for complex changes requiring human judgment\n- If no issues found, return: {\"issues\": []}\n\nPR Diff:\n\($diff)"
               }]
             }],
             generationConfig: {
@@ -248,19 +251,237 @@ jobs:
         echo "$REVIEW" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
+    - name: Parse review JSON
+      id: parse
+      env:
+        REVIEW_TEXT: ${{ steps.review.outputs.review }}
+      run: |
+        # Extract JSON from response (remove any markdown code blocks if present)
+        REVIEW_JSON=$(echo "$REVIEW_TEXT" | sed -n '/^{/,/^}/p' | head -n 1)
+
+        # Validate JSON
+        if ! echo "$REVIEW_JSON" | jq empty 2>/dev/null; then
+          echo "::warning::Review response is not valid JSON, treating as plain text"
+          # Fallback: create empty issues JSON
+          REVIEW_JSON='{"issues":[]}'
+        fi
+
+        # Store JSON for auto-fix job
+        echo "review_json<<EOF" >> $GITHUB_OUTPUT
+        echo "$REVIEW_JSON" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        # Count auto-fixable issues
+        FIXABLE_COUNT=$(echo "$REVIEW_JSON" | jq '[.issues[]? | select(.autoFixable == true)] | length')
+        echo "fixable_count=$FIXABLE_COUNT" >> $GITHUB_OUTPUT
+        echo "Found $FIXABLE_COUNT auto-fixable issues"
+
     - name: Post review comment
       uses: actions/github-script@v7
       env:
-        REVIEW_TEXT: ${{ steps.review.outputs.review }}
+        REVIEW_JSON: ${{ steps.parse.outputs.review_json }}
+        FIXABLE_COUNT: ${{ steps.parse.outputs.fixable_count }}
         DIFF_SIZE: ${{ steps.diff.outputs.diff_size }}
       with:
         script: |
-          const review = process.env.REVIEW_TEXT;
+          const reviewJson = JSON.parse(process.env.REVIEW_JSON);
+          const fixableCount = process.env.FIXABLE_COUNT;
           const diffSize = process.env.DIFF_SIZE;
 
-          const body = "## 🤖 AI Code Review (Gemini 2.5 Pro)\n\n" +
-                       review +
-                       "\n\n---\n*Diff size: " + diffSize + " bytes | Reviewed by Gemini 2.5 Pro with thinking*";
+          let body = "## 🤖 AI Code Review (Gemini 2.5 Pro)\n\n";
+
+          if (!reviewJson.issues || reviewJson.issues.length === 0) {
+            body += "✅ **No issues found**\n\n";
+          } else {
+            body += `Found ${reviewJson.issues.length} issue(s):\n\n`;
+
+            reviewJson.issues.forEach((issue, index) => {
+              const autoFixBadge = issue.autoFixable ? " 🔧 *Auto-fixable*" : "";
+              const severityEmoji = issue.severity === "high" ? "🔴" : issue.severity === "medium" ? "🟡" : "🟢";
+
+              body += `### ${index + 1}. ${issue.type}${autoFixBadge}\n`;
+              body += `${severityEmoji} **${issue.file}:${issue.line}**\n\n`;
+              body += `${issue.description}\n\n`;
+              if (issue.suggestedFix) {
+                body += `**Suggested fix:** ${issue.suggestedFix}\n\n`;
+              }
+              body += "---\n\n";
+            });
+
+            if (fixableCount > 0) {
+              body += `\n💡 **${fixableCount} issue(s) marked as auto-fixable** - the auto-fix bot will attempt to fix these automatically.\n\n`;
+            }
+          }
+
+          body += `*Diff size: ${diffSize} bytes | Reviewed by Gemini 2.5 Pro with thinking*`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.pull_request.number,
+            body: body
+          });
+
+  auto-fix:
+    name: Auto-Fix Issues
+    runs-on: ubuntu-latest
+    needs: ai-code-review
+    # Only run if review found auto-fixable issues
+    if: |
+      needs.ai-code-review.outputs.fixable_count > 0 &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.repository == 'Mawar2/Kaimi'
+
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    - name: Get access token
+      id: auth
+      run: |
+        TOKEN=$(gcloud auth print-access-token)
+        echo "::add-mask::$TOKEN"
+        echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
+
+    - name: Generate and apply fixes
+      id: apply_fixes
+      env:
+        REVIEW_JSON: ${{ needs.ai-code-review.outputs.review_json }}
+        ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+      run: |
+        # Parse auto-fixable issues
+        FIXABLE=$(echo "$REVIEW_JSON" | jq -c '[.issues[] | select(.autoFixable == true)]')
+        ISSUE_COUNT=$(echo "$FIXABLE" | jq 'length')
+
+        echo "Processing $ISSUE_COUNT auto-fixable issues..."
+
+        # Track which files were fixed
+        FIXED_FILES=""
+
+        # For each fixable issue
+        echo "$FIXABLE" | jq -c '.[]' | while read -r issue; do
+          FILE=$(echo "$issue" | jq -r '.file')
+          LINE=$(echo "$issue" | jq -r '.line')
+          DESCRIPTION=$(echo "$issue" | jq -r '.description')
+          SUGGESTED_FIX=$(echo "$issue" | jq -r '.suggestedFix')
+
+          echo "Fixing: $FILE (line $LINE)"
+
+          # Read file content
+          if [ ! -f "$FILE" ]; then
+            echo "::warning::File not found: $FILE"
+            continue
+          fi
+
+          FILE_CONTENT=$(cat "$FILE")
+
+          # Call Gemini to generate specific fix
+          PROMPT="Fix this issue in the code. Return ONLY the complete fixed file content, no explanations, no markdown code blocks.
+
+File: $FILE
+Issue at line $LINE: $DESCRIPTION
+Suggested fix: $SUGGESTED_FIX
+
+Current file content:
+$FILE_CONTENT"
+
+          PAYLOAD=$(jq -n \
+            --arg prompt "$PROMPT" \
+            '{
+              contents: [{
+                role: "user",
+                parts: [{ text: $prompt }]
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 8192
+              }
+            }')
+
+          RESPONSE=$(curl -s -X POST \
+            "https://${{ secrets.GCP_REGION }}-aiplatform.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION }}/publishers/google/models/gemini-2.5-pro:generateContent" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD")
+
+          # Check for API errors
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
+            echo "::warning::Gemini API error for $FILE: $(echo "$RESPONSE" | jq -r '.error.message')"
+            continue
+          fi
+
+          FIXED_CODE=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // ""')
+
+          if [ -z "$FIXED_CODE" ]; then
+            echo "::warning::No fix generated for $FILE"
+            continue
+          fi
+
+          # Apply fix (overwrite file)
+          echo "$FIXED_CODE" > "$FILE"
+
+          echo "✓ Fixed: $FILE (line $LINE)"
+          FIXED_FILES="$FIXED_FILES $FILE"
+        done
+
+        # Store fixed files list for commit message
+        echo "fixed_files=$FIXED_FILES" >> $GITHUB_OUTPUT
+
+    - name: Commit and push fixes
+      run: |
+        git config user.name "Kaimi Auto-Fix Bot"
+        git config user.email "bot@kaimi-seeker.iam.gserviceaccount.com"
+
+        # Check if there are changes to commit
+        if git diff --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+
+        git add .
+        git commit -m "AI auto-fix: Apply fixes from code review [skip ci]
+
+Co-Authored-By: Gemini 2.5 Pro <noreply@google.com>"
+
+        # Push to PR branch
+        git push origin ${{ github.event.pull_request.head.ref }}
+
+    - name: Post summary comment
+      uses: actions/github-script@v7
+      env:
+        REVIEW_JSON: ${{ needs.ai-code-review.outputs.review_json }}
+      with:
+        script: |
+          const reviewJson = JSON.parse(process.env.REVIEW_JSON);
+          const issues = reviewJson.issues.filter(i => i.autoFixable);
+
+          const fixList = issues.map(i =>
+            `- **${i.file}:${i.line}** (${i.type}): ${i.description}`
+          ).join('\n');
+
+          const body = `## 🔧 Auto-Fix Bot
+
+Applied ${issues.length} automatic fix(es):
+
+${fixList}
+
+---
+*These fixes were automatically generated and applied by Gemini 2.5 Pro. Please review the changes before merging.*`;
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
@@ -272,7 +493,7 @@ jobs:
   all-checks-pass:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [test, lint, verify-gcp, verify-acceptance-criteria, ai-code-review]
+    needs: [test, lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
     if: always()
 
     steps:
@@ -304,6 +525,12 @@ jobs:
         # ai-code-review can be skipped (on forks, draft PRs, direct push, or missing secrets) but not failed
         if [[ "${{ needs.ai-code-review.result }}" != "success" && "${{ needs.ai-code-review.result }}" != "skipped" ]]; then
           echo "::error::AI code review failed"
+          exit 1
+        fi
+
+        # auto-fix can be skipped (if no fixable issues, on forks, draft PRs, direct push, or missing secrets) but not failed
+        if [[ "${{ needs.auto-fix.result }}" != "success" && "${{ needs.auto-fix.result }}" != "skipped" ]]; then
+          echo "::error::Auto-fix failed"
           exit 1
         fi
 
