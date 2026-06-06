@@ -1,0 +1,67 @@
+# Multi-Agent Orchestrator Configuration
+# Supervisor monitors these projects and routes issues to workers
+
+projects:
+  # Kaimi - Federal BD pipeline agents
+  - name: kaimi
+    repo_owner: Mawar2
+    repo_name: Kaimi
+    branch_pattern: "feature/*"
+    conventions_path: ".claude/CLAUDE.md"
+    labels_filter:
+      - "phase-0"
+      - "phase-1"
+      - "phase-2"
+      - "phase-3"
+
+  # Multi-Agent-System - The orchestrator itself (self-improvement!)
+  - name: multi-agent-system
+    repo_owner: Mawar2
+    repo_name: multi-agent-system
+    branch_pattern: "feature/*"
+    conventions_path: "CLAUDE.md"
+    labels_filter: []  # Process all issues
+    poll_interval: 60  # Check every 60 seconds
+
+# Worker pool configuration
+workers:
+  max_concurrent: 5
+
+  # ClaudeCodeWorker (local Claude Code CLI)
+  claudecode:
+    enabled: true
+    tier: simple
+    max_workers: 3
+
+  # GeminiWorker (future - Gemini API integration)
+  gemini:
+    enabled: false  # Not yet implemented
+    flash_tier:
+      model: "gemini-2.0-flash-exp"
+      max_workers: 2
+    pro_tier:
+      model: "gemini-2.5-pro"
+      max_workers: 1
+
+# Task routing
+routing:
+  complexity_heuristics:
+    simple:
+      - "documentation"
+      - "good first issue"
+      - "refactor"
+    medium:
+      - "feature"
+      - "enhancement"
+    complex:
+      - "architecture"
+      - "integration"
+
+# Quality gates (pre-PR validation)
+quality_gates:
+  enabled: true
+  checks:
+    - tests
+    - linter
+    - formatter
+    - build
