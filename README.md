@@ -38,7 +38,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full system design and [WORKFLOW.md
 
 - **Language**: Go (for concurrency, Google-native fit, single-binary deployment)
 - **Agent Framework**: Google ADK (Agent Development Kit) v1.0+
-- **LLM**: Gemini 3 Pro via Vertex AI
+- **LLM**: Gemini 2.5 Pro via Vertex AI
 - **Cloud**: Google Cloud Platform / Vertex AI
 
 ## Build Instructions

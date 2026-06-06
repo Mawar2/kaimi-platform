@@ -132,8 +132,9 @@ For every ticket:
 3. Write the code to pass it.
 4. Run all tests + linter locally until green.
 5. Spin up the AI sub-agent review team; address its report.
-6. Open a PR referencing the ticket; CI runs all gates.
-7. A **human** reviews and merges if everything passes.
-8. Commit message follows `<ticket_number>_<feature_completed>`.
+6. **Open a PR referencing the ticket** - IMPORTANT: Only create the PR when your code is ready for human review. Work on your branch as long as you need, but don't open the PR until you're confident it's complete. Every push to an open PR triggers an AI review (~$0.01/review), so opening early and pushing many commits adds unnecessary cost. Use draft PRs if you need early feedback.
+7. CI runs all gates (tests, linter, AI review).
+8. A **human** reviews and merges if everything passes.
+9. Commit message follows `<ticket_number>_<feature_completed>`.
 
 If any gate fails, the feature is not done. Fix it or stop and ask.
