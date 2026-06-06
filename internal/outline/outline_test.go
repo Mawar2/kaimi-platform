@@ -74,4 +74,11 @@ func TestOutlineAgent_NilOpportunity(t *testing.T) {
 	if result.Status != agent.StatusFailed {
 		t.Errorf("Status = %q, want %q", result.Status, agent.StatusFailed)
 	}
+	if result.AgentName != agentName {
+		t.Errorf("AgentName = %q, want %q", result.AgentName, agentName)
+	}
+	const wantSummary = "opportunity must not be nil"
+	if result.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", result.Summary, wantSummary)
+	}
 }
