@@ -8,6 +8,7 @@ package outline
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,13 +26,33 @@ type Section struct {
 	Rationale string // why this section was included, derived from opportunity data
 }
 
+// FormattingRule represents one formatting requirement extracted from the solicitation.
+// Specified is false when the solicitation is silent on this requirement — downstream
+// agents must not invent a value when Specified is false.
+type FormattingRule struct {
+	Value     string // stated value; empty when Specified is false
+	Specified bool   // true only if the solicitation explicitly states this requirement
+}
+
+// FormattingRules captures the formatting requirements extracted from the solicitation.
+// Every field is non-nil so callers can always check Specified without a nil guard.
+type FormattingRules struct {
+	PageLimit     *FormattingRule // e.g. "25 pages per volume"
+	Font          *FormattingRule // e.g. "Arial 12-point"
+	Margins       *FormattingRule // e.g. "1-inch on all sides"
+	LineSpacing   *FormattingRule // e.g. "single-spaced"
+	FileFormat    *FormattingRule // e.g. "PDF"
+	RequiredForms []string        // government form numbers, e.g. ["SF-330", "SF-1449"]
+}
+
 // Outline is the structured output produced by the Outline agent.
-// It is the input the next agent in Zone 2 (KAI-4: formatting rules) consumes.
+// It is the input the next agent in Zone 2 consumes.
 type Outline struct {
-	OpportunityID string
-	Title         string // opportunity title, carried for context
-	Sections      []Section
-	GeneratedAt   time.Time
+	OpportunityID   string
+	Title           string // opportunity title, carried for context
+	Sections        []Section
+	FormattingRules *FormattingRules
+	GeneratedAt     time.Time
 }
 
 // Agent is the Outline agent.
@@ -59,12 +80,14 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline
 	}
 
 	sections := buildSections(opp)
+	formatting := extractFormattingRules(opp)
 
 	outline := &Outline{
-		OpportunityID: opp.ID,
-		Title:         opp.Title,
-		Sections:      sections,
-		GeneratedAt:   time.Now().UTC(),
+		OpportunityID:   opp.ID,
+		Title:           opp.Title,
+		Sections:        sections,
+		FormattingRules: formatting,
+		GeneratedAt:     time.Now().UTC(),
 	}
 
 	result := &agent.AgentResult{
@@ -75,6 +98,100 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline
 	}
 
 	return outline, result, nil
+}
+
+// Regexes for extracting formatting values from solicitation text.
+// Compiled once at package level for efficiency.
+var (
+	// page limits: "not to exceed 25 pages", "no more than 10 pages", "limited to 15 pages"
+	pageLimitRE = regexp.MustCompile(`(?i)(?:not to exceed|no more than|limited to|maximum of)\s+(\d+)\s+pages?`)
+
+	// fonts: "Arial 12-point", "Times New Roman 11-point", "Calibri 12 point"
+	fontRE = regexp.MustCompile(`(?i)(arial|times new roman|calibri|courier new)\s+(\d+)\s*-?\s*point`)
+
+	// margins: "1-inch margins", "0.5-inch margins", "minimum 1-inch margin"
+	marginRE = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*-?\s*inch\s+(?:minimum\s+)?margins?`)
+
+	// line spacing: "single-spaced", "double-spaced", "1.5-spaced"
+	spacingRE = regexp.MustCompile(`(?i)(single|double|1\.5)\s*-?\s*spaced`)
+
+	// file format: "submitted as PDF", "in PDF format", "Microsoft Word", ".doc", ".docx"
+	// .docx? requires a non-word preceding char (space, start, punctuation) so it does
+	// not false-positive on filenames like "proposal.docx".
+	fileFormatRE = regexp.MustCompile(`(?i)\b(pdf|microsoft word)\b|(?:^|[\s(,])(\.docx?)\b`)
+
+	// government forms: "SF-330", "SF 1449", "DD Form 254", "DD-1423"
+	formRE = regexp.MustCompile(`(?i)\b(SF|DD(?:\s+Form)?)\s*-?\s*(\d+)\b`)
+
+	// ip as a standalone abbreviation: matches "IP." "(IP)" "IP rights" but not "zip" or "tip"
+	ipRE = regexp.MustCompile(`(?i)\bip\b`)
+)
+
+// extractFormattingRules parses the opportunity description for stated formatting
+// requirements. Fields not mentioned in the solicitation are returned with
+// Specified=false and an empty Value — callers must not invent defaults for these.
+func extractFormattingRules(opp *opportunity.Opportunity) *FormattingRules {
+	desc := opp.Description
+
+	rules := &FormattingRules{
+		PageLimit:   unspecified(),
+		Font:        unspecified(),
+		Margins:     unspecified(),
+		LineSpacing: unspecified(),
+		FileFormat:  unspecified(),
+	}
+
+	if m := pageLimitRE.FindStringSubmatch(desc); m != nil {
+		rules.PageLimit = specified(m[1] + " pages")
+	}
+
+	if m := fontRE.FindStringSubmatch(desc); m != nil {
+		rules.Font = specified(m[1] + " " + m[2] + "-point")
+	}
+
+	if m := marginRE.FindStringSubmatch(desc); m != nil {
+		rules.Margins = specified(m[1] + "-inch margins")
+	}
+
+	if m := spacingRE.FindStringSubmatch(desc); m != nil {
+		rules.LineSpacing = specified(m[1] + "-spaced")
+	}
+
+	if m := fileFormatRE.FindStringSubmatch(desc); m != nil {
+		val := strings.ToLower(m[1])
+		if val == "" {
+			val = strings.ToLower(m[2])
+		}
+		canonical := "PDF"
+		if strings.HasPrefix(val, ".doc") || val == "microsoft word" {
+			canonical = "Microsoft Word"
+		}
+		rules.FileFormat = specified(canonical)
+	}
+
+	// Collect all government form numbers mentioned, deduplicated.
+	seen := map[string]bool{}
+	for _, m := range formRE.FindAllStringSubmatch(desc, -1) {
+		// m[1] may be "DD Form" — keep only the first word (the prefix).
+		prefix := strings.ToUpper(strings.Fields(m[1])[0])
+		form := prefix + "-" + m[2]
+		if !seen[form] {
+			rules.RequiredForms = append(rules.RequiredForms, form)
+			seen[form] = true
+		}
+	}
+
+	return rules
+}
+
+// specified returns a FormattingRule with a known value.
+func specified(value string) *FormattingRule {
+	return &FormattingRule{Value: value, Specified: true}
+}
+
+// unspecified returns a FormattingRule marking a requirement as not stated.
+func unspecified() *FormattingRule {
+	return &FormattingRule{Specified: false}
 }
 
 // buildSections derives the required proposal sections from the opportunity.
@@ -92,36 +209,36 @@ func buildSections(opp *opportunity.Opportunity) []Section {
 			ID:        "executive_summary",
 			Title:     "Executive Summary",
 			Required:  true,
-			Rationale: "required for all federal solicitations",
+			Rationale: "standard section for federal proposals",
 		},
 		{
 			ID:        "technical_approach",
 			Title:     "Technical Approach",
 			Required:  true,
-			Rationale: "required for all federal solicitations",
+			Rationale: "standard section for federal proposals",
 		},
 		{
 			ID:        "management_approach",
 			Title:     "Management Approach",
 			Required:  true,
-			Rationale: "required for all federal solicitations",
+			Rationale: "standard section for federal proposals",
 		},
 		{
 			ID:        "past_performance",
 			Title:     "Past Performance",
 			Required:  true,
-			Rationale: "required for all federal solicitations",
+			Rationale: "standard section for federal proposals",
 		},
 		{
 			ID:        "price_cost_volume",
 			Title:     "Price/Cost Volume",
 			Required:  true,
-			Rationale: "required for all federal solicitations",
+			Rationale: "standard section for federal proposals",
 		},
 	}
 
 	// Set-aside programs require a small business subcontracting plan.
-	if opp.SetAsideCode != "" && opp.SetAsideCode != "NONE" {
+	if opp.SetAsideCode != "" && !strings.EqualFold(opp.SetAsideCode, "NONE") {
 		sections = append(sections, Section{
 			ID:        "small_business_subcontracting",
 			Title:     "Small Business Subcontracting Plan",
@@ -171,7 +288,7 @@ func buildSections(opp *opportunity.Opportunity) []Section {
 	}
 
 	// Data rights appear in technology and software contracts.
-	if containsAny(desc, "data right", "intellectual property", " ip ", "technical data") {
+	if containsAny(desc, "data right", "intellectual property", "technical data") || ipRE.MatchString(desc) {
 		sections = append(sections, Section{
 			ID:        "data_rights",
 			Title:     "Data Rights and Intellectual Property",
