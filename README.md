@@ -1,5 +1,7 @@
 # Kaimi - The Seeker
 
+<!-- Kaimi automates federal BD: it hunts SAM.gov opportunities, scores them for fit, and drafts proposals — with human review before any submission. -->
+
 **Kaimi** (Hawaiian for "the seeker") is an autonomous business-development pipeline for federal government contracting. It hunts live federal opportunities on SAM.gov, scores them bid/no-bid against a company's capabilities, and drafts tailored proposals - with human review before submission.
 
 This is production infrastructure for BlueMeta Technologies' BD operations, built to run for years, not as a demo.

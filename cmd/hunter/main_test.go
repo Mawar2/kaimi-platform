@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -323,4 +326,134 @@ func TestHunterIntegration_EmptyNAICS(t *testing.T) {
 	if len(allOpportunities) != 0 {
 		t.Errorf("Expected empty store, found %d opportunities", len(allOpportunities))
 	}
+}
+
+// TestFilterEligible verifies that filterEligible applies the profile gate correctly.
+func TestFilterEligible(t *testing.T) {
+	now := time.Now().UTC()
+
+	makeOpp := func(id, setAside string) *opportunity.Opportunity {
+		return &opportunity.Opportunity{
+			ID:           id,
+			SetAsideCode: setAside,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+	}
+
+	tests := []struct {
+		name          string
+		opportunities []*opportunity.Opportunity
+		wantEligible  int
+		wantDropped   int
+	}{
+		{
+			name: "eligible kept, ineligible dropped",
+			opportunities: []*opportunity.Opportunity{
+				makeOpp("sba-opp", "SBA"),   // eligible
+				makeOpp("8a-opp", "8A"),     // ineligible
+				makeOpp("open-opp", ""),     // eligible (full-and-open)
+				makeOpp("wosb-opp", "WOSB"), // ineligible
+				makeOpp("hub-opp", "HZC"),   // ineligible
+			},
+			wantEligible: 2,
+			wantDropped:  3,
+		},
+		{
+			name: "all eligible",
+			opportunities: []*opportunity.Opportunity{
+				makeOpp("open1", ""),
+				makeOpp("sba1", "SBA"),
+				makeOpp("sbp1", "SBP"),
+			},
+			wantEligible: 3,
+			wantDropped:  0,
+		},
+		{
+			name: "all ineligible",
+			opportunities: []*opportunity.Opportunity{
+				makeOpp("8a1", "8A"),
+				makeOpp("sdvosb1", "SDVOSB"),
+			},
+			wantEligible: 0,
+			wantDropped:  2,
+		},
+		{
+			name:          "empty input",
+			opportunities: []*opportunity.Opportunity{},
+			wantEligible:  0,
+			wantDropped:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eligible, dropped := filterEligible(tt.opportunities, profile.BlueMeta)
+			if len(eligible) != tt.wantEligible {
+				t.Errorf("eligible count = %d, want %d", len(eligible), tt.wantEligible)
+			}
+			if dropped != tt.wantDropped {
+				t.Errorf("dropped count = %d, want %d", dropped, tt.wantDropped)
+			}
+		})
+	}
+}
+
+// TestHunterIntegration_EligibilityGate tests that the cached fixture returns the
+// correct eligible subset. Two of three fixture opportunities are eligible:
+//   - a1b2c3d4e5f6 (SBA): eligible
+//   - f6e5d4c3b2a1 (8A):  ineligible — dropped
+//   - 9z8y7x6w5v4u (""): eligible (full-and-open)
+func TestHunterIntegration_EligibilityGate(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	samClient, err := samgov.NewClient(samgov.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("Failed to create SAM.gov client: %v", err)
+	}
+
+	opportunityStore, err := store.NewJSONStore(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create JSON store: %v", err)
+	}
+
+	all, err := samClient.FetchByNAICS(ctx, []string{"541512", "541519"})
+	if err != nil {
+		t.Fatalf("Failed to fetch opportunities: %v", err)
+	}
+
+	eligible, dropped := filterEligible(all, profile.BlueMeta)
+
+	// Fixture has exactly one 8(a) opportunity — verify it was dropped
+	if dropped != 1 {
+		t.Errorf("Expected 1 dropped opportunity (8(a)), got %d", dropped)
+	}
+	if len(eligible) != len(all)-1 {
+		t.Errorf("Expected %d eligible opportunities, got %d", len(all)-1, len(eligible))
+	}
+
+	// Save eligible opportunities and verify
+	for _, opp := range eligible {
+		if err := opportunityStore.Save(ctx, opp); err != nil {
+			t.Errorf("Failed to save opportunity %s: %v", opp.ID, err)
+		}
+	}
+
+	saved, err := opportunityStore.List(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to list saved opportunities: %v", err)
+	}
+	if len(saved) != len(eligible) {
+		t.Errorf("Expected %d saved opportunities, got %d", len(eligible), len(saved))
+	}
+
+	// Verify the 8(a) opportunity was NOT saved
+	for _, opp := range saved {
+		if opp.SetAsideCode == "8A" {
+			t.Errorf("Ineligible 8(a) opportunity %s was saved to store", opp.ID)
+		}
+	}
+
+	t.Logf("Eligibility gate test: %d fetched, %d dropped, %d saved", len(all), dropped, len(saved))
 }

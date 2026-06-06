@@ -46,9 +46,11 @@ type Opportunity struct {
 	Attachments []string `json:"attachments"` // URLs to attached documents (RFPs, etc.)
 
 	// Scoring (populated by Scorer in Phase 1)
-	Score          float64    `json:"score"`               // Bid/no-bid score (0.0-1.0)
-	ScoreReasoning string     `json:"score_reasoning"`     // LLM's reasoning for the score
-	ScoredAt       *time.Time `json:"scored_at,omitempty"` // When scoring completed
+	Score          float64    `json:"score"`                    // Bid/no-bid score (0.0-1.0)
+	ScoreReasoning string     `json:"score_reasoning"`          // LLM's reasoning for the score
+	Recommendation string     `json:"recommendation,omitempty"` // Bid/no-bid recommendation: BID, NO_BID, or REVIEW
+	Requirements   []string   `json:"requirements,omitempty"`   // Must-have requirements extracted from the solicitation
+	ScoredAt       *time.Time `json:"scored_at,omitempty"`      // When scoring completed
 
 	// Selection and status (populated by selection event / Manager)
 	Selected       bool       `json:"selected"`              // Whether a human selected this for proposal

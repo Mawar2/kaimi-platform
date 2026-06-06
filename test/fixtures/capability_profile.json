@@ -1,0 +1,45 @@
+{
+  "primary_naics": [
+    "541512",
+    "541519"
+  ],
+  "secondary_naics": [
+    "541511",
+    "541513",
+    "541690",
+    "518210"
+  ],
+  "competency_tags": [
+    "cloud migration",
+    "Zero Trust",
+    "system integration",
+    "data analytics",
+    "DevSecOps",
+    "federal IT",
+    "cybersecurity",
+    "API development",
+    "microservices",
+    "Agile",
+    "FISMA",
+    "FedRAMP",
+    "software development"
+  ],
+  "past_performance": [
+    "Department of Defense",
+    "DoD",
+    "DHS",
+    "Department of Homeland Security",
+    "VA",
+    "Department of Veterans Affairs",
+    "GSA",
+    "General Services Administration",
+    "HHS",
+    "Department of Health and Human Services"
+  ],
+  "sdb_status": true,
+  "qualifying_set_asides": [
+    "SDB",
+    "SBA",
+    "SBP"
+  ]
+}

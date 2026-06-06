@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -52,6 +54,11 @@ func main() {
 func run() error {
 	// Parse configuration
 	config := parseConfig()
+
+	// If no NAICS codes specified, use the full tiered list from the capability profile.
+	if len(config.NAICSCodes) == 0 {
+		config.NAICSCodes = profile.BlueMeta.NAICSCodes
+	}
 
 	// Validate configuration
 	if err := validateConfig(&config); err != nil {
@@ -98,12 +105,17 @@ func run() error {
 	fetchDuration := time.Since(startTime)
 	fmt.Printf("Fetched %d opportunities in %v\n", len(opportunities), fetchDuration)
 
-	// Save opportunities to store
-	fmt.Println("Saving opportunities to store...")
+	// Apply eligibility gate: drop set-asides for programs BlueMeta doesn't hold.
+	fmt.Println("Applying eligibility gate...")
+	eligible, filtered := filterEligible(opportunities, profile.BlueMeta)
+	fmt.Printf("Eligibility gate: %d eligible, %d dropped (ineligible set-aside)\n", len(eligible), filtered)
+
+	// Save eligible opportunities to store
+	fmt.Println("Saving eligible opportunities to store...")
 	savedCount := 0
 	errorCount := 0
 
-	for _, opp := range opportunities {
+	for _, opp := range eligible {
 		if err := opportunityStore.Save(ctx, opp); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to save opportunity %s: %v\n", opp.ID, err)
 			errorCount++
@@ -116,6 +128,7 @@ func run() error {
 	totalDuration := time.Since(startTime)
 	fmt.Println("\n--- Hunter Summary ---")
 	fmt.Printf("Opportunities fetched: %d\n", len(opportunities))
+	fmt.Printf("Ineligible (dropped):  %d\n", filtered)
 	fmt.Printf("Opportunities saved:   %d\n", savedCount)
 	fmt.Printf("Errors:                %d\n", errorCount)
 	fmt.Printf("Total duration:        %v\n", totalDuration)
@@ -132,7 +145,8 @@ func run() error {
 func parseConfig() Config {
 	// Define command-line flags
 	mode := flag.String("mode", getEnv("MODE", "cached"), "Mode: cached or live")
-	naicsStr := flag.String("naics", getEnv("NAICS_CODES", "541512,541519"), "Comma-separated NAICS codes")
+	// Default empty: run() falls back to profile.BlueMeta.NAICSCodes when not specified.
+	naicsStr := flag.String("naics", getEnv("NAICS_CODES", ""), "Comma-separated NAICS codes (default: full profile list)")
 	storeType := flag.String("store-type", getEnv("STORE_TYPE", "json"), "Store type: json")
 	storePath := flag.String("store-path", getEnv("STORE_PATH", "./queue"), "Store directory path")
 
@@ -141,7 +155,7 @@ func parseConfig() Config {
 	// Get API key from environment (never from command-line for security)
 	apiKey := os.Getenv("SAM_API_KEY")
 
-	// Parse NAICS codes
+	// Parse NAICS codes; if empty, run() will substitute the full profile list
 	naicsCodes := parseNAICSCodes(*naicsStr)
 
 	return Config{
@@ -176,6 +190,21 @@ func validateConfig(config *Config) error {
 	}
 
 	return nil
+}
+
+// filterEligible applies the capability profile eligibility gate, returning the
+// subset of opportunities that pass along with a count of those dropped.
+func filterEligible(opportunities []*opportunity.Opportunity, p *profile.CapabilityProfile) (eligible []*opportunity.Opportunity, dropped int) {
+	eligible = make([]*opportunity.Opportunity, 0, len(opportunities))
+	for _, opp := range opportunities {
+		if p.IsEligible(opp) {
+			eligible = append(eligible, opp)
+		} else {
+			fmt.Fprintf(os.Stderr, "Dropped ineligible opportunity %s (set-aside: %q)\n", opp.ID, opp.SetAsideCode)
+			dropped++
+		}
+	}
+	return eligible, dropped
 }
 
 // parseNAICSCodes parses a comma-separated string of NAICS codes.

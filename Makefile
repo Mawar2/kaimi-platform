@@ -18,6 +18,8 @@ build:
 	go build -v ./...
 	@echo "Building Hunter agent..."
 	go build -v -o bin/hunter ./cmd/hunter
+	@echo "Building Scorer agent..."
+	go build -v -o bin/scorer ./cmd/scorer
 	@echo "Build complete."
 
 # Run all tests
