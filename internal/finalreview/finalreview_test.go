@@ -2,12 +2,14 @@ package finalreview_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/outline"
 )
 
 // fixture returns a minimal valid Opportunity for use in tests.
@@ -41,6 +43,28 @@ Our approach follows a phased migration strategy...
 ## Past Performance
 BlueMeta has successfully delivered similar engagements for DoD and civilian agencies...
 `
+
+// outlineFixture returns a minimal Outline with a few required sections.
+func outlineFixture() *outline.Outline {
+	return &outline.Outline{
+		OpportunityID: "opp-fixture-001",
+		Title:         "Enterprise IT Modernization Services",
+		Sections: []outline.Section{
+			{ID: "executive_summary", Title: "Executive Summary", Required: true},
+			{ID: "technical_approach", Title: "Technical Approach", Required: true},
+			{ID: "past_performance", Title: "Past Performance", Required: true},
+		},
+		FormattingRules: &outline.FormattingRules{
+			PageLimit:     &outline.FormattingRule{Specified: false},
+			Font:          &outline.FormattingRule{Specified: false},
+			Margins:       &outline.FormattingRule{Specified: false},
+			LineSpacing:   &outline.FormattingRule{Specified: false},
+			FileFormat:    &outline.FormattingRule{Specified: false},
+			RequiredForms: nil,
+		},
+		GeneratedAt: time.Now().UTC(),
+	}
+}
 
 func TestNew_ReturnsAgent(t *testing.T) {
 	a := finalreview.New()
@@ -92,7 +116,7 @@ func TestReview_ValidInput_ReadyToSubmit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Review() returned unexpected error: %v", err)
 	}
-	// Stubbed checks pass — a valid draft and opportunity should be ready.
+	// All checks pass — a valid draft and opportunity should be ready.
 	if result.Status != agent.StatusReadyToSubmit {
 		t.Errorf("Status = %q, want %q for valid input; summary: %s", result.Status, agent.StatusReadyToSubmit, result.Summary)
 	}
@@ -197,5 +221,387 @@ func TestReview_ExpiredDeadline_NotReadyToSubmit(t *testing.T) {
 	}
 	if result.Status != agent.StatusFailed {
 		t.Errorf("Status = %q for expired deadline, want %q", result.Status, agent.StatusFailed)
+	}
+}
+
+// --- KAI-7: must_have check ---
+
+func TestReview_MissingMustHave_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"cybersecurity compliance"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture, // does not mention "cybersecurity compliance"
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when must-have requirement is missing", result.Status, agent.StatusNeedsHuman)
+	}
+}
+
+func TestReview_MustHaveAddressed_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"IT modernization"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture, // contains "IT modernization"
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when must-have requirement is addressed", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_MultipleMustHaves_AllMissing_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"zero trust architecture", "FedRAMP authorization", "FIPS 140-2"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture, // mentions none of these
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when all must-have requirements are missing", result.Status, agent.StatusNeedsHuman)
+	}
+	// All three gaps should be recorded as separate issues.
+	issuesFound := result.Flags["issues_found"]
+	if issuesFound == "0" || issuesFound == "" {
+		t.Errorf("Flags[issues_found] = %q, want > 0 when multiple requirements are missing", issuesFound)
+	}
+}
+
+func TestReview_EmptyRequirements_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = nil // no must-have requirements
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when Requirements is nil", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+// --- KAI-7: required_section check ---
+
+func TestReview_MissingRequiredSection_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	// Add a required section whose title doesn't appear in draftFixture.
+	ol.Sections = append(ol.Sections, outline.Section{
+		ID:       "security_plan",
+		Title:    "Security Plan",
+		Required: true,
+	})
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when required section is absent from draft", result.Status, agent.StatusNeedsHuman)
+	}
+}
+
+func TestReview_AllRequiredSectionsPresent_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	// outlineFixture has Executive Summary, Technical Approach, Past Performance —
+	// all of which appear in draftFixture.
+	ol := outlineFixture()
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when all required sections are present", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_OptionalSectionMissing_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	// Add an optional section that is NOT in the draft.
+	ol.Sections = append(ol.Sections, outline.Section{
+		ID:       "appendix_a",
+		Title:    "Appendix A — Resumes",
+		Required: false,
+	})
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	// Optional sections don't trigger an issue.
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q for optional missing section", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_NoOutline_SkipsOutlineChecks(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	// No Outline provided — section and form checks must be skipped.
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     nil,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when Outline is nil", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+// --- KAI-7: required_form check ---
+
+func TestReview_MissingRequiredForm_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	ol.FormattingRules.RequiredForms = []string{"SF-1449"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture, // does not mention "SF-1449"
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when required form is not acknowledged in draft", result.Status, agent.StatusNeedsHuman)
+	}
+}
+
+func TestReview_RequiredFormMentioned_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	ol.FormattingRules.RequiredForms = []string{"SF-1449"}
+
+	draftWithForm := draftFixture + "\n\nSF-1449 is attached as required by the solicitation.\n"
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftWithForm,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when required form is mentioned in draft", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_NoRequiredForms_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	ol.FormattingRules.RequiredForms = nil // no forms required
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when no required forms are specified", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+// --- KAI-7: flag reporting ---
+
+func TestReview_IssuesReportedInFlags(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"zero trust architecture"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+
+	if result.Flags == nil {
+		t.Fatal("Flags is nil, want at least issues_found key")
+	}
+	if result.Flags["issues_found"] == "" {
+		t.Error("Flags[issues_found] is empty, want a count")
+	}
+	// At least one issue should be reported.
+	if result.Flags["issue_1"] == "" {
+		t.Error("Flags[issue_1] is empty, want a detail string")
+	}
+}
+
+func TestReview_CleanDraft_FlagsHaveZeroIssues(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+
+	if result.Flags == nil {
+		t.Fatal("Flags is nil, want issues_found key")
+	}
+	if result.Flags["issues_found"] != "0" {
+		t.Errorf("Flags[issues_found] = %q, want \"0\" for a clean draft", result.Flags["issues_found"])
+	}
+	if _, ok := result.Flags["issue_1"]; ok {
+		t.Error("Flags[issue_1] is set, want no issue_N keys for a clean draft")
+	}
+}
+
+func TestReview_IssueDetails_ContainWhatAndWhere(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"zero trust architecture"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+
+	detail := result.Flags["issue_1"]
+	if !strings.Contains(detail, "zero trust architecture") {
+		t.Errorf("issue_1 = %q, want it to contain the keyword %q", detail, "zero trust architecture")
+	}
+	if !strings.Contains(strings.ToLower(detail), "draft") {
+		t.Errorf("issue_1 = %q, want it to reference \"draft\"", detail)
+	}
+}
+
+// --- KAI-7: page_limit check ---
+
+func TestReview_DraftWithinPageLimit_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	// 5-page limit; draftFixture is well under that.
+	ol.FormattingRules.PageLimit = &outline.FormattingRule{Value: "5 pages", Specified: true}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when draft is within page limit", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_DraftExceedsPageLimit_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	// 1-page limit (250 words); build a draft that clearly exceeds it.
+	ol.FormattingRules.PageLimit = &outline.FormattingRule{Value: "1 pages", Specified: true}
+
+	// ~300 words to exceed 1 page (250 words/page).
+	longDraft := strings.Repeat("word ", 300)
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       longDraft,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when draft exceeds page limit", result.Status, agent.StatusNeedsHuman)
+	}
+}
+
+func TestReview_UnspecifiedPageLimit_NoIssue(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	ol := outlineFixture()
+	ol.FormattingRules.PageLimit = &outline.FormattingRule{Specified: false}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draftFixture,
+		Opportunity: fixture(),
+		Outline:     ol,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when page limit is not specified", result.Status, agent.StatusReadyToSubmit)
 	}
 }
