@@ -73,9 +73,12 @@ func runSAMMode(ctx context.Context, mode string, limit int) error {
 		return fmt.Errorf("SAM_API_KEY environment variable required for live mode")
 	}
 
-	prof := profile.BlueMeta
+	prof, err := profile.LoadProfile("config/profile.json")
+	if err != nil {
+		return fmt.Errorf("load capability profile: %w", err)
+	}
 	fmt.Printf("Capability profile: BlueMeta Technologies\n")
-	fmt.Printf("NAICS codes: %s\n", strings.Join(prof.NAICSCodes, ", "))
+	fmt.Printf("NAICS codes: %s\n", strings.Join(prof.AllNAICSCodes(), ", "))
 	fmt.Println(strings.Repeat("=", 60))
 
 	client, err := samgov.NewClient(samgov.Config{
@@ -86,7 +89,7 @@ func runSAMMode(ctx context.Context, mode string, limit int) error {
 		return fmt.Errorf("create SAM.gov client: %w", err)
 	}
 
-	opps, err := client.FetchByNAICS(ctx, prof.NAICSCodes)
+	opps, err := client.FetchByNAICS(ctx, prof.AllNAICSCodes())
 	if err != nil {
 		return fmt.Errorf("fetch opportunities: %w", err)
 	}

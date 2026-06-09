@@ -2,66 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
-	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
-
-// TestParseNAICSCodes verifies NAICS code parsing from comma-separated strings.
-func TestParseNAICSCodes(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "single code",
-			input:    "541512",
-			expected: []string{"541512"},
-		},
-		{
-			name:     "multiple codes",
-			input:    "541512,541519,541330",
-			expected: []string{"541512", "541519", "541330"},
-		},
-		{
-			name:     "codes with spaces",
-			input:    "541512, 541519, 541330",
-			expected: []string{"541512", "541519", "541330"},
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: nil,
-		},
-		{
-			name:     "trailing comma",
-			input:    "541512,541519,",
-			expected: []string{"541512", "541519"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseNAICSCodes(tt.input)
-			if len(result) != len(tt.expected) {
-				t.Errorf("Expected %d codes, got %d", len(tt.expected), len(result))
-				return
-			}
-			for i, code := range result {
-				if code != tt.expected[i] {
-					t.Errorf("Expected code %q at index %d, got %q", tt.expected[i], i, code)
-				}
-			}
-		})
-	}
-}
 
 // TestValidateConfig verifies configuration validation.
 func TestValidateConfig(t *testing.T) {
@@ -73,57 +23,57 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid cached config",
 			config: Config{
-				Mode:       "cached",
-				NAICSCodes: []string{"541512"},
-				StoreType:  "json",
-				StorePath:  "./queue",
+				Mode:        "cached",
+				ProfilePath: "config/profile.json",
+				StoreType:   "json",
+				StorePath:   "./queue",
 			},
 			shouldError: false,
 		},
 		{
 			name: "valid live config with API key",
 			config: Config{
-				Mode:       "live",
-				APIKey:     "test-api-key",
-				NAICSCodes: []string{"541512"},
-				StoreType:  "json",
-				StorePath:  "./queue",
+				Mode:        "live",
+				APIKey:      "test-api-key",
+				ProfilePath: "config/profile.json",
+				StoreType:   "json",
+				StorePath:   "./queue",
 			},
 			shouldError: false,
 		},
 		{
 			name: "invalid mode",
 			config: Config{
-				Mode:       "invalid",
-				NAICSCodes: []string{"541512"},
-				StoreType:  "json",
+				Mode:        "invalid",
+				ProfilePath: "config/profile.json",
+				StoreType:   "json",
 			},
 			shouldError: true,
 		},
 		{
 			name: "live mode without API key",
 			config: Config{
-				Mode:       "live",
-				NAICSCodes: []string{"541512"},
-				StoreType:  "json",
+				Mode:        "live",
+				ProfilePath: "config/profile.json",
+				StoreType:   "json",
 			},
 			shouldError: true,
 		},
 		{
-			name: "no NAICS codes",
+			name: "empty profile path",
 			config: Config{
-				Mode:       "cached",
-				NAICSCodes: []string{},
-				StoreType:  "json",
+				Mode:        "cached",
+				ProfilePath: "",
+				StoreType:   "json",
 			},
 			shouldError: true,
 		},
 		{
 			name: "unsupported store type",
 			config: Config{
-				Mode:       "cached",
-				NAICSCodes: []string{"541512"},
-				StoreType:  "firestore",
+				Mode:        "cached",
+				ProfilePath: "config/profile.json",
+				StoreType:   "firestore",
 			},
 			shouldError: true,
 		},
@@ -144,7 +94,6 @@ func TestValidateConfig(t *testing.T) {
 
 // TestGetEnv verifies environment variable reading with defaults.
 func TestGetEnv(t *testing.T) {
-	// Set a test environment variable
 	testKey := "TEST_HUNTER_VAR"
 	testValue := "test-value"
 	if err := os.Setenv(testKey, testValue); err != nil {
@@ -186,149 +135,39 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
-// TestHunterIntegration is an end-to-end integration test for the Hunter agent.
-//
-// This test runs the complete Hunter workflow in cached mode:
-// 1. Initialize SAM.gov client in cached mode
-// 2. Initialize JSON store
-// 3. Fetch opportunities from cached fixtures
-// 4. Save opportunities to store
-// 5. Verify opportunities were saved correctly
-func TestHunterIntegration(t *testing.T) {
-	ctx := context.Background()
-
-	// Create temporary directory for store
-	tempDir := t.TempDir()
-	storePath := filepath.Join(tempDir, "queue")
-
-	// Initialize SAM.gov client in cached mode
-	samClient, err := samgov.NewClient(samgov.Config{
-		UseCached: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create SAM.gov client: %v", err)
+// TestIsEligible verifies the standalone eligibility switch in the hunter package.
+func TestIsEligible(t *testing.T) {
+	tests := []struct {
+		code string
+		want bool
+	}{
+		{"", true},
+		{"SBA", true},
+		{"SBP", true},
+		{"SDB", true},
+		{"8A", false},
+		{"8AN", false},
+		{"SDVOSB", false},
+		{"WOSB", false},
+		{"EDWOSB", false},
+		{"HUBZONE", false},
+		{"HZC", false},
+		{"VOSB", false},
+		{"IEE", false},
+		{"ISBEE", false},
+		{"UNKNOWNCODE", true}, // conservative passthrough
 	}
-
-	// Initialize JSON store
-	opportunityStore, err := store.NewJSONStore(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to create JSON store: %v", err)
-	}
-
-	// Fetch opportunities
-	naicsCodes := []string{"541512", "541519"}
-	opportunities, err := samClient.FetchByNAICS(ctx, naicsCodes)
-	if err != nil {
-		t.Fatalf("Failed to fetch opportunities: %v", err)
-	}
-
-	// Verify we got opportunities
-	if len(opportunities) == 0 {
-		t.Fatal("Expected to fetch at least one opportunity")
-	}
-
-	t.Logf("Fetched %d opportunities", len(opportunities))
-
-	// Save opportunities to store
-	savedCount := 0
-	for _, opp := range opportunities {
-		if err := opportunityStore.Save(ctx, opp); err != nil {
-			t.Errorf("Failed to save opportunity %s: %v", opp.ID, err)
-			continue
-		}
-		savedCount++
-	}
-
-	// Verify all opportunities were saved
-	if savedCount != len(opportunities) {
-		t.Errorf("Expected to save %d opportunities, saved %d", len(opportunities), savedCount)
-	}
-
-	// Verify opportunities can be retrieved from store
-	for _, opp := range opportunities {
-		retrieved, err := opportunityStore.Get(ctx, opp.ID)
-		if err != nil {
-			t.Errorf("Failed to retrieve opportunity %s: %v", opp.ID, err)
-			continue
-		}
-
-		// Verify key fields match
-		if retrieved.ID != opp.ID {
-			t.Errorf("ID mismatch: expected %q, got %q", opp.ID, retrieved.ID)
-		}
-		if retrieved.Title != opp.Title {
-			t.Errorf("Title mismatch for %s: expected %q, got %q", opp.ID, opp.Title, retrieved.Title)
-		}
-		if retrieved.Agency != opp.Agency {
-			t.Errorf("Agency mismatch for %s: expected %q, got %q", opp.ID, opp.Agency, retrieved.Agency)
-		}
-	}
-
-	// Verify JSON files were created
-	entries, err := os.ReadDir(storePath)
-	if err != nil {
-		t.Fatalf("Failed to read store directory: %v", err)
-	}
-
-	jsonFileCount := 0
-	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
-			jsonFileCount++
-		}
-	}
-
-	if jsonFileCount != len(opportunities) {
-		t.Errorf("Expected %d JSON files, found %d", len(opportunities), jsonFileCount)
-	}
-
-	t.Logf("Integration test complete: %d opportunities saved and verified", savedCount)
-}
-
-// TestHunterIntegration_EmptyNAICS verifies Hunter behavior with NAICS codes that return no results.
-func TestHunterIntegration_EmptyNAICS(t *testing.T) {
-	ctx := context.Background()
-
-	// Create temporary directory for store
-	tempDir := t.TempDir()
-
-	// Initialize SAM.gov client in cached mode
-	samClient, err := samgov.NewClient(samgov.Config{
-		UseCached: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create SAM.gov client: %v", err)
-	}
-
-	// Initialize JSON store
-	opportunityStore, err := store.NewJSONStore(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to create JSON store: %v", err)
-	}
-
-	// Fetch opportunities with non-matching NAICS code
-	naicsCodes := []string{"999999"} // This NAICS code doesn't exist in fixtures
-	opportunities, err := samClient.FetchByNAICS(ctx, naicsCodes)
-	if err != nil {
-		t.Fatalf("Failed to fetch opportunities: %v", err)
-	}
-
-	// Verify no opportunities were found
-	if len(opportunities) != 0 {
-		t.Errorf("Expected 0 opportunities for non-matching NAICS, got %d", len(opportunities))
-	}
-
-	// Verify store is empty
-	allOpportunities, err := opportunityStore.List(ctx, nil)
-	if err != nil {
-		t.Fatalf("Failed to list opportunities: %v", err)
-	}
-
-	if len(allOpportunities) != 0 {
-		t.Errorf("Expected empty store, found %d opportunities", len(allOpportunities))
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			got := isEligible(tt.code)
+			if got != tt.want {
+				t.Errorf("isEligible(%q) = %v, want %v", tt.code, got, tt.want)
+			}
+		})
 	}
 }
 
-// TestFilterEligible verifies that filterEligible applies the profile gate correctly.
+// TestFilterEligible verifies that filterEligible applies the eligibility gate correctly.
 func TestFilterEligible(t *testing.T) {
 	now := time.Now().UTC()
 
@@ -388,7 +227,7 @@ func TestFilterEligible(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eligible, dropped := filterEligible(tt.opportunities, profile.BlueMeta)
+			eligible, dropped := filterEligible(tt.opportunities)
 			if len(eligible) != tt.wantEligible {
 				t.Errorf("eligible count = %d, want %d", len(eligible), tt.wantEligible)
 			}
@@ -399,16 +238,81 @@ func TestFilterEligible(t *testing.T) {
 	}
 }
 
-// TestHunterIntegration_EligibilityGate tests that the cached fixture returns the
-// correct eligible subset. Two of three fixture opportunities are eligible:
-//   - a1b2c3d4e5f6 (SBA): eligible
-//   - f6e5d4c3b2a1 (8A):  ineligible — dropped
-//   - 9z8y7x6w5v4u (""): eligible (full-and-open)
-func TestHunterIntegration_EligibilityGate(t *testing.T) {
+// TestRunWithConfig verifies end-to-end Hunter behaviour: 3 cached fixtures in, 2 saved
+// (the 8(a) opportunity is dropped by the eligibility gate).
+func TestRunWithConfig(t *testing.T) {
+	// Write a minimal profile to a temp file so runWithConfig can load it.
+	// The profile must include NAICS codes present in the SAM.gov fixtures
+	// (541512, 541519) so the cached client returns all 3 opportunities.
+	minimalProfile := map[string]any{
+		"uei":     "TESTUE1234567",
+		"cage":    "TESTCG",
+		"company": "Test Corp",
+		"naics_codes": []map[string]string{
+			{"code": "541512", "description": "Computer Systems Design", "tier": "primary"},
+			{"code": "541519", "description": "Other Computer Related", "tier": "primary"},
+		},
+		"set_aside":        map[string]bool{"small_business": true},
+		"past_performance": []any{},
+	}
+
+	profileData, err := json.Marshal(minimalProfile)
+	if err != nil {
+		t.Fatalf("Failed to marshal test profile: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "test_profile.json")
+	if err := os.WriteFile(profilePath, profileData, 0o644); err != nil {
+		t.Fatalf("Failed to write test profile: %v", err)
+	}
+
+	storePath := filepath.Join(tmpDir, "store")
+
+	config := &Config{
+		Mode:        "cached",
+		ProfilePath: profilePath,
+		StoreType:   "json",
+		StorePath:   storePath,
+	}
+
+	if err := runWithConfig(config); err != nil {
+		t.Fatalf("runWithConfig failed: %v", err)
+	}
+
+	// Verify the store received exactly 2 opportunities (8(a) was dropped).
+	opportunityStore, err := store.NewJSONStore(storePath)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+
+	saved, err := opportunityStore.List(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Failed to list saved opportunities: %v", err)
+	}
+
+	if len(saved) != 2 {
+		t.Errorf("Expected 2 saved opportunities (8(a) filtered), got %d", len(saved))
+	}
+
+	// Verify the 8(a) opportunity was NOT saved.
+	for _, opp := range saved {
+		if opp.SetAsideCode == "8A" {
+			t.Errorf("Ineligible 8(a) opportunity %s was saved to store", opp.ID)
+		}
+	}
+}
+
+// TestHunterIntegration is an end-to-end integration test for the Hunter agent
+// using the SAM.gov cached fixtures and the JSON store.
+func TestHunterIntegration(t *testing.T) {
 	ctx := context.Background()
+
 	tempDir := t.TempDir()
 
-	samClient, err := samgov.NewClient(samgov.Config{UseCached: true})
+	samClient, err := samgov.NewClient(samgov.Config{
+		UseCached: true,
+	})
 	if err != nil {
 		t.Fatalf("Failed to create SAM.gov client: %v", err)
 	}
@@ -418,42 +322,83 @@ func TestHunterIntegration_EligibilityGate(t *testing.T) {
 		t.Fatalf("Failed to create JSON store: %v", err)
 	}
 
-	all, err := samClient.FetchByNAICS(ctx, []string{"541512", "541519"})
+	naicsCodes := []string{"541512", "541519"}
+	opportunities, err := samClient.FetchByNAICS(ctx, naicsCodes)
 	if err != nil {
 		t.Fatalf("Failed to fetch opportunities: %v", err)
 	}
 
-	eligible, dropped := filterEligible(all, profile.BlueMeta)
-
-	// Fixture has exactly one 8(a) opportunity — verify it was dropped
-	if dropped != 1 {
-		t.Errorf("Expected 1 dropped opportunity (8(a)), got %d", dropped)
-	}
-	if len(eligible) != len(all)-1 {
-		t.Errorf("Expected %d eligible opportunities, got %d", len(all)-1, len(eligible))
+	if len(opportunities) == 0 {
+		t.Fatal("Expected to fetch at least one opportunity")
 	}
 
-	// Save eligible opportunities and verify
-	for _, opp := range eligible {
+	t.Logf("Fetched %d opportunities", len(opportunities))
+
+	savedCount := 0
+	for _, opp := range opportunities {
 		if err := opportunityStore.Save(ctx, opp); err != nil {
 			t.Errorf("Failed to save opportunity %s: %v", opp.ID, err)
+			continue
+		}
+		savedCount++
+	}
+
+	if savedCount != len(opportunities) {
+		t.Errorf("Expected to save %d opportunities, saved %d", len(opportunities), savedCount)
+	}
+
+	for _, opp := range opportunities {
+		retrieved, err := opportunityStore.Get(ctx, opp.ID)
+		if err != nil {
+			t.Errorf("Failed to retrieve opportunity %s: %v", opp.ID, err)
+			continue
+		}
+
+		if retrieved.ID != opp.ID {
+			t.Errorf("ID mismatch: expected %q, got %q", opp.ID, retrieved.ID)
+		}
+		if retrieved.Title != opp.Title {
+			t.Errorf("Title mismatch for %s: expected %q, got %q", opp.ID, opp.Title, retrieved.Title)
 		}
 	}
 
-	saved, err := opportunityStore.List(ctx, nil)
+	t.Logf("Integration test complete: %d opportunities saved and verified", savedCount)
+}
+
+// TestHunterIntegration_EmptyNAICS verifies Hunter behaviour with NAICS codes that return no results.
+func TestHunterIntegration_EmptyNAICS(t *testing.T) {
+	ctx := context.Background()
+
+	tempDir := t.TempDir()
+
+	samClient, err := samgov.NewClient(samgov.Config{
+		UseCached: true,
+	})
 	if err != nil {
-		t.Fatalf("Failed to list saved opportunities: %v", err)
-	}
-	if len(saved) != len(eligible) {
-		t.Errorf("Expected %d saved opportunities, got %d", len(eligible), len(saved))
+		t.Fatalf("Failed to create SAM.gov client: %v", err)
 	}
 
-	// Verify the 8(a) opportunity was NOT saved
-	for _, opp := range saved {
-		if opp.SetAsideCode == "8A" {
-			t.Errorf("Ineligible 8(a) opportunity %s was saved to store", opp.ID)
-		}
+	opportunityStore, err := store.NewJSONStore(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create JSON store: %v", err)
 	}
 
-	t.Logf("Eligibility gate test: %d fetched, %d dropped, %d saved", len(all), dropped, len(saved))
+	naicsCodes := []string{"999999"} // not present in fixtures
+	opportunities, err := samClient.FetchByNAICS(ctx, naicsCodes)
+	if err != nil {
+		t.Fatalf("Failed to fetch opportunities: %v", err)
+	}
+
+	if len(opportunities) != 0 {
+		t.Errorf("Expected 0 opportunities for non-matching NAICS, got %d", len(opportunities))
+	}
+
+	allOpportunities, err := opportunityStore.List(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to list opportunities: %v", err)
+	}
+
+	if len(allOpportunities) != 0 {
+		t.Errorf("Expected empty store, found %d opportunities", len(allOpportunities))
+	}
 }

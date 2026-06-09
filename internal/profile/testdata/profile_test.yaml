@@ -1,0 +1,47 @@
+uei: "TESTUE1234567"
+cage: "TESTCG"
+company: "Test Corp"
+address: "123 Test St, Test City, TC 00000"
+
+naics_codes:
+  - code: "541512"
+    description: "Computer Systems Design Services"
+    tier: "primary"
+  - code: "541519"
+    description: "Other Computer Related Services"
+    tier: "primary"
+  - code: "518210"
+    description: "Data Processing and Hosting"
+    tier: "secondary"
+  - code: "541690"
+    description: "Other Scientific Consulting"
+    tier: "tertiary"
+
+set_aside:
+  small_business: true
+  sdb: true
+  minority_owned: false
+  eight_a: false
+  sdvosb: false
+  wosb: false
+  hubzone: false
+
+clearance: "Public Trust"
+
+competencies:
+  - "AI/ML"
+  - "Federal Systems"
+
+past_performance:
+  - client: "U.S. Census Bureau"
+    scope: "AI-powered multilingual communication platform"
+    value: "Opportunity Project Sprint 2024"
+    what_it_proves:
+      - "Federal experience"
+      - "AI/ML capability"
+  - client: "DOD Agency"
+    scope: "Mobile application for field data collection"
+    value: "$50,000"
+    what_it_proves:
+      - "Mobile development"
+      - "Security"
