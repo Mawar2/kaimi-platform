@@ -1,7 +1,17 @@
 // Package writer provides the Zone 2 agent that turns an Outline into draft prose.
-// This is a skeleton implementation that produces a stubbed draft to prove the
-// interface; actual content generation will be implemented in KAI-9.
-// It returns an agent.Result consistent with other agents in the system.
+//
+// It runs in two modes:
+//   - Skeleton/stub mode (New): produces a deterministic placeholder draft with no
+//     model call. Used as a fallback and in fast tests.
+//   - Generation mode (NewWithGenerator): drafts each outline section with a
+//     Generator (Gemini in production), grounded strictly in the Opportunity and
+//     the Capability Profile.
+//
+// Grounding rule (KAI-9): the Writer passes only the facts present in the
+// Opportunity and Capability Profile into the prompt and enforces, via a system
+// instruction, that the model never invents past performance, contract numbers,
+// client names, certifications, or compliance claims. Missing facts are flagged as
+// gaps, never fabricated.
 package writer
 
 import (
@@ -13,71 +23,214 @@ import (
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 const agentName = "writer"
 
-// Input contains the necessary context for the writer agent to generate a draft.
-type Input struct {
-	// Opportunity provides the high-level project details and title.
-	Opportunity *opportunity.Opportunity
-	// Outline defines the required sections and formatting rules for the draft.
-	Outline *outline.Outline
+// gapMarker is the placeholder the model is instructed to emit when a section
+// needs a fact that is not present in the grounding inputs — instead of inventing it.
+const gapMarker = "[GAP:"
+
+// systemInstruction carries the critical anti-fabrication rules. It is delivered as
+// a system instruction (not appended to the user prompt) so it is robust against
+// instruction drift when the opportunity text is long or complex.
+const systemInstruction = "You are drafting sections of a U.S. federal proposal for BlueMeta Technologies. " +
+	"CRITICAL RULES: " +
+	"Use ONLY the facts provided in the user message. " +
+	"Do NOT invent past performance, contract numbers, client names, dollar amounts, certifications, dates, or compliance claims. " +
+	"If a section needs a fact that is not provided, do NOT fabricate it — insert a placeholder of the exact form " + gapMarker + " what is missing] and continue. " +
+	"Write only the prose for the requested section: no preamble and no markdown headers."
+
+// Generator produces prose for a single proposal section from a system instruction
+// (the static anti-fabrication rules) and a grounded user prompt (the per-section
+// facts). The production implementation is GeminiGenerator; tests inject a mock.
+// Implementations must not add facts beyond what the prompt provides.
+type Generator interface {
+	GenerateSection(ctx context.Context, systemInstruction, prompt string) (string, error)
 }
 
-// Agent handles the transformation of an outline into a prose document.
-type Agent struct{}
+// Input contains the context the Writer needs to generate a draft.
+type Input struct {
+	// Opportunity provides the solicitation facts and title. Required.
+	Opportunity *opportunity.Opportunity
+	// Outline defines the sections and formatting rules for the draft. Required.
+	Outline *outline.Outline
+	// Profile supplies BlueMeta's real facts (past performance, competencies) used
+	// to ground the draft. Required in generation mode; ignored in stub mode.
+	Profile *scorer.CapabilityProfile
+}
 
-// New creates a new instance of the Writer agent.
+// Agent transforms an outline into a proposal draft. A nil generator selects
+// stub mode; a non-nil generator selects grounded generation mode.
+type Agent struct {
+	gen Generator
+}
+
+// New creates a Writer in stub mode (no model calls).
 func New() *Agent {
 	return &Agent{}
 }
 
-// Run generates a stubbed proposal draft based on the provided input.
+// NewWithGenerator creates a Writer that drafts sections with the given Generator.
+func NewWithGenerator(g Generator) *Agent {
+	return &Agent{gen: g}
+}
+
+// Run produces a proposal draft for the given input.
+//
+// Stub mode returns a deterministic placeholder draft. Generation mode drafts each
+// section via the Generator, grounded in the Opportunity and Capability Profile.
+// On any failure it returns a failed Result and a non-nil error with an empty
+// draft — it never emits a silent empty draft.
 func (a *Agent) Run(ctx context.Context, in Input) (string, *agent.Result, error) {
 	if in.Opportunity == nil {
-		res := &agent.Result{
-			AgentName:   agentName,
-			Status:      agent.StatusFailed,
-			Summary:     "missing opportunity data",
-			Error:       "opportunity cannot be nil",
-			CompletedAt: time.Now().UTC(),
-		}
-		return "", res, fmt.Errorf("opportunity is required")
+		return "", failed("", "missing opportunity data", "opportunity cannot be nil"), fmt.Errorf("opportunity is required")
 	}
-
 	if in.Outline == nil {
-		res := &agent.Result{
-			AgentName:   agentName,
-			Status:      agent.StatusFailed,
-			Summary:     "missing outline data",
-			Error:       "outline cannot be nil",
-			CompletedAt: time.Now().UTC(),
-		}
-		return "", res, fmt.Errorf("outline is required")
+		return "", failed(in.Opportunity.ID, "missing outline data", "outline cannot be nil"), fmt.Errorf("outline is required")
 	}
 
-	// TODO(phase-3): replace the stub with a Gemini call (KAI-9).
+	if a.gen == nil {
+		return a.runStub(in)
+	}
+	return a.runGenerated(ctx, in)
+}
+
+// runStub produces the deterministic placeholder draft (skeleton behavior).
+func (a *Agent) runStub(in Input) (string, *agent.Result, error) {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# Proposal Draft: %s\n", in.Opportunity.Title)
-
 	for _, section := range in.Outline.Sections {
 		fmt.Fprintf(&sb, "\n## %s\n", section.Title)
 		fmt.Fprintf(&sb, "[Stub draft for %s -- real generation lands in KAI-9]\n", section.Title)
 	}
+	return sb.String(), successResult(in, len(in.Outline.Sections), "true"), nil
+}
 
-	draft := sb.String()
-	res := &agent.Result{
+// runGenerated drafts each section with the Generator, grounded in the inputs.
+func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Result, error) {
+	if in.Profile == nil {
+		return "", failed(in.Opportunity.ID, "missing capability profile", "profile cannot be nil in generation mode"), fmt.Errorf("profile is required for grounded drafting")
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# Proposal Draft: %s\n", in.Opportunity.Title)
+
+	for _, section := range in.Outline.Sections {
+		if err := ctx.Err(); err != nil {
+			return "", failed(in.Opportunity.ID, "draft generation cancelled", err.Error()), err
+		}
+
+		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules)
+		text, err := a.gen.GenerateSection(ctx, systemInstruction, prompt)
+		if err != nil {
+			return "", failed(
+				in.Opportunity.ID,
+				fmt.Sprintf("failed to generate section %q", section.Title),
+				err.Error(),
+			), fmt.Errorf("writer: generate section %q: %w", section.ID, err)
+		}
+
+		// Treat a whitespace-only section as a failure rather than silently
+		// emitting a heading with no content (no silent empty draft).
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return "", failed(
+				in.Opportunity.ID,
+				fmt.Sprintf("empty draft for section %q", section.Title),
+				"generator returned no content for the section",
+			), fmt.Errorf("writer: empty draft for section %q", section.ID)
+		}
+
+		fmt.Fprintf(&sb, "\n## %s\n", section.Title)
+		sb.WriteString(text)
+		sb.WriteString("\n")
+	}
+
+	return sb.String(), successResult(in, len(in.Outline.Sections), "false"), nil
+}
+
+// buildSectionPrompt builds the grounded user prompt for one section. It includes
+// only the facts present in the Opportunity and Capability Profile; the
+// anti-fabrication rules are delivered separately via systemInstruction.
+func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Section to draft\n")
+	fmt.Fprintf(&sb, "Title: %s\n", section.Title)
+	if section.Rationale != "" {
+		fmt.Fprintf(&sb, "Why this section is required: %s\n", section.Rationale)
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Opportunity facts (the only solicitation facts you may use)\n")
+	fmt.Fprintf(&sb, "Title: %s\n", opp.Title)
+	fmt.Fprintf(&sb, "Agency: %s\n", opp.Agency)
+	fmt.Fprintf(&sb, "NAICS: %s (%s)\n", opp.NAICSCode, opp.NAICSDescription)
+	if opp.Description != "" {
+		fmt.Fprintf(&sb, "Description: %s\n", opp.Description)
+	}
+	if len(opp.Requirements) > 0 {
+		fmt.Fprintf(&sb, "Stated requirements: %s\n", strings.Join(opp.Requirements, "; "))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Company facts (the only company facts you may use)\n")
+	fmt.Fprintf(&sb, "Competencies: %s\n", joinOrNone(profile.CompetencyTags))
+	fmt.Fprintf(&sb, "Past performance: %s\n", joinOrNone(profile.PastPerformance))
+	fmt.Fprintf(&sb, "Primary NAICS: %s\n", joinOrNone(profile.PrimaryNAICS))
+	// Only assert SDB status when true — printing "false" can prompt the model to
+	// write an unnecessary negative claim.
+	if profile.SDBStatus {
+		sb.WriteString("Small Disadvantaged Business: yes\n")
+	}
+	sb.WriteString("\n")
+
+	if rules != nil {
+		if rules.PageLimit != nil && rules.PageLimit.Specified {
+			fmt.Fprintf(&sb, "Formatting: respect the page limit (%s).\n", rules.PageLimit.Value)
+		}
+		if rules.Font != nil && rules.Font.Specified {
+			fmt.Fprintf(&sb, "Formatting: use the required font (%s).\n", rules.Font.Value)
+		}
+	}
+
+	return sb.String()
+}
+
+// joinOrNone joins items with ", " or returns "(none provided)" when empty, so the
+// prompt never implies a fact the profile does not contain.
+func joinOrNone(items []string) string {
+	if len(items) == 0 {
+		return "(none provided)"
+	}
+	return strings.Join(items, ", ")
+}
+
+// successResult builds the success Result for a completed draft.
+func successResult(in Input, sectionCount int, stub string) *agent.Result {
+	return &agent.Result{
 		AgentName: agentName,
 		Status:    agent.StatusSuccess,
 		NoticeID:  in.Opportunity.ID,
-		Summary:   fmt.Sprintf("generated stub draft with %d sections for opportunity %s", len(in.Outline.Sections), in.Opportunity.ID),
+		Summary:   fmt.Sprintf("generated draft with %d sections for opportunity %s", sectionCount, in.Opportunity.ID),
 		Flags: map[string]string{
-			"section_count": fmt.Sprintf("%d", len(in.Outline.Sections)),
-			"stub":          "true",
+			"section_count": fmt.Sprintf("%d", sectionCount),
+			"stub":          stub,
 		},
 		CompletedAt: time.Now().UTC(),
 	}
+}
 
-	return draft, res, nil
+// failed builds a failed Result with the given notice ID, summary, and error detail.
+func failed(noticeID, summary, errMsg string) *agent.Result {
+	return &agent.Result{
+		AgentName:   agentName,
+		Status:      agent.StatusFailed,
+		NoticeID:    noticeID,
+		Summary:     summary,
+		Error:       errMsg,
+		CompletedAt: time.Now().UTC(),
+	}
 }
