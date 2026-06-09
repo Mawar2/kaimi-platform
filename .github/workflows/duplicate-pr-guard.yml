@@ -1,0 +1,87 @@
+name: Duplicate PR Guard
+
+# Prevents a runaway bot (or an accidental re-submission) from piling up
+# duplicate PRs for the same work — the failure mode that produced ~25 redundant
+# PRs in June 2026. On PR open/reopen, if an OLDER open PR by the SAME author
+# already covers the same work (near-identical title), this PR is auto-closed
+# with a pointer to the original. Only acts on same-repo PRs (never forks).
+#
+# The match is deliberately conservative (same author + high title-token overlap)
+# to avoid closing a human's distinct take on the same ticket.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    # Fork PRs get a read-only token and are out of scope — skip them.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            // Tokenize a title into a set of significant words: strip a leading
+            // "NN_" / "NN:" / "NN-" prefix (the bot numbered each retry), lowercase,
+            // split on non-alphanumerics, drop short words and weak stopwords.
+            const STOP = new Set(['the','a','an','to','for','of','and','with','add','agent','feat','fix','chore']);
+            const tokenize = (t) => new Set(
+              String(t || '')
+                .toLowerCase()
+                .replace(/^\s*\d+\s*[_:\-]\s*/, '')
+                .split(/[^a-z0-9]+/)
+                .filter((w) => w.length > 1 && !STOP.has(w))
+            );
+            const jaccard = (a, b) => {
+              if (!a.size || !b.size) return 0;
+              let inter = 0;
+              for (const x of a) if (b.has(x)) inter++;
+              return inter / (a.size + b.size - inter);
+            };
+
+            const mine = tokenize(pr.title);
+            const others = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+
+            const THRESHOLD = 0.8;
+            let original = null;
+            for (const o of others) {
+              if (o.number >= pr.number) continue;             // only an OLDER PR wins
+              if (o.user.login !== pr.user.login) continue;    // same author only
+              if (jaccard(mine, tokenize(o.title)) >= THRESHOLD) { original = o; break; }
+            }
+
+            if (!original) {
+              core.info('No older same-author near-duplicate found; allowing PR.');
+              return;
+            }
+
+            core.warning(`PR #${pr.number} duplicates #${original.number}; auto-closing.`);
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pr.number,
+              body:
+                `🔁 **Auto-closed as a duplicate of #${original.number}.**\n\n` +
+                `An older open PR by the same author already covers this work. ` +
+                `Please continue on #${original.number} instead of opening a new PR.\n\n` +
+                `_Duplicate PR Guard — stops runaway re-submissions. ` +
+                `If this is a false positive, reopen and adjust the title so it differs._`,
+            });
+            try {
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: pr.number, labels: ['duplicate'],
+              });
+            } catch (e) {
+              core.info(`label add skipped: ${e.message}`);
+            }
+            await github.rest.pulls.update({
+              owner, repo, pull_number: pr.number, state: 'closed',
+            });
