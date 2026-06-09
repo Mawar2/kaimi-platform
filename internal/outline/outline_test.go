@@ -2,14 +2,49 @@ package outline
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/agent"
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
 var testTime = time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+// fakeDocsClient is a colocated test double for googledocs.Client. It lets tests
+// control whether and how Doc creation succeeds without any network calls.
+type fakeDocsClient struct {
+	createDocFunc func(ctx context.Context, doc googledocs.Document) (*googledocs.CreatedDoc, error)
+}
+
+func (f *fakeDocsClient) CreateDoc(ctx context.Context, doc googledocs.Document) (*googledocs.CreatedDoc, error) {
+	return f.createDocFunc(ctx, doc)
+}
+
+// succeedingDocsClient returns a fakeDocsClient whose CreateDoc always succeeds
+// with a deterministic CreatedDoc.
+func succeedingDocsClient() *fakeDocsClient {
+	return &fakeDocsClient{
+		createDocFunc: func(_ context.Context, _ googledocs.Document) (*googledocs.CreatedDoc, error) {
+			return &googledocs.CreatedDoc{
+				ID:  "fixture-doc-id-001",
+				URL: "https://docs.google.com/document/d/fixture-doc-id-001/edit",
+			}, nil
+		},
+	}
+}
+
+// failingDocsClient returns a fakeDocsClient whose CreateDoc always fails.
+func failingDocsClient(err error) *fakeDocsClient {
+	return &fakeDocsClient{
+		createDocFunc: func(_ context.Context, _ googledocs.Document) (*googledocs.CreatedDoc, error) {
+			return nil, err
+		},
+	}
+}
 
 // baseOpportunity returns a minimal but valid Opportunity for testing.
 func baseOpportunity() *opportunity.Opportunity {
@@ -35,7 +70,7 @@ func baseOpportunity() *opportunity.Opportunity {
 // TestOutlineAgent_HappyPath verifies the agent returns a valid Outline and success result.
 func TestOutlineAgent_HappyPath(t *testing.T) {
 	ctx := context.Background()
-	a := New()
+	a := New(succeedingDocsClient())
 
 	outline, result, err := a.Run(ctx, baseOpportunity())
 
@@ -55,6 +90,16 @@ func TestOutlineAgent_HappyPath(t *testing.T) {
 	if result.Summary != wantSummary {
 		t.Errorf("Summary = %q, want %q", result.Summary, wantSummary)
 	}
+	const wantURL = "https://docs.google.com/document/d/fixture-doc-id-001/edit"
+	if result.OutputRef != wantURL {
+		t.Errorf("OutputRef = %q, want %q", result.OutputRef, wantURL)
+	}
+	if result.Flags["doc_id"] != "fixture-doc-id-001" {
+		t.Errorf("Flags[doc_id] = %q, want %q", result.Flags["doc_id"], "fixture-doc-id-001")
+	}
+	if result.Flags["section_count"] != "5" {
+		t.Errorf("Flags[section_count] = %q, want %q", result.Flags["section_count"], "5")
+	}
 	if outline == nil {
 		t.Fatal("Run() returned nil outline on success")
 	}
@@ -69,10 +114,49 @@ func TestOutlineAgent_HappyPath(t *testing.T) {
 	}
 }
 
+// TestOutlineAgent_DocCreationFails verifies that when the Google Doc cannot be
+// created, the agent returns a failed Result with an error AND still returns the
+// generated Outline — the outline must not be lost silently.
+func TestOutlineAgent_DocCreationFails(t *testing.T) {
+	ctx := context.Background()
+	wantErr := errors.New("drive: permission denied")
+	a := New(failingDocsClient(wantErr))
+
+	outline, result, err := a.Run(ctx, baseOpportunity())
+
+	if err == nil {
+		t.Fatal("Run() should return an error when Doc creation fails")
+	}
+	if outline == nil {
+		t.Fatal("Run() must still return the generated Outline when Doc creation fails — don't lose it silently")
+	}
+	if outline.OpportunityID != "TEST-001" {
+		t.Errorf("OpportunityID = %q, want %q", outline.OpportunityID, "TEST-001")
+	}
+	if result == nil {
+		t.Fatal("Run() should still return a Result on failure")
+	}
+	if result.Status != agent.StatusFailed {
+		t.Errorf("Status = %q, want %q", result.Status, agent.StatusFailed)
+	}
+	if result.AgentName != agentName {
+		t.Errorf("AgentName = %q, want %q", result.AgentName, agentName)
+	}
+	if result.Error == "" {
+		t.Error("Result.Error must be populated when Doc creation fails")
+	}
+	if !strings.Contains(result.Error, wantErr.Error()) {
+		t.Errorf("Result.Error = %q, want it to contain %q", result.Error, wantErr.Error())
+	}
+	if result.OutputRef != "" {
+		t.Errorf("OutputRef = %q, want empty on failure", result.OutputRef)
+	}
+}
+
 // TestOutlineAgent_NilOpportunity verifies the agent returns a failed result and nil outline.
 func TestOutlineAgent_NilOpportunity(t *testing.T) {
 	ctx := context.Background()
-	a := New()
+	a := New(succeedingDocsClient())
 
 	outline, result, err := a.Run(ctx, nil)
 
@@ -406,12 +490,60 @@ func TestOutlineAgent_FormattingRulesNonNil(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = ""
 
-	outline, _, err := New().Run(context.Background(), opp)
+	outline, _, err := New(succeedingDocsClient()).Run(context.Background(), opp)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 	if outline.FormattingRules == nil {
 		t.Error("Outline.FormattingRules must never be nil")
+	}
+}
+
+// TestToDocSections_RendersFormattingRules verifies that toDocSections renders a
+// stated value for Specified rules and "Not specified in solicitation" for
+// unspecified ones — mirroring the "don't invent values" philosophy documented on
+// FormattingRule, now carried through into the rendered Doc content.
+func TestToDocSections_RendersFormattingRules(t *testing.T) {
+	out := &Outline{
+		Title:    "Test Outline",
+		Sections: []Section{{ID: "executive_summary", Title: "Executive Summary", Required: true, Rationale: "standard"}},
+		FormattingRules: &FormattingRules{
+			PageLimit:     specified("25 pages"),
+			Font:          unspecified(),
+			Margins:       specified("1-inch margins"),
+			LineSpacing:   unspecified(),
+			FileFormat:    unspecified(),
+			RequiredForms: []string{"SF-330"},
+		},
+	}
+
+	docSections := toDocSections(out)
+
+	var formatting *googledocs.DocSection
+	for i := range docSections {
+		if docSections[i].Heading == "Formatting Requirements" {
+			formatting = &docSections[i]
+		}
+	}
+	if formatting == nil {
+		t.Fatal("expected a \"Formatting Requirements\" section")
+	}
+
+	cases := []struct {
+		name       string
+		wantInBody string
+	}{
+		{"specified page limit", "25 pages"},
+		{"specified margins", "1-inch margins"},
+		{"required form", "SF-330"},
+		{"unspecified rule placeholder", "Not specified in solicitation"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(formatting.Body, tc.wantInBody) {
+				t.Errorf("Formatting Requirements body = %q, want it to contain %q", formatting.Body, tc.wantInBody)
+			}
+		})
 	}
 }
 

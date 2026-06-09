@@ -52,6 +52,22 @@ if [ -z "$GOOGLE_API_KEY" ]; then
 fi
 echo "✅ Retrieved Google AI Studio API key"
 
+GOOGLE_DRIVE_CREDENTIALS_JSON=$(gcloud secrets versions access latest --secret=google-drive-service-account-key 2>/dev/null)
+if [ -z "$GOOGLE_DRIVE_CREDENTIALS_JSON" ]; then
+    echo "❌ Error: Could not fetch google-drive-service-account-key"
+    echo "   Make sure you have Secret Manager access"
+    exit 1
+fi
+echo "✅ Retrieved Google Drive service-account credentials"
+
+GOOGLE_DRIVE_SHARED_DRIVE_ID=$(gcloud secrets versions access latest --secret=google-drive-shared-drive-id 2>/dev/null)
+if [ -z "$GOOGLE_DRIVE_SHARED_DRIVE_ID" ]; then
+    echo "❌ Error: Could not fetch google-drive-shared-drive-id"
+    echo "   Make sure you have Secret Manager access"
+    exit 1
+fi
+echo "✅ Retrieved Google Drive Shared Drive ID"
+
 # Create .env file
 echo ""
 echo "📝 Creating .env file..."
@@ -67,6 +83,12 @@ SAM_API_KEY=$SAM_API_KEY
 # Google AI Studio API Key (for Gemini agent platform - ADK Go)
 GOOGLE_API_KEY=$GOOGLE_API_KEY
 
+# Google Drive service-account credentials (for the Outline agent's Google Docs integration)
+GOOGLE_DRIVE_CREDENTIALS_JSON=$GOOGLE_DRIVE_CREDENTIALS_JSON
+
+# Shared Drive ID that the Outline agent creates Docs in
+GOOGLE_DRIVE_SHARED_DRIVE_ID=$GOOGLE_DRIVE_SHARED_DRIVE_ID
+
 # Hunter Configuration (optional - can also use command-line flags)
 # MODE=cached
 # NAICS_CODES=541512,541519
@@ -80,6 +102,8 @@ echo ""
 echo "Your environment is ready. The .env file has been created with:"
 echo "  - SAM_API_KEY"
 echo "  - GOOGLE_API_KEY"
+echo "  - GOOGLE_DRIVE_CREDENTIALS_JSON"
+echo "  - GOOGLE_DRIVE_SHARED_DRIVE_ID"
 echo ""
 echo "To use these in your terminal session, run:"
 echo "  source .env  (on Mac/Linux)"

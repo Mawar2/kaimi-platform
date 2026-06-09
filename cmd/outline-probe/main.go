@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/profile"
@@ -268,7 +269,13 @@ func fetchDescription(url, apiKey string) (string, error) {
 // processOpportunities runs the outline agent against each opportunity in turn
 // and prints the resulting sections, formatting rules, and a description excerpt.
 func processOpportunities(ctx context.Context, opps []*opportunity.Opportunity) error {
-	ag := outline.New()
+	// outline-probe is a diagnostic tool and does not persist to Drive; use the
+	// cached Docs client so Run() can complete without live credentials.
+	docsClient, err := googledocs.NewClient(ctx, googledocs.Config{UseCached: true})
+	if err != nil {
+		return fmt.Errorf("create cached docs client: %w", err)
+	}
+	ag := outline.New(docsClient)
 
 	for i, opp := range opps {
 		printDivider()

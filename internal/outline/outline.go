@@ -9,10 +9,12 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/agent"
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
@@ -56,18 +58,28 @@ type Outline struct {
 }
 
 // Agent is the Outline agent.
-type Agent struct{}
+type Agent struct {
+	docsClient googledocs.Client
+}
 
-// New creates a new Outline agent.
-func New() *Agent {
-	return &Agent{}
+// New creates a new Outline agent that saves generated outlines to Google Docs
+// via the given client.
+func New(docsClient googledocs.Client) *Agent {
+	return &Agent{docsClient: docsClient}
 }
 
 // Run takes a selected Opportunity and produces a structured Outline and a Result.
 //
-// Returns a non-nil Outline on success. Returns a failed Result (and nil Outline)
-// on unrecoverable errors. Sparse opportunities get a best-effort outline rather than
-// a failure.
+// On success, the outline is saved to a Google Doc and the Result's OutputRef is
+// set to the Doc's URL. Returns a non-nil Outline on success. Returns a failed
+// Result on unrecoverable errors.
+//
+// If the opportunity itself is invalid, returns a nil Outline — there is nothing
+// to save. If the Outline was generated but the Google Doc could not be created,
+// the Outline is still returned alongside the failed Result so the caller can
+// retry or persist it elsewhere — the outline must never be lost silently.
+//
+// Sparse opportunities get a best-effort outline rather than a failure.
 //
 // TODO(phase-3): Replace buildSections with a Gemini call once LLM integration lands.
 func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline, *agent.Result, error) {
@@ -90,14 +102,91 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline
 		GeneratedAt:     time.Now().UTC(),
 	}
 
+	created, err := a.docsClient.CreateDoc(ctx, googledocs.Document{
+		Title:    outline.Title,
+		Sections: toDocSections(outline),
+	})
+	if err != nil {
+		// Don't lose the outline silently: return it alongside the failed Result
+		// so the caller can retry Doc creation or persist the outline elsewhere.
+		return outline, &agent.Result{
+			AgentName:   agentName,
+			Status:      agent.StatusFailed,
+			NoticeID:    opp.ID,
+			Summary:     fmt.Sprintf("generated outline for %s but failed to create Google Doc", opp.ID),
+			Error:       fmt.Sprintf("creating google doc: %v", err),
+			CompletedAt: time.Now().UTC(),
+		}, fmt.Errorf("outline agent: create google doc: %w", err)
+	}
+
 	result := &agent.Result{
 		AgentName: agentName,
 		Status:    agent.StatusSuccess,
+		NoticeID:  opp.ID,
 		Summary:   fmt.Sprintf("generated %d sections for opportunity %s", len(sections), opp.ID),
-		OutputRef: "", // TODO(phase-3): set to Google Doc URL once KAI-5 is built
+		OutputRef: created.URL,
+		Flags: map[string]string{
+			"doc_id":        created.ID,
+			"section_count": strconv.Itoa(len(sections)),
+		},
+		CompletedAt: time.Now().UTC(),
 	}
 
 	return outline, result, nil
+}
+
+// toDocSections renders an Outline's sections and formatting rules into the flat
+// heading/body shape the googledocs client writes to a Doc.
+func toDocSections(o *Outline) []googledocs.DocSection {
+	docSections := make([]googledocs.DocSection, 0, len(o.Sections)+1)
+
+	for _, sec := range o.Sections {
+		required := "Required: no"
+		if sec.Required {
+			required = "Required: yes"
+		}
+		docSections = append(docSections, googledocs.DocSection{
+			Heading: sec.Title,
+			Body:    required + "\n" + sec.Rationale,
+		})
+	}
+
+	docSections = append(docSections, googledocs.DocSection{
+		Heading: "Formatting Requirements",
+		Body:    formatFormattingRules(o.FormattingRules),
+	})
+
+	return docSections
+}
+
+// formatFormattingRules renders each formatting requirement as one line: its
+// stated value when Specified, or an explicit "not specified" placeholder
+// otherwise — never inventing a value the solicitation didn't state.
+func formatFormattingRules(f *FormattingRules) string {
+	lines := []string{
+		formatRuleLine("Page limit", f.PageLimit),
+		formatRuleLine("Font", f.Font),
+		formatRuleLine("Margins", f.Margins),
+		formatRuleLine("Line spacing", f.LineSpacing),
+		formatRuleLine("File format", f.FileFormat),
+	}
+
+	if len(f.RequiredForms) > 0 {
+		lines = append(lines, "Required forms: "+strings.Join(f.RequiredForms, ", "))
+	} else {
+		lines = append(lines, "Required forms: Not specified in solicitation")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// formatRuleLine renders a single formatting rule as "<label>: <value>", using
+// "Not specified in solicitation" when the rule's value was not stated.
+func formatRuleLine(label string, rule *FormattingRule) string {
+	if rule.Specified {
+		return label + ": " + rule.Value
+	}
+	return label + ": Not specified in solicitation"
 }
 
 // Regexes for extracting formatting values from solicitation text.

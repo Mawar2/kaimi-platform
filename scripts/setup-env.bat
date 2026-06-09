@@ -45,6 +45,34 @@ if "%GOOGLE_API_KEY%"=="" (
 )
 echo [OK] Retrieved Google AI Studio API key
 
+REM NOTE: GOOGLE_DRIVE_CREDENTIALS_JSON is a raw JSON blob (quotes, braces, colons).
+REM Batch's "for /f" and the parenthesized echo block below handle it as a single
+REM line without re-quoting, which is sufficient for writing it to .env, but do not
+REM try to "echo" or inspect this variable directly in cmd - special characters will
+REM not round-trip cleanly through the shell.
+gcloud secrets versions access latest --secret=google-drive-service-account-key > "%TEMP%\kaimi-gdrive-creds.json" 2>nul
+if not exist "%TEMP%\kaimi-gdrive-creds.json" (
+    echo [ERROR] Could not fetch google-drive-service-account-key
+    echo         Make sure you have Secret Manager access
+    exit /b 1
+)
+for /f "delims=" %%a in ('type "%TEMP%\kaimi-gdrive-creds.json"') do set GOOGLE_DRIVE_CREDENTIALS_JSON=%%a
+del "%TEMP%\kaimi-gdrive-creds.json"
+if "%GOOGLE_DRIVE_CREDENTIALS_JSON%"=="" (
+    echo [ERROR] Could not fetch google-drive-service-account-key
+    echo         Make sure you have Secret Manager access
+    exit /b 1
+)
+echo [OK] Retrieved Google Drive service-account credentials
+
+for /f "delims=" %%a in ('gcloud secrets versions access latest --secret=google-drive-shared-drive-id 2^>nul') do set GOOGLE_DRIVE_SHARED_DRIVE_ID=%%a
+if "%GOOGLE_DRIVE_SHARED_DRIVE_ID%"=="" (
+    echo [ERROR] Could not fetch google-drive-shared-drive-id
+    echo         Make sure you have Secret Manager access
+    exit /b 1
+)
+echo [OK] Retrieved Google Drive Shared Drive ID
+
 REM Create .env file
 echo.
 echo Creating .env file...
@@ -59,6 +87,12 @@ echo SAM_API_KEY=%SAM_API_KEY%
 echo.
 echo # Google AI Studio API Key ^(for Gemini agent platform - ADK Go^)
 echo GOOGLE_API_KEY=%GOOGLE_API_KEY%
+echo.
+echo # Google Drive service-account credentials ^(for the Outline agent's Google Docs integration^)
+echo GOOGLE_DRIVE_CREDENTIALS_JSON=%GOOGLE_DRIVE_CREDENTIALS_JSON%
+echo.
+echo # Shared Drive ID that the Outline agent creates Docs in
+echo GOOGLE_DRIVE_SHARED_DRIVE_ID=%GOOGLE_DRIVE_SHARED_DRIVE_ID%
 echo.
 echo # Hunter Configuration ^(optional - can also use command-line flags^)
 echo # MODE=cached
@@ -75,6 +109,8 @@ echo.
 echo Your environment is ready. The .env file has been created with:
 echo   - SAM_API_KEY
 echo   - GOOGLE_API_KEY
+echo   - GOOGLE_DRIVE_CREDENTIALS_JSON
+echo   - GOOGLE_DRIVE_SHARED_DRIVE_ID
 echo.
 echo To use these in your current terminal session, run:
 echo   set GOOGLE_API_KEY=%GOOGLE_API_KEY%
