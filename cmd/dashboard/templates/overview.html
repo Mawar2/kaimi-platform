@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="stage-container">
+    {{range .Stages}}
+    <div class="stage-card">
+        <h3>{{.Name}}</h3>
+        <div class="count">{{index $.Counts .Name}}</div>
+    </div>
+    {{end}}
+</div>
+{{end}}
