@@ -104,9 +104,7 @@ type PastPerformance struct {
 // Note: Named CapabilityProfile (not just Profile) per Issue #9 acceptance criteria,
 // despite stuttering with package name. The explicit name improves clarity when reading
 // agent code that uses this type.
-//
-//nolint:revive // Name specified in Issue #9 acceptance criteria
-type CapabilityProfile struct {
+type CapabilityProfile struct { //nolint:revive // Name specified in Issue #9 acceptance criteria
 	// UEI is the Unique Entity Identifier (replaced DUNS in 2022)
 	UEI string `yaml:"uei" json:"uei"`
 
