@@ -20,14 +20,29 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/manager"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/pipeline"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/store"
 	"github.com/Mawar2/Kaimi/internal/writer"
 )
+
+// stubDocsClient satisfies googledocs.Client for the contract layer: Outline
+// gets a deterministic doc without any network call. Mirrors the colocated
+// fake in internal/outline's tests (test doubles aren't exported across
+// packages).
+type stubDocsClient struct{}
+
+func (stubDocsClient) CreateDoc(_ context.Context, _ googledocs.Document) (*googledocs.CreatedDoc, error) {
+	return &googledocs.CreatedDoc{
+		ID:  "e2e-fixture-doc-001",
+		URL: "https://docs.google.com/document/d/e2e-fixture-doc-001/edit",
+	}, nil
+}
 
 type mockSam struct {
 	opps []*opportunity.Opportunity
@@ -53,10 +68,26 @@ func newOpp(id, naics, setAside string, deadline time.Time) *opportunity.Opportu
 	}
 }
 
-func profile() *scorer.CapabilityProfile {
+func scoringProfile() *scorer.CapabilityProfile {
 	return &scorer.CapabilityProfile{
 		PrimaryNAICS:   []string{"541512"},
 		CompetencyTags: []string{"cloud migration"},
+	}
+}
+
+// eligibilityProfile mirrors the eligibility fixture in internal/pipeline's
+// tests: a small business not 8(a)-certified, so the 8A set-aside opportunity
+// is dropped by the Hunter gate.
+func eligibilityProfile() *profile.CapabilityProfile {
+	return &profile.CapabilityProfile{
+		Company: "BlueMeta Technologies (e2e)",
+		NAICSCodes: []profile.NAICSCode{
+			{Code: "541512", Description: "Computer Systems Design Services", Tier: profile.TierPrimary},
+		},
+		SetAside: profile.SetAsideStatus{
+			SmallBusiness: true,
+			SDB:           true,
+		},
 	}
 }
 
@@ -80,10 +111,11 @@ func TestE2E_Contract_FullChain(t *testing.T) {
 
 	// Zone 1: Hunter eligibility gate + Scorer.
 	report, err := pipeline.RunZone1(ctx, &pipeline.Zone1Deps{
-		Sam:     &mockSam{opps: []*opportunity.Opportunity{good, ineligible, stale}},
-		Scorer:  scorer.NewDeterministicScorer(),
-		Store:   st,
-		Profile: profile(),
+		Sam:         &mockSam{opps: []*opportunity.Opportunity{good, ineligible, stale}},
+		Scorer:      scorer.NewDeterministicScorer(),
+		Store:       st,
+		Profile:     scoringProfile(),
+		Eligibility: eligibilityProfile(),
 	})
 	if err != nil {
 		t.Fatalf("run zone 1 failed: %v", err)
@@ -101,10 +133,10 @@ func TestE2E_Contract_FullChain(t *testing.T) {
 	}
 
 	// Zone 2: Manager threads a scored opportunity through Outline -> Writer -> Final Review.
-	m := manager.New(outline.New(), writer.New(), finalreview.New(), st)
+	m := manager.New(outline.New(stubDocsClient{}), writer.New(), finalreview.New(), st)
 
 	// Happy path: a future deadline yields a ready_to_submit proposal.
-	out, err := m.Run(ctx, good, profile())
+	out, err := m.Run(ctx, good, scoringProfile())
 	if err != nil {
 		t.Fatalf("manager run (good) failed: %v", err)
 	}
@@ -116,7 +148,7 @@ func TestE2E_Contract_FullChain(t *testing.T) {
 	}
 
 	// A passed deadline fails Final Review and halts the chain there.
-	out2, _ := m.Run(ctx, stale, profile())
+	out2, _ := m.Run(ctx, stale, scoringProfile())
 	if out2.Status != agent.StatusFailed {
 		t.Errorf("stale: status = %v, want failed", out2.Status)
 	}

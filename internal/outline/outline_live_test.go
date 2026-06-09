@@ -51,13 +51,13 @@ func TestLive_OutlineAgent_CreatesGoogleDoc(t *testing.T) {
 	}
 
 	opp := &opportunity.Opportunity{
-		ID:          "LIVE-TEST-001",
-		Title:       "Live Test: IT Systems Integration Services",
-		Description: "Provide key personnel for IT integration. Proposals shall not to exceed 25 pages. Submit in PDF format. Personnel must hold an active Secret clearance. SF-330 required.",
+		ID:           "LIVE-TEST-001",
+		Title:        "Live Test: IT Systems Integration Services",
+		Description:  "Provide key personnel for IT integration. Proposals shall not to exceed 25 pages. Submit in PDF format. Personnel must hold an active Secret clearance. SF-330 required.",
 		SetAsideCode: "SBA",
-		Type:        "Solicitation",
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
+		Type:         "Solicitation",
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
 	}
 
 	agent := New(client)

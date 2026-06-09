@@ -1,0 +1,9 @@
+# Force LF for files whose toolchains require it. Without this, Windows
+# checkouts (core.autocrlf=true) get CRLF working copies, which gofmt /
+# golangci-lint flag on every .go file — local QA gates then fail on a clean
+# clone even though Linux CI is green.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
