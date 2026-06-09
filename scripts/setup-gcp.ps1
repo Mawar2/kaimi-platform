@@ -234,6 +234,46 @@ if ($LASTEXITCODE -eq 0) {
 
 Write-Host ""
 
+# Step 10: Zone-1 deployment infrastructure (issue #122)
+# Artifact Registry repo, GCS queue bucket, Cloud Run Job, Cloud Scheduler.
+# All commands are idempotent: existing resources are left untouched.
+Write-Info "Step 10: Zone-1 deployment infrastructure"
+
+$PipelineImage = "$Region-docker.pkg.dev/$ProjectId/kaimi/pipeline:latest"
+$QueueBucket = "$ProjectId-queue"
+
+gcloud artifacts repositories describe kaimi --location=$Region --project=$ProjectId 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    gcloud artifacts repositories create kaimi --repository-format=docker --location=$Region --description="Kaimi container images" --project=$ProjectId
+}
+Write-Success "✓ Artifact Registry repo 'kaimi' ready"
+
+gcloud storage buckets describe "gs://$QueueBucket" --project=$ProjectId 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    gcloud storage buckets create "gs://$QueueBucket" --location=$Region --project=$ProjectId --uniform-bucket-level-access
+}
+gcloud storage buckets add-iam-policy-binding "gs://$QueueBucket" --member="serviceAccount:$ServiceAccountEmail" --role=roles/storage.objectAdmin | Out-Null
+Write-Success "✓ Queue bucket gs://$QueueBucket ready"
+
+# The Cloud Run Job runs cmd/pipeline in live mode with the JSON store on a
+# GCS volume mount, so scored opportunities persist across runs.
+gcloud run jobs describe kaimi-pipeline --region=$Region --project=$ProjectId 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    gcloud run jobs create kaimi-pipeline --image $PipelineImage --region $Region --project $ProjectId --service-account $ServiceAccountEmail --set-env-vars "MODE=live,GCP_PROJECT_ID=$ProjectId,GCP_REGION=$Region,STORE_PATH=/mnt/store/queue" --set-secrets "SAM_API_KEY=${secretName}:latest" --add-volume "name=store,type=cloud-storage,bucket=$QueueBucket" --add-volume-mount "volume=store,mount-path=/mnt/store" --memory 512Mi --cpu 1 --max-retries 1 --task-timeout 600
+}
+Write-Success "✓ Cloud Run Job kaimi-pipeline ready"
+
+gcloud run jobs add-iam-policy-binding kaimi-pipeline --region $Region --project $ProjectId --member "serviceAccount:$ServiceAccountEmail" --role roles/run.invoker | Out-Null
+
+# Three quota-friendly runs per day (SAM.gov allows 1,000 requests/day; the
+# client caches aggressively so repeat pulls are cheap).
+gcloud scheduler jobs describe kaimi-pipeline-schedule --location=$Region --project=$ProjectId 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    gcloud scheduler jobs create http kaimi-pipeline-schedule --project $ProjectId --location $Region --schedule "0 7,12,17 * * *" --time-zone "America/New_York" --uri "https://$Region-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$ProjectId/jobs/kaimi-pipeline:run" --http-method POST --oauth-service-account-email $ServiceAccountEmail
+}
+Write-Success "✓ Cloud Scheduler trigger ready (07:00/12:00/17:00 ET)"
+Write-Host ""
+
 # Summary
 Write-Success "=== Setup Complete ===`n"
 Write-Host "Your GCP environment is ready for Kaimi Phase 0 development.`n"

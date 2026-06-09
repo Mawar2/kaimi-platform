@@ -1,0 +1,16 @@
+# Keep the Docker build context small and free of secrets (issue #122).
+.git
+.github
+.claude
+_recover
+projects
+queue
+hackathon
+docs
+*.md
+
+# Never let credentials reach a build context.
+sa.json
+*.pem
+*.key
+.env

@@ -27,6 +27,7 @@ vendor/
 .env.gcp
 
 # GCP credentials (NEVER commit these!)
+sa.json
 kaimi-sa-key.json
 *-sa-key.json
 gcp-key.json

@@ -566,77 +566,31 @@ jobs:
       run: |
         gcloud auth configure-docker us-east4-docker.pkg.dev
 
-    # Phase 0: Placeholder deployment
-    # Phase 1+: Uncomment the sections below to deploy Hunter to Cloud Run
-    - name: Phase 0 - Deployment Placeholder
+    # One-time infrastructure (Artifact Registry repo "kaimi", GCS bucket
+    # kaimi-seeker-queue, the kaimi-pipeline Cloud Run Job with its GCS volume
+    # mount + Secret Manager wiring, and the Cloud Scheduler trigger) is
+    # provisioned by scripts/setup-gcp.ps1 / setup-gcp.sh (issue #122).
+    # This job only builds the new image and points the existing job at it.
+    - name: Build pipeline image
       run: |
-        echo "========================================="
-        echo "GCP Deployment - Phase 0"
-        echo "========================================="
-        echo ""
-        echo "This job is configured but not yet deploying."
-        echo "Phase 0 has no cloud infrastructure to deploy."
-        echo ""
-        echo "When Phase 1 begins, uncomment the steps below to:"
-        echo "  1. Build Hunter Docker image"
-        echo "  2. Push to Google Container Registry"
-        echo "  3. Deploy to Cloud Run"
-        echo "  4. Configure Cloud Scheduler for daily runs"
-        echo ""
-        echo "Project: ${{ secrets.GCP_PROJECT_ID }}"
-        echo "Region: ${{ secrets.GCP_REGION }}"
-        echo "Status: Ready for Phase 1 deployment"
-        echo "========================================="
+        docker build \
+          -f cmd/pipeline/Dockerfile \
+          -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }} \
+          -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:latest \
+          .
 
-    # PHASE 1: Uncomment these steps when ready to deploy
+    - name: Push pipeline image
+      run: |
+        docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }}
+        docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:latest
 
-    # - name: Build Hunter Docker image
-    #   run: |
-    #     docker build \
-    #       -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/hunter:${{ github.sha }} \
-    #       -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/hunter:latest \
-    #       -f cmd/hunter/Dockerfile .
+    - name: Update Cloud Run Job image
+      run: |
+        gcloud run jobs update kaimi-pipeline \
+          --image us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }} \
+          --region ${{ secrets.GCP_REGION }}
 
-    # - name: Push to Google Container Registry
-    #   run: |
-    #     docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/hunter:${{ github.sha }}
-    #     docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/hunter:latest
-
-    # - name: Deploy Hunter to Cloud Run
-    #   run: |
-    #     gcloud run deploy hunter \
-    #       --image us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/hunter:${{ github.sha }} \
-    #       --region ${{ secrets.GCP_REGION }} \
-    #       --platform managed \
-    #       --allow-unauthenticated \
-    #       --set-env-vars GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }} \
-    #       --set-env-vars GCP_REGION=${{ secrets.GCP_REGION }} \
-    #       --set-secrets SAMGOV_API_KEY=samgov-api-key:latest \
-    #       --memory 512Mi \
-    #       --cpu 1 \
-    #       --timeout 300s \
-    #       --max-instances 10
-
-    # - name: Get Cloud Run URL
-    #   id: get-url
-    #   run: |
-    #     URL=$(gcloud run services describe hunter \
-    #       --region ${{ secrets.GCP_REGION }} \
-    #       --format 'value(status.url)')
-    #     echo "url=$URL" >> $GITHUB_OUTPUT
-    #     echo "Hunter deployed to: $URL"
-
-    # - name: Configure Cloud Scheduler (Phase 1)
-    #   run: |
-    #     # Create or update Cloud Scheduler job to run Hunter daily
-    #     gcloud scheduler jobs create http hunter-daily \
-    #       --location ${{ secrets.GCP_REGION }} \
-    #       --schedule "0 9 * * *" \
-    #       --uri "${{ steps.get-url.outputs.url }}/run" \
-    #       --http-method POST \
-    #       --oidc-service-account-email kaimi-dev@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
-    #       --oidc-token-audience "${{ steps.get-url.outputs.url }}" \
-    #       || gcloud scheduler jobs update http hunter-daily \
-    #       --location ${{ secrets.GCP_REGION }} \
-    #       --schedule "0 9 * * *" \
-    #       --uri "${{ steps.get-url.outputs.url }}/run"
+    - name: Deployment summary
+      run: |
+        echo "Deployed kaimi-pipeline image ${{ github.sha }} to Cloud Run Jobs."
+        echo "Scheduled runs: 07:00 / 12:00 / 17:00 America/New_York (Cloud Scheduler job: kaimi-pipeline-schedule)."
