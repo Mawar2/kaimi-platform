@@ -1,15 +1,16 @@
 package dashboard
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/store"
 )
 
 // validID accepts only characters that appear in SAM.gov opportunity IDs.
@@ -161,7 +162,7 @@ func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	opp, err := h.svc.Get(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrNotFound) {
 			h.renderNotFound(w, id)
 			return
 		}

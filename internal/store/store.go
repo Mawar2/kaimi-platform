@@ -10,9 +10,15 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
+
+// ErrNotFound is returned by Get and Delete when the requested opportunity does
+// not exist in the store. Callers should use errors.Is(err, store.ErrNotFound)
+// to distinguish a missing record from an infrastructure failure.
+var ErrNotFound = errors.New("not found")
 
 // Store defines the interface for persisting and retrieving opportunities.
 //

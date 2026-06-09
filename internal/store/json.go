@@ -120,7 +120,7 @@ func (s *JSONStore) Get(ctx context.Context, id string) (*opportunity.Opportunit
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("opportunity %s not found", id)
+		return nil, fmt.Errorf("opportunity %s: %w", id, ErrNotFound)
 	}
 
 	// Read file
@@ -211,7 +211,7 @@ func (s *JSONStore) Delete(ctx context.Context, id string) error {
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("opportunity %s not found", id)
+		return fmt.Errorf("opportunity %s: %w", id, ErrNotFound)
 	}
 
 	// Delete file
