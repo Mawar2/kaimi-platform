@@ -77,6 +77,35 @@ func TestStyleTagLoadsNoExternalAssets(t *testing.T) {
 	}
 }
 
+// TestStyleTagSelfHostsDesignedFonts proves the designed faces actually render
+// instead of falling back to system fonts: the design system declares Figtree
+// (sans) and Geist Mono (mono) as the primary families, so StyleTag must embed
+// each as an inline @font-face data-URI (no network fetch — see the
+// no-external-assets test above). The fonts are variable, so each face declares
+// the full weight range to cover the non-standard token weights (420/430/550/650).
+func TestStyleTagSelfHostsDesignedFonts(t *testing.T) {
+	got := string(StyleTag())
+	wants := []string{
+		"@font-face",                      // the faces are embedded, not assumed installed
+		`font-family:"Figtree"`,           // sans face self-hosted
+		`font-family:"Geist Mono"`,        // mono face self-hosted (design-system primary)
+		"font-weight:100 900",             // variable axis covers 420/430/550/650
+		"src:url(data:font/woff2;base64,", // inline data-URI, no external request
+		`format("woff2")`,
+		`--font-sans: "Figtree"`,    // token still names Figtree first
+		`--font-mono: "Geist Mono"`, // token still names Geist Mono first
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("StyleTag() must self-host designed fonts: missing %q", want)
+		}
+	}
+	// Exactly two embedded faces (Figtree + Geist Mono), no accidental extras.
+	if n := strings.Count(got, "@font-face"); n != 2 {
+		t.Errorf("StyleTag() should embed exactly 2 @font-face faces, found %d", n)
+	}
+}
+
 func TestStyleTagContainsAppShellStyles(t *testing.T) {
 	got := string(StyleTag())
 	// One selector per app.css family (issue #150): shell, sidebar, page,

@@ -12,9 +12,10 @@ import "html/template"
 // means "a human is needed" and NOTHING else. Never use it decoratively.
 //
 // Delivery is inline-only per docs/dashboard/ux-spec.md: the styles are
-// emitted into each page's <head>; no external CSS files or fonts are loaded
-// (font stacks fall back to system fonts when Figtree/IBM Plex Mono are not
-// installed locally).
+// emitted into each page's <head>; no external CSS files or fonts are fetched.
+// The designed faces are self-hosted as inline base64 @font-face data-URIs (see
+// fonts.go), so Figtree (sans) and Geist Mono (mono) render on every machine
+// rather than falling back to system fonts.
 
 // designTokensCSS is kaimi/tokens.css from the handoff, verbatim: brand ramps,
 // the status vocabulary, fit bands, urgency escalation, semantic surfaces for
@@ -680,6 +681,8 @@ body{ background: var(--app-bg); color: var(--ink); }
 // classes — as a single inline <style> element for a page's <head>. This is
 // the one place visual values are defined; see the file comment for the rules.
 func StyleTag() template.HTML {
-	// #nosec G203 -- constant stylesheets, no user input.
-	return template.HTML("<style>" + designTokensCSS + componentStylesCSS + appStylesCSS + "</style>")
+	// #nosec G203 -- constant stylesheets plus base64-embedded fonts, no user input.
+	// fontFaceCSS is emitted first so the @font-face declarations exist before any
+	// rule references --font-sans / --font-mono.
+	return template.HTML("<style>" + fontFaceCSS + designTokensCSS + componentStylesCSS + appStylesCSS + "</style>")
 }

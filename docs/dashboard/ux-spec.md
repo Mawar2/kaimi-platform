@@ -288,7 +288,7 @@ The `<meta http-equiv="refresh" content="30">` tag is omitted on the 404 error p
 - "A human is needed" amber `#E8870E` on `#FFF3E0` — used ONLY for Awaiting Human Review
 - Bid / done green `#15A06B`; No-Bid rose `#C2354A`; failed / critical deadline red `#DC2626`
 - Backgrounds are navy-tinted neutrals (`#FBFCFE` page, `#FAFCFF` panels); borders `rgba(16,30,60,0.12)`
-- Fonts stay on the system stack (no external fonts, per Technology Constraints); the brand's Figtree/IBM Plex Mono pairing applies to surfaces that may ship external assets in later phases
+- Fonts are **self-hosted** so the designed faces render on every machine and the deployed app, not just where they happen to be installed. `StyleTag()` embeds Figtree (sans) and Geist Mono (mono) as inline base64 `@font-face` data-URIs (`internal/dashboard/fonts.go`); this is self-hosting, not an external fetch, so it still honors the no-external-assets constraint (no Google Fonts, no network request). Both are SIL OFL variable fonts (`internal/dashboard/fonts/`), chosen as the variable build because the type tokens use non-standard weights (420/430/550/650) that static cuts cannot supply. The token order (`--font-mono: "Geist Mono", "IBM Plex Mono", …`) makes **Geist Mono** the design-system primary; the older handoff screenshots show IBM Plex Mono because the comps only ever loaded that fallback, so mono text now matches the token intent rather than those PNGs.
 
 ---
 
@@ -354,5 +354,5 @@ type DetailData struct {
 - Write operations via the dashboard (no "Select to pursue" button, no status changes — the handoff drawer's CTA is out of scope)
 - Authentication or session management
 - WebSocket live-push (meta-refresh is sufficient for Wave 3)
-- External CSS files, icon libraries, or fonts (the handoff stylesheets are embedded verbatim, never fetched)
+- External CSS files, icon libraries, or *fetched* fonts (the handoff stylesheets are embedded verbatim; the Figtree/Geist Mono faces are embedded as inline base64 `@font-face`, never fetched over the network — see Brand color mapping above)
 - Mobile-responsive layout as dedicated work — **superseded**: the embedded `app.css` ships a built-in 860px single-column collapse (sidebar becomes a horizontal bar), which we get for free; no responsive work beyond that is in scope
