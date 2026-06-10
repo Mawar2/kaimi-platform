@@ -16,34 +16,53 @@ import (
 
 // --- mocks ---
 
+type mockIngest struct {
+	docs   []opportunity.SolicitationDoc
+	texts  map[string]string
+	res    *agent.Result
+	err    error
+	called bool
+}
+
+func (m *mockIngest) Ingest(_ context.Context, _ *opportunity.Opportunity) ([]opportunity.SolicitationDoc, map[string]string, *agent.Result, error) {
+	m.called = true
+	return m.docs, m.texts, m.res, m.err
+}
+
 type mockOutline struct {
-	res *agent.Result
-	err error
+	res    *agent.Result
+	err    error
+	called bool
 }
 
 func (m *mockOutline) Run(_ context.Context, _ *opportunity.Opportunity) (*outline.Outline, *agent.Result, error) {
+	m.called = true
 	return &outline.Outline{OpportunityID: "opp-1", Sections: []outline.Section{{ID: "s1", Title: "Approach"}}}, m.res, m.err
 }
 
 type mockWriter struct {
-	res    *agent.Result
-	err    error
-	called bool
+	res      *agent.Result
+	err      error
+	called   bool
+	gotInput writer.Input
 }
 
-func (m *mockWriter) Run(_ context.Context, _ writer.Input) (string, *agent.Result, error) {
+func (m *mockWriter) Run(_ context.Context, in writer.Input) (string, *agent.Result, error) {
 	m.called = true
+	m.gotInput = in
 	return "draft text", m.res, m.err
 }
 
 type mockReview struct {
-	res    *agent.Result
-	err    error
-	called bool
+	res      *agent.Result
+	err      error
+	called   bool
+	gotInput finalreview.Input
 }
 
-func (m *mockReview) Review(_ context.Context, _ finalreview.Input) (*agent.Result, error) {
+func (m *mockReview) Review(_ context.Context, in finalreview.Input) (*agent.Result, error) {
 	m.called = true
+	m.gotInput = in
 	return m.res, m.err
 }
 
@@ -217,6 +236,131 @@ func TestRun_UnexpectedStatus_Halts(t *testing.T) {
 	}
 	if out.Status != agent.StatusFailed {
 		t.Errorf("Status = %s, want failed", out.Status)
+	}
+}
+
+// --- ingestion (step 0) tests ---
+
+func ingestDocs() []opportunity.SolicitationDoc {
+	return []opportunity.SolicitationDoc{{
+		Filename:   "rfp.pdf",
+		RawObject:  "gs://b/opp-1/raw/rfp.pdf",
+		TextObject: "gs://b/opp-1/text/rfp.pdf.txt",
+	}}
+}
+
+func TestRun_WithIngestor_ThreadsDocumentTextDownstream(t *testing.T) {
+	st := newStore(t)
+	ing := &mockIngest{
+		docs:  ingestDocs(),
+		texts: map[string]string{"rfp.pdf": "Section L instructions"},
+		res:   ok("ingest"),
+	}
+	w := &mockWriter{res: ok("writer")}
+	rev := &mockReview{res: ready()}
+	m := New(&mockOutline{res: ok("outline")}, w, rev, st).WithIngestor(ing)
+
+	opp := testOpp()
+	out, err := m.Run(context.Background(), opp, testProfile())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ing.called {
+		t.Fatal("ingestor was not called")
+	}
+	if out.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %s, want ready_to_submit", out.Status)
+	}
+	// Ingest adds a fourth stage to the trail.
+	if len(out.Results) != 4 {
+		t.Errorf("Results len = %d, want 4 (ingest+outline+writer+review)", len(out.Results))
+	}
+	// Documents are attached to the Opportunity and surfaced on the Outcome.
+	if len(opp.Documents) != 1 || len(out.Documents) != 1 {
+		t.Errorf("documents not attached: opp=%d out=%d, want 1/1", len(opp.Documents), len(out.Documents))
+	}
+	// The extracted text is threaded to both downstream agents.
+	if got := w.gotInput.Documents["rfp.pdf"]; got != "Section L instructions" {
+		t.Errorf("writer did not receive document text: %q", got)
+	}
+	if got := rev.gotInput.Documents["rfp.pdf"]; got != "Section L instructions" {
+		t.Errorf("final review did not receive document text: %q", got)
+	}
+}
+
+func TestRun_IngestNeedsHuman_HaltsBeforeOutline(t *testing.T) {
+	st := newStore(t)
+	ing := &mockIngest{
+		docs: ingestDocs(),
+		res:  &agent.Result{AgentName: "ingest", Status: agent.StatusNeedsHuman},
+	}
+	o := &mockOutline{res: ok("outline")}
+	m := New(o, &mockWriter{res: ok("writer")}, &mockReview{res: ready()}, st).WithIngestor(ing)
+
+	opp := testOpp()
+	out, err := m.Run(context.Background(), opp, testProfile())
+	if err != nil {
+		t.Fatalf("needs_human is a clean halt, not a Go error: %v", err)
+	}
+	if out.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %s, want needs_human", out.Status)
+	}
+	if out.Stage != stageIngest {
+		t.Errorf("Stage = %s, want ingest", out.Stage)
+	}
+	if o.called {
+		t.Error("Outline must not run after ingestion needs a human")
+	}
+	// Documents fetched so far are still attached for the human to review.
+	if len(opp.Documents) != 1 {
+		t.Errorf("documents should be attached even on halt: got %d", len(opp.Documents))
+	}
+	saved, err := st.Get(context.Background(), opp.ID)
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if saved.ProposalStatus != "ingest:needs_human" {
+		t.Errorf("persisted ProposalStatus = %q, want ingest:needs_human", saved.ProposalStatus)
+	}
+}
+
+func TestRun_IngestFailed_Halts(t *testing.T) {
+	st := newStore(t)
+	ing := &mockIngest{res: failedRes("ingest")}
+	o := &mockOutline{res: ok("outline")}
+	m := New(o, &mockWriter{res: ok("writer")}, &mockReview{res: ready()}, st).WithIngestor(ing)
+
+	out, err := m.Run(context.Background(), testOpp(), testProfile())
+	if err != nil {
+		t.Fatalf("a failed Result should halt without a Go error: %v", err)
+	}
+	if out.Status != agent.StatusFailed || out.Stage != stageIngest {
+		t.Errorf("got %s/%s, want failed/ingest", out.Status, out.Stage)
+	}
+	if o.called {
+		t.Error("Outline must not run after ingestion fails")
+	}
+}
+
+func TestRun_NoIngestor_SkipsStep0(t *testing.T) {
+	st := newStore(t)
+	w := &mockWriter{res: ok("writer")}
+	m := New(&mockOutline{res: ok("outline")}, w, &mockReview{res: ready()}, st)
+
+	opp := testOpp()
+	out, err := m.Run(context.Background(), opp, testProfile())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Without an ingestor the chain is the original three stages.
+	if len(out.Results) != 3 {
+		t.Errorf("Results len = %d, want 3 (no ingest stage)", len(out.Results))
+	}
+	if len(out.Documents) != 0 {
+		t.Errorf("expected no documents without an ingestor, got %d", len(out.Documents))
+	}
+	if w.gotInput.Documents != nil {
+		t.Errorf("writer should receive nil Documents without an ingestor, got %v", w.gotInput.Documents)
 	}
 }
 

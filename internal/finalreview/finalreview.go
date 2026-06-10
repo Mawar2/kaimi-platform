@@ -35,6 +35,12 @@ type Input struct {
 	// When nil, the required_section, required_form, and page_limit checks
 	// are skipped — only deadline and must_have checks run.
 	Outline *outline.Outline
+
+	// Documents maps a solicitation document filename to its extracted text
+	// (populated by the Manager's ingest stage). It is threaded through now so the
+	// LLM compliance pass (#164) can vet the draft against the full solicitation;
+	// the current deterministic checks do not use it.
+	Documents map[string]string
 }
 
 // Agent is the Final Review agent.

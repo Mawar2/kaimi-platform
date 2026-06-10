@@ -1,10 +1,17 @@
 // Package manager implements the Zone 2 per-proposal orchestrator (KAI-M5).
 //
 // Given one eligible, scored Opportunity, the Manager threads it through the Zone 2
-// chain in order — Outline -> Writer -> Final Review — recording each stage's
-// agent.Result and persisting progress to the Store. It halts and surfaces clearly
-// on any stage that fails or needs a human, and it never auto-submits: the best
-// terminal state is ready_to_submit, awaiting a human.
+// chain in order — (Ingest) -> Outline -> Writer -> Final Review — recording each
+// stage's agent.Result and persisting progress to the Store. It halts and surfaces
+// clearly on any stage that fails or needs a human, and it never auto-submits: the
+// best terminal state is ready_to_submit, awaiting a human.
+//
+// Ingestion is an optional step 0, enabled via WithIngestor: it fetches the
+// solicitation attachments, attaches the resulting SolicitationDocs to the
+// Opportunity, and threads their extracted text to the Writer and Final Review so
+// those stages ground on the real documents rather than the SAM.gov summary alone.
+// A failed or needs_human ingest halts the chain — the Manager does not draft
+// against documents it could not read.
 //
 // Persistence note: the Store is Opportunity-centric (Save(*Opportunity)), so each
 // stage's outcome is persisted by updating Opportunity.ProposalStatus and saving —
@@ -20,6 +27,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
+	"github.com/Mawar2/Kaimi/internal/ingest"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/scorer"
@@ -29,10 +37,18 @@ import (
 
 // Stage names, also used as the ProposalStatus prefix persisted to the Store.
 const (
+	stageIngest  = "ingest"
 	stageOutline = "outline"
 	stageWriter  = "writer"
 	stageReview  = "final-review"
 )
+
+// Ingestor fetches an opportunity's solicitation attachments, stores them, and
+// returns the resulting SolicitationDocs together with a filename -> extracted
+// text map for downstream grounding. The concrete *ingest.Agent satisfies this.
+type Ingestor interface {
+	Ingest(ctx context.Context, opp *opportunity.Opportunity) ([]opportunity.SolicitationDoc, map[string]string, *agent.Result, error)
+}
 
 // OutlineRunner produces an outline and a Result for an opportunity.
 // The concrete *outline.Agent satisfies this.
@@ -55,6 +71,7 @@ type Reviewer interface {
 // Compile-time checks that the real Zone 2 agents satisfy the Manager's interfaces,
 // so the Manager can be wired with the production agents.
 var (
+	_ Ingestor      = (*ingest.Agent)(nil)
 	_ OutlineRunner = (*outline.Agent)(nil)
 	_ WriterRunner  = (*writer.Agent)(nil)
 	_ Reviewer      = (*finalreview.Agent)(nil)
@@ -62,15 +79,26 @@ var (
 
 // Manager threads one Opportunity through the Zone 2 chain.
 type Manager struct {
+	ingest  Ingestor // optional step 0; when nil, ingestion is skipped
 	outline OutlineRunner
 	writer  WriterRunner
 	review  Reviewer
 	store   store.Store
 }
 
-// New constructs a Manager from the three Zone 2 agents and a Store.
+// New constructs a Manager from the three Zone 2 agents and a Store. Document
+// ingestion (step 0) is opt-in via WithIngestor.
 func New(o OutlineRunner, w WriterRunner, r Reviewer, s store.Store) *Manager {
 	return &Manager{outline: o, writer: w, review: r, store: s}
+}
+
+// WithIngestor configures the Manager to run document ingestion as step 0 before
+// Outline: the ingestor's SolicitationDocs are attached to the Opportunity and
+// its extracted text is threaded to the Writer and Final Review. Returns the
+// Manager for chaining.
+func (m *Manager) WithIngestor(i Ingestor) *Manager {
+	m.ingest = i
+	return m
 }
 
 // Outcome is the result of running the Zone 2 chain for one opportunity.
@@ -82,6 +110,9 @@ type Outcome struct {
 	Stage string
 	// Results is the ordered per-stage agent.Result trail.
 	Results []*agent.Result
+	// Documents are the ingested solicitation documents (nil if ingestion is not
+	// configured or the chain halts before it completes).
+	Documents []opportunity.SolicitationDoc
 	// Outline and Draft are intermediate artifacts (empty if the chain halts early).
 	Outline *outline.Outline
 	Draft   string
@@ -106,6 +137,25 @@ func (m *Manager) Run(ctx context.Context, opp *opportunity.Opportunity, profile
 
 	out := &Outcome{}
 
+	// docText carries the filename -> extracted text produced by ingestion so the
+	// Writer and Final Review can ground on the real solicitation documents. It
+	// stays nil when ingestion is not configured; agents treat that as "no docs".
+	var docText map[string]string
+
+	// Stage 0: Ingest (optional). Fetch, store, and extract the solicitation
+	// attachments, attach them to the Opportunity, and capture their text. A
+	// failed or needs_human ingest halts the chain — we do not draft against
+	// documents we could not read.
+	if m.ingest != nil {
+		docs, texts, res, err := m.ingest.Ingest(ctx, opp)
+		opp.Documents = docs
+		out.Documents = docs
+		docText = texts
+		if stop, e := m.after(ctx, out, stageIngest, res, err, opp); stop {
+			return out, e
+		}
+	}
+
 	// Stage 1: Outline. Capture the artifact before evaluating the halt so a human
 	// reviewing a halted run still sees whatever was produced.
 	ol, res, err := m.outline.Run(ctx, opp)
@@ -115,7 +165,7 @@ func (m *Manager) Run(ctx context.Context, opp *opportunity.Opportunity, profile
 	}
 
 	// Stage 2: Writer.
-	draft, res, err := m.writer.Run(ctx, writer.Input{Opportunity: opp, Outline: ol, Profile: profile})
+	draft, res, err := m.writer.Run(ctx, writer.Input{Opportunity: opp, Outline: ol, Profile: profile, Documents: docText})
 	out.Draft = draft
 	if stop, e := m.after(ctx, out, stageWriter, res, err, opp); stop {
 		return out, e
@@ -123,7 +173,7 @@ func (m *Manager) Run(ctx context.Context, opp *opportunity.Opportunity, profile
 
 	// Stage 3: Final Review (terminal). A clean review returns ready_to_submit; the
 	// Manager surfaces that and stops — submission is always a human action.
-	res, err = m.review.Review(ctx, finalreview.Input{Draft: draft, Opportunity: opp})
+	res, err = m.review.Review(ctx, finalreview.Input{Draft: draft, Opportunity: opp, Documents: docText})
 	if stop, e := m.after(ctx, out, stageReview, res, err, opp); stop {
 		return out, e
 	}

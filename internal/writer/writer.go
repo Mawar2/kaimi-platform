@@ -17,6 +17,7 @@ package writer
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,10 @@ type Input struct {
 	// Profile supplies BlueMeta's real facts (past performance, competencies) used
 	// to ground the draft. Required in generation mode; ignored in stub mode.
 	Profile *scorer.CapabilityProfile
+	// Documents maps a solicitation document filename to its extracted text
+	// (populated by the Manager's ingest stage). When present it is additional
+	// grounded source material the model may use; it is never required.
+	Documents map[string]string
 }
 
 // Agent transforms an outline into a proposal draft. A nil generator selects
@@ -122,7 +127,7 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 			return "", failed(in.Opportunity.ID, "draft generation cancelled", err.Error()), err
 		}
 
-		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules)
+		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules, in.Documents)
 		text, err := a.gen.GenerateSection(ctx, systemInstruction, prompt)
 		if err != nil {
 			return "", failed(
@@ -152,9 +157,10 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 }
 
 // buildSectionPrompt builds the grounded user prompt for one section. It includes
-// only the facts present in the Opportunity and Capability Profile; the
-// anti-fabrication rules are delivered separately via systemInstruction.
-func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules) string {
+// only the facts present in the Opportunity, the Capability Profile, and the
+// ingested solicitation documents; the anti-fabrication rules are delivered
+// separately via systemInstruction.
+func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules, documents map[string]string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Section to draft\n")
@@ -175,6 +181,8 @@ func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.Capability
 		fmt.Fprintf(&sb, "Stated requirements: %s\n", strings.Join(opp.Requirements, "; "))
 	}
 	sb.WriteString("\n")
+
+	writeSolicitationDocuments(&sb, documents)
 
 	sb.WriteString("## Company facts (the only company facts you may use)\n")
 	fmt.Fprintf(&sb, "Competencies: %s\n", joinOrNone(profile.CompetencyTags))
@@ -197,6 +205,30 @@ func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.Capability
 	}
 
 	return sb.String()
+}
+
+// writeSolicitationDocuments appends the ingested solicitation document text to
+// the prompt, in a stable filename order so prompts are deterministic. When no
+// documents were ingested it writes nothing, so the prompt never implies source
+// material that is not present.
+func writeSolicitationDocuments(sb *strings.Builder, documents map[string]string) {
+	if len(documents) == 0 {
+		return
+	}
+	names := make([]string, 0, len(documents))
+	for name := range documents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	sb.WriteString("## Solicitation documents (extracted text — additional grounded source material)\n")
+	for _, name := range names {
+		text := strings.TrimSpace(documents[name])
+		if text == "" {
+			continue
+		}
+		fmt.Fprintf(sb, "### %s\n%s\n\n", name, text)
+	}
 }
 
 // joinOrNone joins items with ", " or returns "(none provided)" when empty, so the

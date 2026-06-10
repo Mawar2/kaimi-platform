@@ -109,6 +109,42 @@ func TestRun_WithGenerator_PromptIsGroundedAndAntiFabrication(t *testing.T) {
 	}
 }
 
+func TestRun_WithGenerator_GroundsOnSolicitationDocuments(t *testing.T) {
+	gen := &mockGenerator{out: "ok"}
+	a := NewWithGenerator(gen)
+	in := groundedInput()
+	in.Documents = map[string]string{
+		"RFP_Section_L.pdf": "Offerors shall submit a 10-page technical volume.",
+	}
+
+	if _, _, err := a.Run(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gen.prompts) == 0 {
+		t.Fatal("generator was never called")
+	}
+	p := gen.prompts[0]
+	if !strings.Contains(p, "RFP_Section_L.pdf") {
+		t.Error("prompt does not reference the solicitation document filename")
+	}
+	if !strings.Contains(p, "Offerors shall submit a 10-page technical volume.") {
+		t.Error("prompt does not include the extracted solicitation document text")
+	}
+}
+
+func TestRun_WithGenerator_NoDocuments_OmitsDocumentSection(t *testing.T) {
+	gen := &mockGenerator{out: "ok"}
+	a := NewWithGenerator(gen)
+	in := groundedInput() // no Documents set
+
+	if _, _, err := a.Run(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(gen.prompts[0], "Solicitation documents") {
+		t.Error("prompt should not include a documents section when none were ingested")
+	}
+}
+
 func TestRun_WithGenerator_WhitespaceSection_Failed(t *testing.T) {
 	gen := &mockGenerator{out: "   \n\t  "} // model returns only whitespace
 	a := NewWithGenerator(gen)
