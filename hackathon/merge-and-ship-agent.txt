@@ -1,0 +1,160 @@
+================================================================================
+KAIMI — MERGE & SHIP AGENT BRIEF  ("past the draft/stub phase")
+(Paste the "/loop PROMPT" section below into a new Claude Code agent.)
+Last updated: 2026-06-10  •  Owner: Malik (malik@bluemetatech.com)
+================================================================================
+
+THE GOAL (one sentence)
+-----------------------
+Land every open pull request and remove every stub/mock so Kaimi runs END TO END
+on LIVE agents with REAL data — no "[Stub draft …]", no mock content, no demo
+shortcuts — then PROVE it on both the web dashboard and the desktop app.
+
+WHY NOW
+-------
+The product is built but scattered across ~18 open PRs and still defaults to stub
+agents. Example the owner hit in-app:
+    "[Stub draft for Executive Summary -- real generation lands in KAI-9]"
+That's the Writer's STUB mode (internal/writer/writer.go:111), used whenever the
+app runs without live Gemini. Shipping a real product means: merge the work,
+default to live agents, delete the stubs, and verify the whole flow on real data.
+
+
+THE PR BACKLOG (snapshot 2026-06-10 — re-run `gh pr list` every iteration; it changes)
+--------------------------------------------------------------------------------------
+Merge in dependency / oldest-first order, each rebased on the LATEST main, CI +
+AI-review GREEN before merge.
+
+  PRIORITY — unblocks everything live:
+    #209  192_fix_thinking_token_starvation — gives Scorer/Writer/Final-Review
+          thinking-token headroom. LAND THIS FIRST: it's why live agents truncate.
+
+  Live-integration (infra / config / data — base main):
+    #185 GCS solicitations bucket+IAM · #193 demo-seed (real opportunity) ·
+    #196 BlueMeta scorer profile default · #186 live findings · #200 design brief
+
+  Design — web Kaimi App.html (build-loop):
+    #205 detail tokens · #206 detail re-hardcode · #207 proposals cards ·
+    #210 workspace surface tokens · #211 workspace surface · #213 self-cleaning
+    queue + new-tab sol link · #214 component-state coverage · #215 component pass ·
+    #216 design-handoff bundle · #217 Submitted archive (STACKED ON #213) ·
+    #219 agent gradient CSS fix
+
+  Desktop (Wails): #144 ADR-001 stack · #152 desktop design build
+  Docs/chore:      #146 lift phase-0 + model name · #178 hackathon deliverables
+
+  NOTE the stack: #217 is stacked on #213 — merge #213 FIRST. (More stacks may
+  exist; check each PR's base branch.)
+
+
+MERGE DISCIPLINE (hard — do NOT cut corners)
+--------------------------------------------
+- Use the `pr-merge-train` skill. For EACH PR: `gh pr update-branch` (rebase on
+  current main) → re-watch CI → confirm CI + the AI code-review job are GREEN →
+  merge → close the linked issue. NEVER merge a PR with red CI, an unresolved
+  AI-review CRITICAL, or one you cannot verify.
+- Per-PR-green ≠ mergeable-together: two PRs each green on a stale base can break
+  main when combined. Re-rebase + re-check CI before every single merge.
+- Stacked-PR hazards (the team has been bitten by these):
+    * merging a base PR with `--delete-branch` CLOSES its stacked child
+      un-reopenably and GitHub does NOT retarget — so `gh pr edit <child> --base main`
+      BEFORE merging the base, or merge the base WITHOUT `--delete-branch`.
+    * for a squash-merged stack, rebase the child `--onto <new main tip>` in a
+      worktree, then push.
+    * the `ai-code-review` job only triggers when base == main.
+- HUMAN-MERGE RULE: CLAUDE.md says agents don't merge unilaterally. You are
+  operating this merge-train under Malik's explicit, standing direction for THIS
+  ship effort — but the gate still binds: green CI + AI-review only, and anything
+  ambiguous, conflicting, or red gets surfaced to Malik, never forced.
+
+
+ELIMINATE THE STUBS (the actual "ship a real product" work)
+-----------------------------------------------------------
+After #209 lands (clean live generation), make the product run LIVE BY DEFAULT and
+delete stub/mock reliance from the live path:
+- WRITER stub: internal/writer/writer.go:111 ("[Stub draft … lands in KAI-9]").
+  The run/deploy path must use the real Gemini Writer — default the dashboard to
+  live agents, or land KAI-9 to remove stub reliance in production wiring.
+  (internal/writer is shared agent logic — change it via a clean ticket, TDD.)
+- DEFAULT TO LIVE: cmd/dashboard currently needs -live-writer/-live-review/
+  -live-ingest. The shipped product should run all three live by default (env:
+  GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET=kaimi-seeker-solicitations,
+  DOCUMENTAI_PROCESSOR_ID=93d4245d53e97106, DOCUMENTAI_LOCATION=us). Desktop too.
+- DESKTOP MOCK DATA: cmd/desktop/frontend/src/data.js + editor.jsx carry hardcoded
+  mock content (e.g. "$1.8M ICAM modernization …"). Replace with real store-backed
+  data so the desktop shows the actual proposal, not a fixture.
+- HUNT THE REST: `grep -rniE "\bstub\b|\bmock\b|TODO\(phase|lands in KAI|placeholder"
+  internal/ cmd/` (skip _test.go and the deliberately-offline DeterministicScorer/
+  stub agents used only by tests). Replace anything on the live product path with
+  real data; ticket what needs a backend; leave honest `// TODO(phase-N)` ONLY
+  where the phase plan genuinely defers it.
+
+
+VERIFY END TO END (live, real data, ZERO stub text)
+---------------------------------------------------
+On the seeded REAL opportunity (Selective Service Website Modernization, notice
+e89891bf686b4a95a8df4befcd6d296e), prove the whole flow with live agents:
+  seed/SAM → scored (live Gemini) → Select → Outline → Writer (a REAL draft, NOT
+  "[Stub draft]") → ingest + Document-AI OCR → human gate → Final Review (live
+  compliance verdict) → Submit → appears in the Submitted archive.
+- WEB: `cmd/dashboard --live-writer --live-review --live-ingest` (env above), drive
+  it in a real browser (gstack-browse), assert NO "[Stub draft", no mock strings.
+- DESKTOP: build + run the KaimiDesktop app against the same store; confirm the
+  real proposal + working "View solicitation" + real draft (no mock data).
+- ASSERT: grep the served pages and the store for "[Stub draft", "lands in KAI",
+  and the known mock strings — must be ZERO.
+
+
+CREDENTIALS / ENV (Malik provides; same as the live-integration agent used)
+---------------------------------------------------------------------------
+- gh auth (merging). GCP ADC: `gcloud auth application-default login` (project
+  kaimi-seeker). NOTE the two-identity gotcha: gcloud CLI = malik@bluemetatech.com
+  (owner) but ADC may be malikpwarren@gmail.com (limited) — grant that identity any
+  missing role via the owner CLI. Live env vars listed above. SAM quota is small —
+  use the seeded opportunity; only pull live SAM after 00:00 UTC if you need fresh data.
+- Context to read first: hackathon/LIVE_INTEGRATION_FINDINGS.md (what's verified +
+  the F2/ingest/Request-Changes findings), design-handoff/Kaimi-handoff/PIPELINE.md
+  + INTENT.md (the product contract), CLAUDE.md / WORKFLOW.md (the discipline).
+
+
+================================================================================
+/loop PROMPT  — paste this verbatim into the agent (run as: /loop <paste>)
+================================================================================
+/loop Ship Kaimi as a real, working end-to-end product: land every open PR and
+delete every stub/mock so the whole flow runs on LIVE agents with REAL data — no
+"[Stub draft …]", no mock content — then prove it on the web dashboard AND the
+desktop app. Self-pace the iterations. FIRST read hackathon/merge-and-ship-agent.txt
+in full and obey its merge discipline absolutely.
+
+Each iteration, `git fetch` + `gh pr list --repo Mawar2/Kaimi --state open`, then do
+the next highest-value step and VERIFY it (don't just claim it):
+1) MERGE the next ready PR — START with #209 (thinking-token fix; unblocks clean
+   live generation). For each PR: rebase on the latest main (`gh pr update-branch`),
+   re-watch CI, confirm CI + the AI-code-review job are GREEN, then merge and close
+   the linked issue. Use the pr-merge-train skill. Respect stacks (merge #213 before
+   its child #217; never `--delete-branch` a base before retargeting children).
+   NEVER merge red CI, an unresolved AI-review critical, or anything you can't
+   verify — surface those to Malik instead.
+2) Once #209 is in, KILL THE STUBS on the live path: make the product run all agents
+   live by DEFAULT (dashboard + desktop: live writer/review/ingest, env
+   GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET=kaimi-seeker-solicitations,
+   DOCUMENTAI_PROCESSOR_ID=93d4245d53e97106, DOCUMENTAI_LOCATION=us). Eliminate the
+   Writer stub (internal/writer/writer.go:111 "lands in KAI-9") and the desktop mock
+   data (cmd/desktop/frontend/src/data.js, editor.jsx) on a clean ticket with TDD.
+   `grep -rniE "\bstub\b|\bmock\b|TODO\(phase|lands in KAI|placeholder" internal/ cmd/`
+   and replace anything on the live path with real store-backed data.
+3) VERIFY END TO END on the seeded real Selective Service opportunity
+   (e89891bf686b4a95a8df4befcd6d296e): seed/score (live) → Select → Outline → Writer
+   (REAL draft, not a stub) → ingest+OCR → human gate → live Final Review → Submit →
+   Submitted archive. Run the WEB app live in a real browser (gstack-browse) and the
+   DESKTOP app in its window; assert ZERO "[Stub draft", "lands in KAI", or mock
+   strings in the served pages and the store.
+
+CONSTRAINTS: follow CLAUDE.md / WORKFLOW.md — green CI + AI-review before any merge,
+TDD for any code you change, never merge red or unverifiable PRs, and surface
+conflicts to Malik. Work from the latest origin/main each iteration. STOP when every
+open PR is merged (or explicitly deferred with a reason for Malik), `make all` is
+green on main, grep shows zero stub/mock/placeholder on the live product path, and
+the full live end-to-end passes on BOTH web and desktop with real data and zero stub
+text. End each iteration with ONE line: what landed / what's next.
+================================================================================
