@@ -141,6 +141,20 @@ func (svc *Service) Get(ctx context.Context, id string) (*opportunity.Opportunit
 	return opp, nil
 }
 
+// CountStages returns the count of opportunities per derived Stage for all stored
+// opportunities. Used by the list handler to build stage summary cards.
+func (svc *Service) CountStages(ctx context.Context) (map[Stage]int, error) {
+	ptrs, err := svc.store.List(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard count stages: %w", err)
+	}
+	vals := make([]opportunity.Opportunity, len(ptrs))
+	for i, p := range ptrs {
+		vals[i] = *p
+	}
+	return CountByStage(vals), nil
+}
+
 // toRow converts an Opportunity and its derived Stage to an OpportunityRow.
 func toRow(opp *opportunity.Opportunity, stage Stage, now time.Time) OpportunityRow {
 	return OpportunityRow{

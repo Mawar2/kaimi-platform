@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"math"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/proposal"
+	"github.com/Mawar2/Kaimi/internal/store"
 )
 
 // Handler wraps the dashboard service and manages HTTP routing. Pages render
@@ -603,9 +605,11 @@ func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 
 	opp, err := h.svc.Get(r.Context(), id)
 	if err != nil {
-		// The store returns an error for any missing id; with the id shape
-		// already validated, render not-found rather than leaking internals.
-		h.renderNotFound(w, id)
+		if errors.Is(err, store.ErrNotFound) {
+			h.renderNotFound(w, id)
+			return
+		}
+		http.Error(w, "failed to load opportunity", http.StatusInternalServerError)
 		return
 	}
 
