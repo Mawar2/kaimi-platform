@@ -9,7 +9,6 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
-	"github.com/Mawar2/Kaimi/internal/manager"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/scorer"
@@ -18,8 +17,8 @@ import (
 )
 
 // ProposalStatus values this service writes to Opportunity.ProposalStatus,
-// extending the Manager's "{stage}:{status}" vocabulary with in-progress
-// markers, the human gate, and the terminal human-submitted state.
+// using a "{stage}:{status}" vocabulary with in-progress markers, the human
+// gate, and the terminal human-submitted state.
 const (
 	// StatusOutlineRunning means Noa is building the document skeleton.
 	StatusOutlineRunning = "outline:in_progress"
@@ -43,23 +42,22 @@ const (
 // stageTimeout bounds each background agent stage.
 const stageTimeout = 10 * time.Minute
 
-// Deps wires the service. The agent fields take the SAME interfaces the
-// Manager defines, so the real agents (and their stubs/mocks) drop in
-// unchanged — this service deliberately does not modify internal/manager,
-// internal/writer, internal/outline, or internal/finalreview.
+// Deps wires the service. The agent fields take the Zone 2 agent interfaces
+// defined in agents.go, so the real agents (and their stubs/mocks) drop in
+// unchanged.
 type Deps struct {
 	Opportunities store.Store
 	Documents     *document.Store
-	Outline       manager.OutlineRunner
-	Writer        manager.WriterRunner
-	Review        manager.Reviewer
+	Outline       OutlineRunner
+	Writer        WriterRunner
+	Review        Reviewer
 	Profile       *scorer.CapabilityProfile
 	// Ingest is optional. When set, the draft pipeline ingests the solicitation
 	// attachments before outlining, attaches the resulting SolicitationDocs to the
 	// Opportunity, and threads the extracted text into the Writer and Final Review
 	// (so the live compliance pass has documents to vet against). When nil,
 	// ingestion is skipped and the pipeline behaves exactly as before.
-	Ingest manager.Ingestor
+	Ingest Ingestor
 }
 
 // Service drives the gated Zone 2 proposal lifecycle: Select starts the

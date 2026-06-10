@@ -1,6 +1,8 @@
 // Package e2e holds the Kaimi full-chain integration tests (KAI-10): proof that
-// Hunter (eligibility) -> Scorer -> Manager (Outline -> Writer -> Final Review)
-// works end to end, not just the parts.
+// Hunter (eligibility) -> Scorer -> the gated proposal service (Outline -> Writer
+// -> [human gate] -> Final Review) works end to end, not just the parts. The
+// Zone-2 layer drives proposal.Service — the single orchestrator the dashboard
+// also uses (issue #174 retired the parallel manager.Manager).
 //
 // Two layers:
 //   - Contract (every commit): mocked SAM.gov + the offline deterministic scorer +
@@ -26,14 +28,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mawar2/Kaimi/internal/agent"
+	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
-	"github.com/Mawar2/Kaimi/internal/manager"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/pipeline"
 	"github.com/Mawar2/Kaimi/internal/profile"
+	"github.com/Mawar2/Kaimi/internal/proposal"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/store"
@@ -141,29 +143,81 @@ func TestE2E_Contract_FullChain(t *testing.T) {
 		t.Error("ineligible opportunity bad8a should not be in the store")
 	}
 
-	// Zone 2: Manager threads a scored opportunity through Outline -> Writer -> Final Review.
-	m := manager.New(outline.New(stubDocsClient{}), writer.New(), finalreview.New(), st)
+	// Zone 2: the gated proposal service threads a scored opportunity through
+	// Outline -> Writer -> [human gate] -> Final Review. (Issue #174 retired the
+	// parallel manager.Manager; the dashboard and this test share this one path.)
+	svc := newZone2Service(t, st, outline.New(stubDocsClient{}), writer.New())
 
 	// Happy path: a future deadline yields a ready_to_submit proposal.
-	out, err := m.Run(ctx, good, scoringProfile())
-	if err != nil {
-		t.Fatalf("manager run (good) failed: %v", err)
+	status, draft := driveZone2(t, svc, st, good.ID)
+	if status != proposal.StatusReadyToSubmit {
+		t.Errorf("good: status = %q, want %q", status, proposal.StatusReadyToSubmit)
 	}
-	if out.Status != agent.StatusReadyToSubmit {
-		t.Errorf("good: status = %v, want ready_to_submit", out.Status)
-	}
-	if out.Draft == "" {
+	if draft == "" {
 		t.Error("good: expected a non-empty draft")
 	}
 
-	// A passed deadline fails Final Review and halts the chain there.
-	out2, _ := m.Run(ctx, stale, scoringProfile())
-	if out2.Status != agent.StatusFailed {
-		t.Errorf("stale: status = %v, want failed", out2.Status)
+	// A passed deadline fails Final Review at the Approve step.
+	staleStatus, _ := driveZone2(t, svc, st, stale.ID)
+	if staleStatus != "final-review:failed" {
+		t.Errorf("stale: status = %q, want final-review:failed", staleStatus)
 	}
-	if out2.Stage != "final-review" {
-		t.Errorf("stale: stage = %s, want final-review", out2.Stage)
+}
+
+// newZone2Service builds the gated proposal service for the e2e tests with a
+// fresh document store and the offline deterministic Final Review agent.
+func newZone2Service(t *testing.T, opps store.Store, ol proposal.OutlineRunner, w proposal.WriterRunner) *proposal.Service {
+	t.Helper()
+	docs, err := document.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("document store: %v", err)
 	}
+	return proposal.NewService(&proposal.Deps{
+		Opportunities: opps,
+		Documents:     docs,
+		Outline:       ol,
+		Writer:        w,
+		Review:        finalreview.New(),
+		Profile:       scoringProfile(),
+	})
+}
+
+// driveZone2 runs the gated lifecycle for one opportunity to a terminal state,
+// exactly as a human would: Select drafts to the gate, then Approve runs Final
+// Review. It returns the final ProposalStatus and the rendered draft (empty when
+// the draft pipeline halts before the gate).
+func driveZone2(t *testing.T, svc *proposal.Service, opps store.Store, oppID string) (status, draft string) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := svc.Select(ctx, oppID); err != nil {
+		t.Fatalf("select %s: %v", oppID, err)
+	}
+	svc.Wait()
+
+	opp, err := opps.Get(ctx, oppID)
+	if err != nil {
+		t.Fatalf("get %s after draft: %v", oppID, err)
+	}
+	// The draft pipeline either paused at the gate or failed before it.
+	if opp.ProposalStatus != proposal.StatusGate {
+		return opp.ProposalStatus, ""
+	}
+
+	if err := svc.Approve(ctx, oppID); err != nil {
+		t.Fatalf("approve %s: %v", oppID, err)
+	}
+	svc.Wait()
+
+	opp, err = opps.Get(ctx, oppID)
+	if err != nil {
+		t.Fatalf("get %s after review: %v", oppID, err)
+	}
+	doc, err := svc.Document(oppID)
+	if err != nil {
+		t.Fatalf("document %s: %v", oppID, err)
+	}
+	return opp.ProposalStatus, doc.Markdown()
 }
 
 // liveFetchCap bounds how many live opportunities one TestE2E_Live run feeds
@@ -319,35 +373,33 @@ func TestE2E_Live(t *testing.T) {
 		t.Fatalf("writer.NewGeminiGenerator: %v", err)
 	}
 
-	m := manager.New(outline.New(docsClient), writer.NewWithGenerator(gen), finalreview.New(), st)
+	svc := newZone2Service(t, st, outline.New(docsClient), writer.NewWithGenerator(gen))
 
-	out, runErr := m.Run(ctx, scored, scoringProfile())
-	if out == nil {
-		t.Fatalf("manager run returned no outcome: %v", runErr)
-	}
-	t.Logf("zone 2: stage=%s status=%s err=%v draftLen=%d", out.Stage, out.Status, runErr, len(out.Draft))
+	status, draft := driveZone2(t, svc, st, scored.ID)
+	t.Logf("zone 2: status=%s draftLen=%d", status, len(draft))
 
-	// Behavior, not strings: the chain must land on a terminal status. failed and
-	// needs_human are legitimate live outcomes (e.g. Final Review flags a passed
-	// deadline on a real solicitation), so they are reported, not failed.
-	switch out.Status {
-	case agent.StatusReadyToSubmit:
-		if strings.TrimSpace(out.Draft) == "" {
+	// Behavior, not strings: the lifecycle must land on a terminal status. A clean
+	// run reaches ready_to_submit; failed/needs_human are legitimate live outcomes
+	// (e.g. Final Review flags a passed deadline on a real solicitation), so they
+	// are reported, not failed.
+	switch status {
+	case proposal.StatusReadyToSubmit:
+		if strings.TrimSpace(draft) == "" {
 			t.Error("ready_to_submit outcome must include a non-empty draft")
 		}
-	case agent.StatusFailed, agent.StatusNeedsHuman:
-		t.Logf("chain halted at stage %q with status %q — a legitimate live outcome", out.Stage, out.Status)
+	case proposal.StatusReviewNeedsHuman, "final-review:failed", "writer:failed", "outline:failed":
+		t.Logf("chain halted at status %q — a legitimate live outcome", status)
 	default:
-		t.Errorf("manager status = %q, want a terminal status (ready_to_submit, failed, or needs_human)", out.Status)
+		t.Errorf("status = %q, want a terminal status (ready_to_submit, review/draft failure, or needs_human)", status)
 	}
 
-	// The Manager must have persisted progress: ProposalStatus records the last
-	// stage outcome on the stored Opportunity.
+	// Progress must be persisted: ProposalStatus records the last stage outcome on
+	// the stored Opportunity.
 	persisted, err := st.Get(ctx, scored.ID)
 	if err != nil {
 		t.Fatalf("get persisted opportunity %s from store: %v", scored.ID, err)
 	}
 	if persisted.ProposalStatus == "" {
-		t.Error("manager did not persist a ProposalStatus to the store")
+		t.Error("the proposal service did not persist a ProposalStatus to the store")
 	}
 }

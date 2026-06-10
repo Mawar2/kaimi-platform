@@ -19,7 +19,6 @@ import (
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/ingest"
-	"github.com/Mawar2/Kaimi/internal/manager"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/proposal"
 	"github.com/Mawar2/Kaimi/internal/scorer"
@@ -115,7 +114,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 
 	// Document ingestion is opt-in via -live-ingest. A true nil interface (not a
 	// typed-nil) is essential so proposal.Service's `Ingest == nil` check skips it.
-	var ingestor manager.Ingestor
+	var ingestor proposal.Ingestor
 	if liveIngest {
 		projectID := envOr("GCP_PROJECT_ID", "")
 		bucket := envOr("GCS_SOLICITATIONS_BUCKET", "")

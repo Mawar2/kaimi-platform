@@ -12,8 +12,21 @@
 //	RequestChanges→ the draft returns to the Writer with the human's note
 //	Submit        → always a human act; agents stand down
 //
-// The service composes the existing agents through the Manager's own
-// interfaces (OutlineRunner, WriterRunner, Reviewer) without modifying
-// them, persists ProposalStatus on every transition so polling UIs stay
-// truthful, and stores all artifacts through internal/document.
+// Select also runs the optional document-ingestion stage first (fetch, store,
+// and extract the solicitation attachments), threading their text into the
+// Outline, Writer, and Final Review stages so those agents ground on the real
+// documents rather than the SAM.gov summary alone.
+//
+// Single source of truth (issue #174): an earlier parallel orchestrator,
+// internal/manager.Manager, ran the same Outline → Writer → Final Review chain
+// straight through with no human gate and was only ever used by the e2e tests.
+// It was retired in favor of this gated service so the ingestion + document
+// threading logic lives in exactly one place and the dashboard and the e2e tests
+// exercise the same orchestration code path. The Zone 2 agent interfaces the
+// stages implement (Ingestor, OutlineRunner, WriterRunner, Reviewer) now live in
+// agents.go, alongside the orchestrator that consumes them.
+//
+// The service composes the existing agents through those interfaces, persists
+// ProposalStatus on every transition so polling UIs stay truthful, and stores
+// all artifacts through internal/document.
 package proposal
