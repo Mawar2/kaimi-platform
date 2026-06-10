@@ -1,14 +1,19 @@
 # GCP Setup Summary for Kaimi
 
-**Status:** Ready to execute ✅
-**Time to complete:** ~5 minutes
+**Last updated:** 2026-06-09
+**Status:** Environment provisioned; pipeline deployed and running ✅
+**Time to stand up a fresh environment:** ~5 minutes
 **Context:** Google Hackathon billing account
+
+> **Note:** The `kaimi-seeker` environment is already provisioned and the Zone-1
+> pipeline is deployed (see KAIMI_GCP_SETUP_COMPLETE.md). The setup script and steps
+> below remain valid for standing up a fresh environment from scratch.
 
 ---
 
-## What I've Created for You
+## What This Sets Up
 
-I've set up a complete, production-ready GCP environment configuration for the Kaimi project following the architecture's "lazy provisioning" principle. Here's what you now have:
+This is a complete, production-ready GCP environment configuration for the Kaimi project, following the architecture's "provision lazily, design eagerly" principle. Here's what it provides:
 
 ### 📁 Files Created
 
@@ -26,7 +31,7 @@ When you run the setup script, it will automatically:
 
 - ✅ Enable required GCP APIs (Vertex AI, Secret Manager, IAM, Cloud Build, Cloud KMS)
 - ✅ Create service account: `kaimi-dev@YOUR_PROJECT_ID.iam.gserviceaccount.com`
-- ✅ Grant minimal Phase 0 IAM permissions (Vertex AI, Secret Manager, Logging)
+- ✅ Grant least-privilege IAM permissions (Vertex AI, Secret Manager, Logging)
 - ✅ Generate service account key: `kaimi-sa-key.json` (local only, secured in .gitignore)
 - ✅ Create Secret Manager secret for SAM.gov API key
 - ✅ Generate `.env.gcp` environment configuration file
@@ -91,8 +96,8 @@ Since you're using a Google Hackathon billing account:
 
 ### Recommendations
 1. **Monitor usage** even with credits - hackathons often have fair use policies
-2. **Phase 0 is very low cost** - mostly setup, minimal API calls
-3. **Gemini API calls** will be the main cost driver once Hunter runs
+2. **Baseline infra is very low cost** - mostly provisioning, minimal idle cost
+3. **Gemini API calls** are the main cost driver as the scheduled pipeline scores opportunities
 4. **Set up budget alerts** anyway to track usage:
    ```bash
    gcloud billing budgets create \
@@ -103,16 +108,15 @@ Since you're using a Google Hackathon billing account:
 
 ### Expected Costs
 
-**Phase 0 (Current):**
+**Baseline infrastructure:**
 - Infrastructure: < $1/month
-- Gemini 2.5 Pro: Pay-per-use (minimal until Hunter agent runs frequently)
+- Gemini 2.5 Pro: Pay-per-use (driven by pipeline scoring volume)
 
-**Phase 1+ (Future):**
-- Firestore: Pay-per-read/write
-- Scheduled runs: Depends on Hunter frequency
-- Estimated: $10-50/month for active development
-
-For hackathon purposes, Phase 0 should cost essentially nothing.
+**Operational pipeline:**
+- Cloud Run Jobs: billed only while a scheduled run executes
+- Cloud Scheduler: ~$0.30/month (three triggers/day)
+- GCS queue bucket: negligible
+- Estimated: $10-50/month for active development, dominated by Gemini usage
 
 ---
 
@@ -153,13 +157,14 @@ All commands should succeed without errors.
 ### IAM Service Account
 **Name:** `kaimi-dev@YOUR_PROJECT_ID.iam.gserviceaccount.com`
 
-**Roles granted (minimal for Phase 0):**
+**Roles granted (least privilege):**
 - `roles/aiplatform.user` - Access Vertex AI and Gemini
 - `roles/secretmanager.admin` - Manage secrets
 - `roles/logging.logWriter` - Write application logs
 - `roles/monitoring.metricWriter` - Write metrics
 
-**Note:** More roles will be added in later phases as needed (Firestore, Cloud Scheduler, etc.)
+**Note:** Deploying the pipeline additionally requires Cloud Run, Artifact Registry, and
+Cloud Scheduler roles — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full grant list.
 
 ### Secrets
 - `samgov-api-key` - Placeholder created, you'll update with real value
@@ -195,12 +200,12 @@ All checks must pass before a PR can be merged (per WORKFLOW.md).
 ### Credential Protection
 - ✅ `kaimi-sa-key.json` in .gitignore (plus all `*-sa-key.json` patterns)
 - ✅ `.env.gcp` in .gitignore
-- ✅ `queue/*.json` excluded (Phase 1 local queue files)
+- ✅ `queue/*.json` excluded (local queue files)
 
 ### Least Privilege IAM
-- ✅ Service account has only Phase 0 required permissions
+- ✅ Service account has only the permissions it needs
 - ✅ No overly broad roles (no Owner, Editor, etc.)
-- ✅ Roles will be added incrementally in future phases
+- ✅ Deployment roles (Cloud Run, Artifact Registry, Cloud Scheduler) granted as needed
 
 ### Secret Management
 - ✅ SAM.gov API key in Secret Manager (not environment variables)
@@ -213,18 +218,16 @@ All checks must pass before a PR can be merged (per WORKFLOW.md).
 
 1. **Verify CI Pipeline**
    - Push to GitHub and watch the Actions tab
-   - All four jobs should pass (green checkmarks)
+   - All checks should pass (green checkmarks)
 
-2. **Begin Hunter Implementation**
-   - Next Phase 0 work per ARCHITECTURE.md
-   - Create GitHub Issue with acceptance criteria first (per WORKFLOW.md)
-   - TDD approach: write tests, then code
+2. **Wire Up Deployment**
+   - On merge to `main`, CI builds and deploys the `kaimi-pipeline` Cloud Run Job
+   - See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the deploy path and IAM grants
 
-3. **Phase 1 Preparation**
-   - When Phase 1 begins, additional GCP services will be added:
-     - Firestore (persistent opportunity queue)
-     - Cloud Scheduler (daily Hunter runs)
-     - Additional IAM roles
+3. **Confirm the Pipeline Runs**
+   - Cloud Scheduler triggers the job at 07:00 / 12:00 / 17:00 ET
+   - Scored opportunities land in the GCS bucket `gs://kaimi-seeker-queue`
+   - The `Store` is JSON-backed today; Firestore is an optional future swap
 
 ---
 

@@ -1,5 +1,7 @@
 # Kaimi Documentation
 
+**Last updated:** 2026-06-09
+
 This directory contains all project documentation for the Kaimi autonomous BD pipeline system.
 
 ## Quick Links
@@ -78,7 +80,7 @@ All development follows the workflow defined in [WORKFLOW.md](../WORKFLOW.md):
 ### Before Starting a Feature
 1. [ ] Verify GitHub Issue exists with approved acceptance criteria
 2. [ ] Read ARCHITECTURE.md to understand system design
-3. [ ] Understand which phase you're working in (currently Phase 0)
+3. [ ] Keep the work tightly scoped to the ticket's acceptance criteria
 4. [ ] Create feature branch: `<issue_number>_<feature_name>`
 
 ### Before Opening a PR
@@ -102,22 +104,21 @@ Hunter → Scorer → Opportunity Queue
 Manager → Outline → Technical Writer → [HUMAN GATE] → Final Review
 ```
 
-### Current Phase: Phase 0
+### Project State
 
-**Building Now:**
-- ✅ Project foundation and structure
-- ✅ Go module and packages
-- ✅ Core interfaces (Store, SAM.gov Client)
-- ✅ Opportunity schema
-- 🚧 Hunter agent implementation (next)
+**Built and deployed:**
+- ✅ Project foundation, Go module, core interfaces (Store, SAM.gov client)
+- ✅ Opportunity schema and the AgentResult contract
+- ✅ Zone-1 pipeline (Hunter → Scorer → Queue) — deployed as the `kaimi-pipeline` Cloud Run Job on Cloud Scheduler (07:00 / 12:00 / 17:00 ET), scored JSON store on `gs://kaimi-seeker-queue`
+- ✅ Zone-2 agents (Manager, Outline, Writer, Final Review, gdocs)
 
-**Not Building Yet:**
-- ❌ Scorer, Manager, or other agents
-- ❌ Databases (Firestore)
-- ❌ Scheduling infrastructure
-- ❌ AgentResult contract
+**In active development:**
+- 🚧 Web and desktop dashboards
 
-Principle: **Lazy provisioning, eager design**
+**Optional / future:**
+- Firestore swap behind the Store interface (JSON-backed today)
+
+Principle: **Provision lazily, design eagerly**
 
 ## Tech Stack
 
@@ -169,13 +170,15 @@ See [GCP_SETUP.md](./GCP_SETUP.md#troubleshooting) for comprehensive troubleshoo
 
 ## Cost Monitoring
 
-**Phase 0 Expected Costs:** < $1/month (excluding Gemini usage)
+**Baseline infra cost:** < $1/month (excluding Gemini usage and pipeline runtime)
 
 | Service | Cost |
 |---------|------|
-| Vertex AI | Pay-per-use (minimal until Hunter runs) |
+| Vertex AI | Pay-per-use (driven by pipeline scoring volume) |
 | Secret Manager | ~$0.06/month per secret |
 | Cloud Build | 120 build-minutes/day free tier |
+| Cloud Run Jobs | Billed only while a scheduled run executes |
+| Cloud Scheduler | ~$0.30/month (three triggers/day) |
 | IAM | Free |
 
 Monitor: [GCP Console Billing](https://console.cloud.google.com/billing)
@@ -188,7 +191,7 @@ Key principles:
 - **Legibility is a hard requirement** - Code must be clear and well-commented
 - **No work without a ticket** - All work references a GitHub Issue
 - **TDD is required** - Write tests first
-- **No building ahead** - Only build Phase 0 components now
+- **Stay scoped to the ticket** - Build the full product, but don't gold-plate beyond a ticket's acceptance criteria
 
 ## Additional Resources
 

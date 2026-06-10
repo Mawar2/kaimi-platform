@@ -1,6 +1,8 @@
 # GCP Quick Start Guide
 
-This is a condensed setup guide for getting the Kaimi GCP environment running quickly. For detailed information, see [GCP_SETUP.md](./GCP_SETUP.md).
+**Last updated:** 2026-06-09
+
+This is a condensed setup guide for standing up a fresh Kaimi GCP environment quickly. The `kaimi-seeker` environment is already provisioned and the pipeline deployed; these steps remain valid for a new environment. For detailed information, see [GCP_SETUP.md](./GCP_SETUP.md).
 
 ## Prerequisites Checklist
 
@@ -212,7 +214,7 @@ After GCP setup is complete:
 1. [ ] Verify all tests pass: `make test`
 2. [ ] Verify linter passes: `make lint`
 3. [ ] Verify CI pipeline runs successfully (push to GitHub)
-4. [ ] Begin Hunter agent implementation (next Phase 0 task)
+4. [ ] Wire up deployment of the `kaimi-pipeline` Cloud Run Job (see [DEPLOYMENT.md](./DEPLOYMENT.md))
 
 ## Cost Monitoring
 
@@ -229,7 +231,7 @@ gcloud billing budgets create \
   --threshold-rule=percent=100
 ```
 
-**Expected Phase 0 costs:** < $1/month (excluding Gemini API usage when Hunter runs)
+**Expected baseline cost:** < $1/month (excluding Gemini API usage and pipeline runtime)
 
 Monitor spending: [GCP Console Billing](https://console.cloud.google.com/billing)
 

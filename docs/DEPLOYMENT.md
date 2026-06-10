@@ -1,29 +1,33 @@
 # Deployment Guide - Kaimi
 
+**Last updated:** 2026-06-09
+
 This document explains the GCP deployment pipeline for Kaimi.
 
-## Current Status: Phase 0
+## Current Status: Deployed and Operational
 
-**Deployment Status:** Configured but not active
+**Deployment Status:** Live in production
 
-The CI/CD pipeline includes a deployment job that is **ready but waiting** for Phase 1. The job runs as a placeholder in Phase 0, displaying status information without deploying anything.
+The Zone-1 pipeline (Hunter → Scorer → Queue) is **built and deployed**. It runs as a
+Cloud Run **Job** (`kaimi-pipeline`, region `us-east4`) triggered by Cloud Scheduler at
+07:00 / 12:00 / 17:00 ET. Scored opportunities are persisted as JSON to the GCS bucket
+`gs://kaimi-seeker-queue`. The CI/CD pipeline deploys automatically on merge to `main`.
 
 ---
 
 ## Deployment Architecture
 
-### Phase 0 (Current)
-- ✅ CI/CD pipeline configured
-- ✅ Deployment job structure in place
-- ✅ Manual approval required via GitHub environment
-- ⏸️ No actual deployment (placeholder only)
+### Zone-1 Pipeline (Deployed)
+- ✅ CI/CD pipeline deploys on merge to `main`
+- ✅ Cloud Run Job `kaimi-pipeline` runs Hunter → Scorer → Queue
+- ✅ Cloud Scheduler triggers the job at 07:00 / 12:00 / 17:00 ET
+- ✅ Scored JSON store persisted to `gs://kaimi-seeker-queue`
 
-### Phase 1 (Future)
-When Phase 1 begins, the deployment will:
-1. Build Hunter Docker image
-2. Push to Google Container Registry (GCR)
-3. Deploy to Cloud Run
-4. Configure Cloud Scheduler for daily runs
+The deployment flow is:
+1. Build the pipeline Docker image
+2. Push to Artifact Registry
+3. Deploy/update the `kaimi-pipeline` Cloud Run Job
+4. Cloud Scheduler invokes the job on the configured schedule
 
 ---
 
@@ -95,91 +99,65 @@ When deployment is triggered:
 3. You'll see: **"Deploy to GCP - Waiting for approval"**
 4. Click **"Review deployments"**
 5. Select **production** environment
-6. Add a comment (optional): "Approved for Phase 1 launch"
+6. Add a comment (optional): "Approved for deploy"
 7. Click **"Approve and deploy"**
 
 ---
 
-## What Gets Deployed (Phase 1)
+## What Gets Deployed
 
-### Hunter Agent to Cloud Run
+### Pipeline to Cloud Run (Job)
 
-**Service Name:** `hunter`
+**Job Name:** `kaimi-pipeline`
 **Region:** `us-east4`
-**Platform:** Cloud Run (managed)
+**Platform:** Cloud Run Jobs (managed)
+**Runs:** Hunter → Scorer → Queue (Zone-1 pipeline), end to end
 
 **Configuration:**
 - Memory: 512Mi
 - CPU: 1
-- Timeout: 300s (5 minutes)
-- Max instances: 10
-- Min instances: 0 (scales to zero when not used)
+- Task timeout: 300s (5 minutes)
+- Max retries: per job config
 
 **Environment Variables:**
 - `GCP_PROJECT_ID` - Project ID
 - `GCP_REGION` - Deployment region
-- `SAMGOV_API_KEY` - From Secret Manager
+- `QUEUE_BUCKET` - GCS bucket for the scored store (`kaimi-seeker-queue`)
 
 **Secrets:**
 - `samgov-api-key` - Mounted from Secret Manager
 
+### Persisted Store
+
+Scored opportunities are written as JSON to the GCS bucket
+`gs://kaimi-seeker-queue`. The `Store` interface is JSON-backed today; Firestore
+remains an optional future swap that requires no pipeline code changes.
+
 ### Cloud Scheduler
 
-**Job Name:** `hunter-daily`
-**Schedule:** `0 9 * * *` (9 AM daily, UTC)
-**Target:** Cloud Run Hunter service
-**Method:** POST to `/run` endpoint
+**Schedule:** 07:00 / 12:00 / 17:00 ET (three triggers per day)
+**Target:** Cloud Run Job `kaimi-pipeline` (executes the job)
 **Auth:** Service account OIDC token
 
 ---
 
-## Phase 0: Current Deployment Job
+## How the Deployment Runs
 
-The deployment job currently runs a **placeholder script** that displays:
-
-```
-=========================================
-GCP Deployment - Phase 0
-=========================================
-
-This job is configured but not yet deploying.
-Phase 0 has no cloud infrastructure to deploy.
-
-When Phase 1 begins, uncomment the steps below to:
-  1. Build Hunter Docker image
-  2. Push to Google Container Registry
-  3. Deploy to Cloud Run
-  4. Configure Cloud Scheduler for daily runs
-
-Project: kaimi-seeker
-Region: us-east4
-Status: Ready for Phase 1 deployment
-=========================================
-```
-
-This confirms the pipeline is working and ready for Phase 1.
+On merge to `main`, the CI/CD pipeline (`.github/workflows/ci.yml`) builds and
+deploys automatically:
+  1. Build the pipeline Docker image
+  2. Push to Artifact Registry
+  3. Deploy/update the `kaimi-pipeline` Cloud Run Job
+  4. Cloud Scheduler invokes the job at 07:00 / 12:00 / 17:00 ET
 
 ---
 
-## Activating Deployment for Phase 1
+## Standing Up the Deploy Path in a Fresh Environment
 
-When Phase 1 work begins:
+If you are provisioning a new project from scratch, the deploy path requires the
+following APIs, repository, and IAM grants.
 
-### 1. Uncomment Deployment Steps
-
-In `.github/workflows/ci.yml`, uncomment these sections:
-
-```yaml
-# - name: Build Hunter Docker image
-# - name: Push to Google Container Registry
-# - name: Deploy Hunter to Cloud Run
-# - name: Get Cloud Run URL
-# - name: Configure Cloud Scheduler
-```
-
-Remove the `#` at the start of each line.
-
-### 2. Enable Required APIs
+### 1. Enable Required APIs
 
 ```bash
 # Artifact Registry (for Docker images)
@@ -192,7 +170,7 @@ gcloud services enable run.googleapis.com
 gcloud services enable cloudscheduler.googleapis.com
 ```
 
-### 3. Create Artifact Registry Repository
+### 2. Create Artifact Registry Repository
 
 ```bash
 gcloud artifacts repositories create kaimi \
@@ -201,7 +179,7 @@ gcloud artifacts repositories create kaimi \
   --description="Kaimi Docker images"
 ```
 
-### 4. Grant Additional IAM Roles
+### 3. Grant Deployment IAM Roles
 
 The service account needs permissions to deploy:
 
@@ -227,23 +205,22 @@ gcloud projects add-iam-policy-binding kaimi-seeker \
   --role="roles/cloudscheduler.admin"
 ```
 
-### 5. Test Deployment
+### 4. Verify the Deployment
 
-1. Merge a small change to main
-2. Watch CI/CD pipeline run
-3. Approve deployment when prompted
-4. Verify Hunter is deployed to Cloud Run
-5. Check Cloud Scheduler job is created
+1. Merge a small change to `main`
+2. Watch the CI/CD pipeline run
+3. Approve the deployment if a manual gate is configured
+4. Verify the `kaimi-pipeline` Cloud Run Job is deployed
+5. Confirm the Cloud Scheduler triggers exist (07:00 / 12:00 / 17:00 ET)
 
 ---
 
 ## Deployment URLs
 
-After Phase 1 deployment:
-
-- **Cloud Run Service:** https://hunter-[hash]-ue.a.run.app
+- **Cloud Run Jobs:** https://console.cloud.google.com/run/jobs?project=kaimi-seeker
 - **GCP Console:** https://console.cloud.google.com/run?project=kaimi-seeker
 - **Cloud Scheduler:** https://console.cloud.google.com/cloudscheduler?project=kaimi-seeker
+- **Queue bucket:** https://console.cloud.google.com/storage/browser/kaimi-seeker-queue?project=kaimi-seeker
 
 ---
 
@@ -251,15 +228,15 @@ After Phase 1 deployment:
 
 If deployment fails or has issues:
 
-### Option 1: Redeploy Previous Version
+### Option 1: Redeploy a Previous Image
 
 ```bash
-# List revisions
-gcloud run revisions list --service=hunter --region=us-east4
+# List the job's executions
+gcloud run jobs executions list --job=kaimi-pipeline --region=us-east4
 
-# Rollback to previous revision
-gcloud run services update-traffic hunter \
-  --to-revisions=hunter-00002-abc=100 \
+# Update the job back to a known-good image
+gcloud run jobs update kaimi-pipeline \
+  --image=us-east4-docker.pkg.dev/kaimi-seeker/kaimi/pipeline:<previous-tag> \
   --region=us-east4
 ```
 
@@ -280,32 +257,35 @@ git push origin main
 ### View Logs
 
 ```bash
-# Cloud Run logs
-gcloud run services logs read hunter --region=us-east4
+# Cloud Run Job execution logs
+gcloud run jobs executions list --job=kaimi-pipeline --region=us-east4
+gcloud logging read 'resource.type="cloud_run_job" resource.labels.job_name="kaimi-pipeline"' --limit=50
 
 # Cloud Scheduler logs
-gcloud scheduler jobs describe hunter-daily --location=us-east4
+gcloud scheduler jobs list --location=us-east4
 ```
 
 ### Cloud Console
 
-- **Cloud Run Logs:** https://console.cloud.google.com/run/detail/us-east4/hunter/logs
+- **Cloud Run Job:** https://console.cloud.google.com/run/jobs/details/us-east4/kaimi-pipeline?project=kaimi-seeker
 - **Cloud Scheduler Logs:** https://console.cloud.google.com/cloudscheduler
 
 ---
 
 ## Cost Monitoring
 
-### Expected Costs (Phase 1)
+### Expected Costs
 
 | Service | Cost Model | Estimated |
 |---------|------------|-----------|
-| Cloud Run | Pay-per-use (requests + CPU time) | ~$5-10/month |
-| Cloud Scheduler | $0.10/job/month | ~$0.10/month |
+| Cloud Run Jobs | Pay-per-use (CPU/memory while a task runs) | ~$5-10/month |
+| Cloud Scheduler | $0.10/job/month | ~$0.30/month (three triggers) |
 | Artifact Registry | $0.10/GB/month storage | ~$0.50/month |
+| Cloud Storage (queue bucket) | $0.02/GB/month + ops | negligible |
 | **Total** | | **~$5-11/month** |
 
-Cloud Run scales to zero when not used, so costs are minimal during development.
+Cloud Run Jobs only bill while a task is executing, so costs are minimal between
+the three scheduled runs per day.
 
 ---
 
@@ -355,14 +335,14 @@ gcloud artifacts repositories create kaimi \
   --location=us-east4
 ```
 
-### Cloud Scheduler Job Fails
+### Cloud Scheduler Trigger Fails
 
-**Issue:** Cloud Run service not allowing unauthenticated requests
+**Issue:** The scheduler's service account cannot execute the Cloud Run Job
 
 **Fix:**
 ```bash
-# Allow Cloud Scheduler to invoke
-gcloud run services add-iam-policy-binding hunter \
+# Allow Cloud Scheduler to run the job
+gcloud run jobs add-iam-policy-binding kaimi-pipeline \
   --member="serviceAccount:kaimi-dev@kaimi-seeker.iam.gserviceaccount.com" \
   --role="roles/run.invoker" \
   --region=us-east4
@@ -370,21 +350,18 @@ gcloud run services add-iam-policy-binding hunter \
 
 ---
 
-## Next Steps
+## Operations
 
-### Phase 0 (Now)
-- ✅ Set up "production" environment in GitHub
-- ✅ Test manual approval flow with placeholder deployment
-- ✅ Verify all checks pass before deployment is triggered
+### Live
+- ✅ `kaimi-pipeline` Cloud Run Job deployed (Hunter → Scorer → Queue)
+- ✅ Cloud Scheduler triggers at 07:00 / 12:00 / 17:00 ET
+- ✅ Scored JSON store persisted to `gs://kaimi-seeker-queue`
+- ✅ CI/CD deploys on merge to `main`
 
-### Phase 1 (When ready)
-- [ ] Uncomment deployment steps in CI/CD
-- [ ] Enable Cloud Run and Artifact Registry APIs
-- [ ] Create Artifact Registry repository
-- [ ] Grant additional IAM permissions
-- [ ] Test actual deployment to Cloud Run
-- [ ] Configure Cloud Scheduler for daily runs
-- [ ] Monitor costs and performance
+### Optional / Future
+- [ ] Firestore swap for the `Store` interface (no pipeline code changes required)
+- [ ] Tighten manual approval gate in the GitHub `production` environment
+- [ ] Expand monitoring/alerting on job failures and run latency
 
 ---
 
@@ -395,4 +372,4 @@ gcloud run services add-iam-policy-binding hunter \
 - **Architecture:** See [ARCHITECTURE.md](../ARCHITECTURE.md)
 - **Workflow:** See [WORKFLOW.md](../WORKFLOW.md)
 
-**Deployment is ready for Phase 1! 🚀**
+**The Zone-1 pipeline is deployed and running on schedule. 🚀**

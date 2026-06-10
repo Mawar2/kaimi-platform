@@ -1,6 +1,10 @@
 # GCP Setup Guide for Kaimi
 
-This document explains the GCP infrastructure setup for the Kaimi project (Phase 0).
+**Last updated:** 2026-06-09
+
+This document explains the GCP infrastructure setup for the Kaimi project. The
+`kaimi-seeker` environment is already provisioned and the Zone-1 pipeline is deployed;
+these steps remain valid for standing up a fresh environment from scratch.
 
 ## Overview
 
@@ -9,8 +13,13 @@ Kaimi uses Google Cloud Platform for:
 - **Secret Manager**: Secure storage of SAM.gov API credentials
 - **IAM**: Service account for authentication and authorization
 - **Cloud Build**: CI/CD pipeline execution
+- **Cloud Run Jobs + Cloud Scheduler**: the deployed Zone-1 pipeline (`kaimi-pipeline`) and its triggers
+- **Cloud Storage**: the persisted scored store (`gs://kaimi-seeker-queue`)
 
-Following the architecture's "lazy provisioning" principle, Phase 0 only sets up the minimal infrastructure required. Later phases will add Firestore, Cloud Scheduler, and other services as needed.
+Following the architecture's "provision lazily, design eagerly" principle, this guide
+covers the core APIs (Vertex AI, Secret Manager, IAM, Cloud Build). The deploy path adds
+Cloud Run, Artifact Registry, and Cloud Scheduler — see [DEPLOYMENT.md](./DEPLOYMENT.md).
+The `Store` is JSON-backed on GCS today; Firestore remains an optional future swap.
 
 ## Prerequisites
 
@@ -74,7 +83,7 @@ The service account receives these roles:
 | `roles/logging.logWriter` | Write application logs |
 | `roles/monitoring.metricWriter` | Write monitoring metrics |
 
-**Security note**: These are minimal permissions for Phase 0. Later phases may need additional roles (e.g., `datastore.user` for Firestore in Phase 1).
+**Security note**: These are the least-privilege permissions for running agents. Deploying the pipeline adds Cloud Run, Artifact Registry, and Cloud Scheduler roles (see [DEPLOYMENT.md](./DEPLOYMENT.md)); an optional future Firestore swap would add `roles/datastore.user`.
 
 ### 4. Generates Service Account Key
 
@@ -201,7 +210,7 @@ gcloud auth activate-service-account --key-file=kaimi-sa-key.json
 gcloud ai models list --region=us-east4 --limit=5
 
 # Test Gemini access (requires Google ADK setup)
-# This will be tested when the Hunter agent is implemented
+# The deployed agents exercise this path against gemini-2.5-pro
 ```
 
 ### 3. Set Environment Variables for Go
@@ -312,18 +321,21 @@ echo 'new-value' | gcloud secrets versions add samgov-api-key --data-file=-
 
 ## Cost Management
 
-Phase 0 infrastructure costs:
+Baseline infrastructure costs:
 
-| Service | Expected Cost (Phase 0) |
-|---------|-------------------------|
-| **Vertex AI (Gemini 2.5 Pro)** | Pay-per-use, ~$0 until Hunter runs |
+| Service | Expected Cost |
+|---------|---------------|
+| **Vertex AI (Gemini 2.5 Pro)** | Pay-per-use, driven by pipeline scoring volume |
 | **Secret Manager** | ~$0.06/month per secret + access costs (negligible) |
 | **Cloud Build** | 120 build-minutes/day free tier |
+| **Cloud Run Jobs** | Billed only while a scheduled run executes |
+| **Cloud Scheduler** | ~$0.30/month (three triggers/day) |
+| **Cloud Storage (queue bucket)** | Negligible |
 | **IAM** | Free |
 
-**Estimated monthly cost for Phase 0**: < $1 (excluding Gemini usage)
+**Estimated baseline monthly cost**: < $1 (excluding Gemini usage and pipeline runtime)
 
-**Note**: Real costs begin when the Hunter agent starts making Gemini API calls in later Phase 0 work. Monitor usage in [GCP Console Billing](https://console.cloud.google.com/billing).
+**Note**: The main cost driver is Gemini API usage as the scheduled pipeline scores opportunities. Monitor usage in [GCP Console Billing](https://console.cloud.google.com/billing).
 
 ## Security Best Practices
 
@@ -346,7 +358,7 @@ Phase 0 infrastructure costs:
    gcloud iam service-accounts keys create kaimi-sa-key.json --iam-account=kaimi-dev@PROJECT_ID.iam.gserviceaccount.com
    ```
 
-3. **Principle of least privilege**: Phase 0 uses minimal permissions. Only add roles when phases require them.
+3. **Principle of least privilege**: Grant only the roles each service needs. The agent runtime uses a minimal set; the deploy path adds Cloud Run / Artifact Registry / Cloud Scheduler roles (see [DEPLOYMENT.md](./DEPLOYMENT.md)).
 
 ### Secret Manager Best Practices
 
@@ -361,13 +373,13 @@ Phase 0 infrastructure costs:
 
 After GCP setup is complete:
 
-1. **Verify Hunter can access Vertex AI**: When Hunter implementation begins, test Gemini connectivity
+1. **Verify Vertex AI access**: Confirm the service account can reach `gemini-2.5-pro`
 2. **Add SAM.gov API key**: Update the Secret Manager secret with your real API key
 3. **Configure CI/CD**: Add GitHub secrets and test the pipeline
-4. **Phase 1 preparation**: When Phase 1 begins, additional GCP services will be added:
-   - Firestore (for persistent opportunity queue)
-   - Cloud Scheduler (for daily Hunter runs)
-   - Additional IAM roles as needed
+4. **Wire up deployment**: Follow [DEPLOYMENT.md](./DEPLOYMENT.md) to deploy the `kaimi-pipeline`
+   Cloud Run Job and its Cloud Scheduler triggers. The scored store persists to
+   `gs://kaimi-seeker-queue`; Firestore remains an optional future swap behind the
+   `Store` interface.
 
 ## References
 

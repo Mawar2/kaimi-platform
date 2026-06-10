@@ -1,6 +1,6 @@
 # Project Status - Kaimi & Multi-Agent System
 
-**Last Updated:** 2026-06-06
+**Last Updated:** 2026-06-09
 
 This document tracks the current state of both projects in this repository.
 
@@ -20,39 +20,48 @@ This repo contains TWO projects:
 
 ## 🎯 Kaimi - Federal BD Pipeline
 
-### ✅ Completed (Phase 0-1)
+> **Submission target:** Google AI Agents Challenge, Track 1 (Build / Net-New Agents) — **deadline June 11, 2026, 5:00 PM PST.** A human always approves before any proposal is submitted.
+
+### ✅ Zone 1 — BUILT and DEPLOYED
 
 **Foundation:**
-- ✅ AgentResult contract - standardized interface for all agents
+- ✅ AgentResult contract - standardized interface for all agents (`internal/agent`)
 - ✅ Opportunity schema - forward-compatible for all phases
-- ✅ Store interface - JSON-backed in Phase 0, ready for Firestore
+- ✅ Store interface - JSON/GCS-backed, ready for Firestore
 - ✅ SAM.gov client integration
 
-**Agents Implemented:**
-- ✅ **Hunter** - Pulls SAM.gov opportunities, filters by NAICS (#43, #41)
-- ✅ **Scorer** - Bid/no-bid scoring with Gemini 2.5 Pro (#44)
-- ✅ **Outline** - Formatting rules extraction (#49)
-- ✅ **Final Review** - Skeleton with deadline validation (#50)
+**Pipeline (Hunter → Scorer → Queue):**
+- ✅ **Hunter** - Pulls SAM.gov opportunities, eligibility + NAICS filtering
+- ✅ **Scorer** - Bid/no-bid scoring with reasoning via Gemini 2.5 Pro
+- ✅ **Queue** - Scored JSON store persisted to GCS (`gs://kaimi-seeker-queue`)
+- ✅ **Deployed:** Cloud Run Job `kaimi-pipeline` (us-east4) on Cloud Scheduler (07:00 / 12:00 / 17:00 ET); `cmd/pipeline` is the entrypoint; cached mode needs no API keys (default), live mode behind `--mode=live`
+
+### ✅ Zone 2 — AGENTS BUILT (human review gate preserved)
+
+- ✅ **Manager** - Per-proposal orchestration (`internal/manager`)
+- ✅ **Outline** - Section structure + formatting rules extraction (`internal/outline`)
+- ✅ **Writer** - Proposal drafting (`internal/writer`)
+- ✅ **Final Review** - Validation + deadline checks (`internal/finalreview`)
+- ✅ **Google Docs/Drive** - Document integration (`internal/gdocs`)
 
 **Infrastructure:**
-- ✅ CI/CD pipeline with AI code review (Gemini 2.5 Pro)
-- ✅ GitHub API caching layer (#52)
+- ✅ CI/CD pipeline with AI code review + auto-fix bot (Gemini 2.5 Pro)
+- ✅ GitHub API caching layer
 - ✅ CapabilityProfile with real BlueMeta data
-
-**Merged PRs:** 6 (all recent work)
-**Closed Issues:** 14 orchestrator issues (moved to multi-agent-system)
+- ✅ `go test ./...` green
 
 ### 🔄 In Progress
-- Zone 2 agent development (Writer agent, Final Review LLM checks)
-- Manager agent coordination
+- **Web + offline-first desktop dashboards** over the shared `internal/dashboard` data layer (already merged)
+- End-to-end polish: deployed Zone-1 pipeline feeding the Zone-2 drafting chain through the human review gate
 
-### 📋 Remaining Work
-Only **5 issues** left in Kaimi repo - all legitimate agent work:
-- #11 - KAI-M4: Scorer agent enhancements
-- #8 - KAI-M1: AgentResult contract (can close - already done)
-- #7 - KAI-7: Final review LLM-backed checks
-- #5 - KAI-5: Outline agent Google Docs integration
-- #3 - KAI-3: Outline section structure
+### 📋 Remaining Work (toward June 11 submission)
+- Finish the web and desktop dashboards
+- End-to-end dry run of the full pipeline → drafting → human approval flow
+- Submission package and demo readiness
+
+### ⏳ Future (Phase 4 — out of current submission scope)
+- RAG knowledge base / cross-proposal memory
+- Multi-tenancy beyond the single BlueMeta tenant
 
 ---
 
@@ -169,11 +178,10 @@ This is **autonomous infrastructure evolution**. 🤯
 ## 📊 Statistics
 
 ### Kaimi
-- **Files:** ~50 Go files
-- **Packages:** 10+ (agent, hunter, scorer, outline, finalreview, etc.)
-- **Tests:** High coverage on all agents
-- **PRs Merged:** 6 (this session alone)
-- **Issues Closed:** 20+ (including moved orchestrator issues)
+- **Packages:** agent, hunter, scorer, capability, manager, outline, writer, finalreview, gdocs, dashboard, store, github (+ `cmd/pipeline`)
+- **Tests:** Two-layer (unit/contract + E2E); `go test ./...` green
+- **Deployment:** Cloud Run Job `kaimi-pipeline` + Cloud Scheduler (us-east4), GCS store `gs://kaimi-seeker-queue`
+- **Status:** Zone-1 deployed; Zone-2 agents built; dashboards in active development
 
 ### Multi-Agent-System
 - **Files:** ~30 Go files

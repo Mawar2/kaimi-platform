@@ -1,5 +1,7 @@
 # Developer Setup Guide - Kaimi Project
 
+**Last updated:** 2026-06-09
+
 Welcome to the Kaimi project! This guide will help you get set up for development.
 
 ## Your GCP Access
@@ -95,7 +97,7 @@ gcloud ai models list --region=us-east4 --limit=5
 gcloud secrets versions access latest --secret=samgov-api-key
 ```
 
-You should see: `***REDACTED-SAMGOV-KEY***`
+You should see your SAM.gov API key value (it starts with `SAM-`). Never paste the raw key into docs or commit it.
 
 ---
 
@@ -290,24 +292,22 @@ make clean      # Remove build artifacts
 
 ---
 
-## Current Phase: Phase 0
+## Project State
 
-**What We're Building Right Now:**
-- ✅ Project foundation (done)
-- ✅ Go module and structure (done)
-- ✅ Core interfaces (Store, SAM.gov Client) (done)
-- ✅ Opportunity schema (done)
-- 🚧 Hunter agent implementation (in progress)
+**Built and deployed:**
+- ✅ Project foundation, Go module, core interfaces (`Store`, SAM.gov client)
+- ✅ `Opportunity` schema and the `AgentResult` contract
+- ✅ Zone-1 pipeline (Hunter → Scorer → Queue) deployed as the `kaimi-pipeline` Cloud Run Job, run on Cloud Scheduler (07:00 / 12:00 / 17:00 ET); scored JSON store persisted to `gs://kaimi-seeker-queue`
+- ✅ Zone-2 agents (Manager / Outline / Writer / Final Review / gdocs)
 
-**What We're NOT Building Yet:**
-- ❌ Scorer agent (Phase 1)
-- ❌ Manager agent (Phase 2)
-- ❌ Proposal writers (Phase 3)
-- ❌ Firestore database (Phase 1)
-- ❌ Cloud Scheduler (Phase 1)
+**In active development:**
+- 🚧 Web and desktop dashboards over the `internal/dashboard` data layer
+
+**Optional / future:**
+- Firestore swap behind the `Store` interface (no agent code changes required)
 
 **Scope Discipline:**
-Only build Phase 0 components. Don't build ahead. See ARCHITECTURE.md for details.
+Build the full product, but keep every ticket tightly scoped to its acceptance criteria. Don't gold-plate. See ARCHITECTURE.md and CLAUDE.md for details.
 
 ---
 
@@ -351,7 +351,7 @@ You can read secrets (but not create/modify them).
 gcloud secrets versions access latest --secret=samgov-api-key
 
 # In Go code (using Google ADK)
-# The Hunter agent will use this for SAM.gov API calls
+# The Hunter agent uses this for SAM.gov API calls in the deployed pipeline
 ```
 
 ---

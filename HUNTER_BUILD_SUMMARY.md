@@ -2,15 +2,16 @@
 
 ## Issue #4: Hunter Agent - SAM.gov Opportunity Ingestion
 
-**Status:** COMPLETE ✓
+**Status:** COMPLETE ✓ — built and running in the deployed `kaimi-pipeline` Cloud Run Job
 
 **Build Date:** 2026-06-02
+**Last updated:** 2026-06-09
 
 ---
 
 ## What Was Built
 
-The Hunter agent is the first agent in the Kaimi autonomous BD pipeline. It pulls federal contracting opportunities from SAM.gov API, filters them by NAICS code, and saves them to the opportunity queue for downstream processing.
+The Hunter agent is the first agent in the Kaimi autonomous BD pipeline. It pulls federal contracting opportunities from SAM.gov API, filters them by NAICS code, and saves them to the opportunity queue for downstream processing. It now runs in production as the first stage of the deployed Zone-1 pipeline (Hunter → Scorer → Queue), executed on a Cloud Scheduler trigger.
 
 ### Components Delivered
 
@@ -191,9 +192,9 @@ Hunter complete.
 
 ### Adherence to Architecture
 
-- **Provision lazily, design eagerly**: JSON Store is simple for Phase 0, but Store interface allows future Firestore swap
+- **Provision lazily, design eagerly**: the JSON Store is simple and operational, and the Store interface still allows an optional future Firestore swap
 - **Black box agents**: Hunter is self-contained, uses Store interface, doesn't know about downstream agents
-- **Forward-compatible schema**: Opportunity struct includes fields for all phases, Hunter populates Phase 0 fields
+- **Forward-compatible schema**: the Opportunity struct includes fields for every agent across both zones; Hunter populates the ingestion fields, downstream agents fill the rest
 - **Clear, conventional Go**: Well-commented, follows Go idioms, easy to read
 
 ### Code Style
@@ -269,7 +270,7 @@ SAM_API_KEY="your-key" go run cmd/hunter/main.go \
 
 ## Known Limitations (By Design)
 
-1. **NAICS Description**: SAM.gov API doesn't provide NAICS descriptions in search results. Field left empty. Consider adding NAICS lookup table in Phase 1.
+1. **NAICS Description**: SAM.gov API doesn't provide NAICS descriptions in search results. Field left empty. A NAICS lookup table is a possible future enhancement.
 
 2. **Contract Type**: Not always included in SAM.gov search results. Field may be empty for some opportunities.
 
@@ -279,16 +280,20 @@ SAM_API_KEY="your-key" go run cmd/hunter/main.go \
 
 ---
 
-## Next Steps (Phase 1)
+## Status in the Wider Pipeline
 
-The Hunter agent is complete for Phase 0. Future enhancements in Phase 1 may include:
+The Hunter agent is complete and deployed. The downstream stages that once sat on the
+Hunter's "future work" list are now built and running:
 
-1. **Scorer Agent**: Score opportunities for bid/no-bid fit
-2. **Real Queue (Firestore)**: Swap JSON Store for Firestore (no Hunter changes needed)
-3. **Daily Scheduling**: Run Hunter on a daily cron job
-4. **NAICS Lookup Table**: Add descriptions for NAICS codes
-5. **Enhanced Error Handling**: Exponential backoff for rate limiting
-6. **Metrics/Observability**: Add structured logging and metrics
+1. **Scorer Agent**: Built — scores opportunities for bid/no-bid fit downstream of Hunter
+2. **Scheduling**: Built — the `kaimi-pipeline` Cloud Run Job runs on Cloud Scheduler (07:00 / 12:00 / 17:00 ET)
+3. **Persisted Queue**: Operational — scored JSON store persisted to `gs://kaimi-seeker-queue` (Firestore remains an optional future swap behind the `Store` interface, no Hunter changes needed)
+
+Remaining Hunter-specific enhancements still open:
+
+1. **NAICS Lookup Table**: Add descriptions for NAICS codes
+2. **Enhanced Error Handling**: Exponential backoff for rate limiting
+3. **Metrics/Observability**: Expand structured logging and metrics
 
 ---
 
@@ -317,6 +322,7 @@ The Hunter agent successfully:
 - Persists opportunities to the JSON store
 - Provides comprehensive error handling and logging
 
-All acceptance criteria met. All tests passing. Code is production-ready for Phase 0.
+All acceptance criteria met. All tests passing. The Hunter is in production as the first
+stage of the deployed Zone-1 pipeline.
 
-**Hunter is Kaimi's primary agent - and it's ready to hunt.**
+**Hunter is Kaimi's first agent - and it's hunting on schedule.**

@@ -3,7 +3,8 @@
 **Project Created:** `kaimi-seeker`
 **Billing Account:** Google AI Hackathon (017B2F-5BCB85-004642)
 **Setup Date:** June 2, 2026
-**Status:** Fully configured and ready for Phase 0 development
+**Last updated:** 2026-06-09
+**Status:** Fully provisioned; the Zone-1 pipeline is deployed and running on schedule
 
 ---
 
@@ -43,7 +44,7 @@
 
 ### Secret Manager ✅
 - **Secret Name:** `samgov-api-key`
-- **Value:** `***REDACTED-SAMGOV-KEY***`
+- **Value:** stored in Secret Manager (retrieve with `gcloud secrets versions access latest --secret=samgov-api-key`; never paste the raw key into docs)
 - **Status:** ✅ Stored and accessible
 
 ### Environment Configuration ✅
@@ -159,7 +160,7 @@ gcloud config get-value project
 
 # Test 2: Verify Secret Manager access
 gcloud secrets versions access latest --secret=samgov-api-key
-# Expected: ***REDACTED-SAMGOV-KEY***
+# Expected: your SAM.gov API key value (starts with "SAM-")
 
 # Test 3: Verify service account
 gcloud auth list
@@ -190,11 +191,11 @@ All secure files are already in `.gitignore`!
 ## Cost Monitoring
 
 **Billing Account:** Google AI Hackathon
-**Expected Phase 0 Costs:** < $1/month
+**Expected baseline infra cost:** < $1/month (excluding Gemini usage and pipeline runtime)
 
 | Service | Cost |
 |---------|------|
-| Vertex AI (Gemini) | Pay-per-use (~$0 until Hunter runs) |
+| Vertex AI (Gemini 2.5 Pro) | Pay-per-use (driven by pipeline scoring volume) |
 | Secret Manager | ~$0.06/month |
 | Cloud Build | Free tier (120 mins/day) |
 | IAM | Free |
@@ -253,8 +254,8 @@ After adding GitHub secrets, the CI pipeline will:
 
 ✅ **GCP Project:** kaimi-seeker
 ✅ **Billing:** Google AI Hackathon account linked
-✅ **APIs:** All Phase 0 APIs enabled
-✅ **Service Account:** Created with minimal permissions
+✅ **APIs:** Required APIs enabled (Vertex AI, Secret Manager, IAM, Cloud Build, plus Cloud Run / Artifact Registry / Cloud Scheduler for deployment)
+✅ **Service Account:** Created with least-privilege permissions
 ✅ **Credentials:** Service account key generated
 ✅ **Secrets:** SAM.gov API key stored securely
 ✅ **Configuration:** .env.gcp created
@@ -268,8 +269,8 @@ After adding GitHub secrets, the CI pipeline will:
 1. ✅ **Run Go code** that uses Vertex AI (Gemini 2.5 Pro)
 2. ✅ **Access SAM.gov API key** from Secret Manager
 3. ✅ **Run tests locally** with GCP credentials
-4. ✅ **Deploy to Cloud Build** (after GitHub secrets setup)
-5. ✅ **Begin Hunter agent implementation** (Phase 0)
+4. ✅ **Deploy via CI/CD** on merge to `main` (the `kaimi-pipeline` Cloud Run Job)
+5. ✅ **Operate the deployed Zone-1 pipeline** (Hunter → Scorer → Queue, on Cloud Scheduler)
 
 ---
 
@@ -295,15 +296,16 @@ Since you're using the **Google AI Hackathon** billing account:
 - Monitor usage during development
 - Test with small datasets first
 - Use cached mode for SAM.gov (as designed in architecture)
-- Phase 0 should have minimal Gemini API calls
+- Watch Gemini call volume as the scheduled pipeline scores opportunities
 
 ---
 
-## Ready to Build! 🚀
+## Provisioned and Operational 🚀
 
-Your GCP environment is fully configured and ready for Kaimi Phase 0 development.
+Your GCP environment is fully provisioned. The Zone-1 pipeline (Hunter → Scorer → Queue)
+is deployed as the `kaimi-pipeline` Cloud Run Job and runs on Cloud Scheduler.
 
-**Next Step:** Configure GitHub secrets, then begin Hunter agent implementation!
+**To verify the environment:**
 
 ```bash
 # Verify everything one more time
@@ -316,7 +318,8 @@ gcloud auth list
 
 ---
 
-**Setup completed successfully by Claude Code**
-**Date:** June 2, 2026
+**GCP environment provisioned by Claude Code**
+**Setup Date:** June 2, 2026
+**Last updated:** 2026-06-09
 **Project:** kaimi-seeker
-**Status:** Ready for development ✅
+**Status:** Provisioned; pipeline deployed and running ✅

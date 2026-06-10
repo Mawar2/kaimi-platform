@@ -148,11 +148,7 @@ func (svc *Service) CountStages(ctx context.Context) (map[Stage]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dashboard count stages: %w", err)
 	}
-	vals := make([]opportunity.Opportunity, len(ptrs))
-	for i, p := range ptrs {
-		vals[i] = *p
-	}
-	return CountByStage(vals), nil
+	return CountByStage(ptrs), nil
 }
 
 // toRow converts an Opportunity and its derived Stage to an OpportunityRow.
