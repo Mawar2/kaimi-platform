@@ -7,7 +7,7 @@ Welcome to the Kaimi project! This guide will help you get set up for developmen
 You've been granted access to the **kaimi-seeker** GCP project with the following permissions:
 
 ### Roles Granted
-- ✅ **Vertex AI Admin** (`roles/aiplatform.admin`) - Full access to build and manage models with Gemini 3 Pro
+- ✅ **Vertex AI Admin** (`roles/aiplatform.admin`) - Full access to build and manage models with Gemini 2.5 Pro
 - ✅ **Viewer** (`roles/viewer`) - View all project resources
 - ✅ **Secret Manager Secret Accessor** (`roles/secretmanager.secretAccessor`) - Read API keys and secrets
 
@@ -79,7 +79,7 @@ gcloud auth application-default login
 ```
 
 This allows your local Go code to access:
-- Vertex AI (Gemini 3 Pro)
+- Vertex AI (Gemini 2.5 Pro)
 - Secret Manager (SAM.gov API key)
 - Other GCP services
 
@@ -315,7 +315,7 @@ Only build Phase 0 components. Don't build ahead. See ARCHITECTURE.md for detail
 
 You have full admin access to Vertex AI. You can:
 
-### Use Gemini 3 Pro
+### Use Gemini 2.5 Pro
 
 ```go
 // Example: Using Vertex AI in Go

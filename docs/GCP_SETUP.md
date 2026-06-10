@@ -5,7 +5,7 @@ This document explains the GCP infrastructure setup for the Kaimi project (Phase
 ## Overview
 
 Kaimi uses Google Cloud Platform for:
-- **Vertex AI**: Gemini 3 Pro model access for agent reasoning
+- **Vertex AI**: Gemini 2.5 Pro model access for agent reasoning
 - **Secret Manager**: Secure storage of SAM.gov API credentials
 - **IAM**: Service account for authentication and authorization
 - **Cloud Build**: CI/CD pipeline execution
@@ -108,7 +108,7 @@ GCP_REGION=us-east4
 GCP_SERVICE_ACCOUNT_EMAIL=kaimi-dev@your-project-id.iam.gserviceaccount.com
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/kaimi-sa-key.json
 VERTEX_AI_LOCATION=us-east4
-GEMINI_MODEL=gemini-3.0-pro
+GEMINI_MODEL=gemini-2.5-pro
 SAMGOV_API_KEY_SECRET=samgov-api-key
 ```
 
@@ -316,7 +316,7 @@ Phase 0 infrastructure costs:
 
 | Service | Expected Cost (Phase 0) |
 |---------|-------------------------|
-| **Vertex AI (Gemini 3 Pro)** | Pay-per-use, ~$0 until Hunter runs |
+| **Vertex AI (Gemini 2.5 Pro)** | Pay-per-use, ~$0 until Hunter runs |
 | **Secret Manager** | ~$0.06/month per secret + access costs (negligible) |
 | **Cloud Build** | 120 build-minutes/day free tier |
 | **IAM** | Free |

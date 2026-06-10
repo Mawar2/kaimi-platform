@@ -31,7 +31,7 @@ The script will prompt you for your GCP project ID and configure everything auto
 
 ### APIs Enabled
 
-- Vertex AI (aiplatform.googleapis.com) - For Gemini 3 Pro
+- Vertex AI (aiplatform.googleapis.com) - For Gemini 2.5 Pro
 - Secret Manager (secretmanager.googleapis.com) - For API keys
 - IAM (iam.googleapis.com) - For service accounts
 - Cloud Build (cloudbuild.googleapis.com) - For CI/CD

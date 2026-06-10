@@ -125,7 +125,7 @@ Principle: **Lazy provisioning, eager design**
 |-----------|-----------|
 | Language | Go 1.21+ |
 | Agent Framework | Google ADK (Agent Development Kit) |
-| LLM | Gemini 3 Pro via Vertex AI |
+| LLM | Gemini 2.5 Pro via Vertex AI |
 | Cloud Platform | Google Cloud Platform |
 | Testing | Go standard library + fixtures |
 | Linting | golangci-lint |

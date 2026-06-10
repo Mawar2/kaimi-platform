@@ -19,7 +19,7 @@
 ### APIs Enabled ✅
 - ✅ Cloud Resource Manager API
 - ✅ IAM API
-- ✅ Vertex AI API (for Gemini 3 Pro)
+- ✅ Vertex AI API (for Gemini 2.5 Pro)
 - ✅ Secret Manager API
 - ✅ Cloud Build API (for CI/CD)
 - ✅ Cloud KMS API (for encryption)
@@ -63,7 +63,7 @@ GCP_SERVICE_ACCOUNT_EMAIL=kaimi-dev@kaimi-seeker.iam.gserviceaccount.com
 
 # Vertex AI
 VERTEX_AI_LOCATION=us-east4
-GEMINI_MODEL=gemini-3.0-pro
+GEMINI_MODEL=gemini-2.5-pro
 
 # Secret Manager
 SAMGOV_API_KEY_SECRET=samgov-api-key
@@ -91,7 +91,7 @@ name: projects/1098973371312/secrets/samgov-api-key
 
 ### ✅ Vertex AI API Enabled
 The Vertex AI API is enabled and ready for use. The service account has `roles/aiplatform.user` which provides access to:
-- Gemini 3 Pro model
+- Gemini 2.5 Pro model
 - Vertex AI predictions/inference
 - Model endpoint access
 
@@ -265,7 +265,7 @@ After adding GitHub secrets, the CI pipeline will:
 
 ## You Can Now:
 
-1. ✅ **Run Go code** that uses Vertex AI (Gemini 3 Pro)
+1. ✅ **Run Go code** that uses Vertex AI (Gemini 2.5 Pro)
 2. ✅ **Access SAM.gov API key** from Secret Manager
 3. ✅ **Run tests locally** with GCP credentials
 4. ✅ **Deploy to Cloud Build** (after GitHub secrets setup)
@@ -286,7 +286,7 @@ After adding GitHub secrets, the CI pipeline will:
 
 Since you're using the **Google AI Hackathon** billing account:
 
-- ✅ You have access to Gemini 3 Pro
+- ✅ You have access to Gemini 2.5 Pro
 - ✅ Vertex AI credits should be available
 - ✅ All APIs enabled and ready
 - ✅ Infrastructure costs < $1/month

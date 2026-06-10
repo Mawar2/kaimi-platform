@@ -101,17 +101,21 @@ This confirms a live model call — not a cached or static response.
 
 ## Model Name Decision
 
-Architecture targets "Gemini 3 Pro". As of this spike (2026-06-04):
+**DECIDED (2026-06-09): locked to `gemini-2.5-pro`.** It is the current GA / stable pro
+model on Vertex AI us-east4 and is what the code runs everywhere (`GEMINI_MODEL` default,
+the Scorer, and the CI AI review). All docs now state Gemini 2.5 Pro.
+
+Original spike notes (2026-06-04), kept for history:
 
 | Model ID | Status | Notes |
 |---|---|---|
-| `gemini-2.5-pro` | **GA / stable** | Used in this spike |
+| `gemini-2.5-pro` | **GA / stable — LOCKED IN** | What we run |
 | `gemini-3-pro-preview` | Preview | Listed in Google AI API; not confirmed GA on Vertex AI us-east4 |
 | `gemini-3.1-pro-preview` | Preview | Same |
 
-**We used `gemini-2.5-pro`** for the spike because it's the current stable pro model on Vertex AI. The spike code has a `TODO(phase-1)` comment to upgrade once Gemini 3 Pro is GA.
-
-**Malik to confirm:** which model ID to lock in for Phase 1 build. If `gemini-3-pro-preview` is acceptable for development, it can be swapped in `cmd/spike/main.go` at `const modelName`.
+A future upgrade to a Gemini 3 Pro model, once it is GA on Vertex AI, is a deliberate
+follow-up change (swap `GEMINI_MODEL` / the scorer model constant) — not a doc fix.
+Until then, "Gemini 2.5 Pro" is the single source of truth across the repo.
 
 ---
 
