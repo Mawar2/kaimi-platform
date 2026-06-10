@@ -175,6 +175,9 @@ GEMINI_MODEL=gemini-3.0-pro
 # Secret Manager
 SAMGOV_API_KEY_SECRET=$SECRET_NAME
 
+# Zone-2 solicitation documents bucket (issue #162)
+GCS_SOLICITATIONS_BUCKET=${PROJECT_ID}-solicitations
+
 # Application settings
 LOG_LEVEL=info
 ENVIRONMENT=development
@@ -252,6 +255,27 @@ if ! gcloud scheduler jobs describe kaimi-pipeline-schedule --location="$REGION"
         --oauth-service-account-email "$SERVICE_ACCOUNT_EMAIL"
 fi
 echo -e "${GREEN}✓ Cloud Scheduler trigger ready (07:00/12:00/17:00 ET)${NC}"
+echo ""
+
+# Step 11: Zone-2 solicitation documents bucket (issue #162)
+# Stores raw solicitation files + extracted text for the ingestion stage
+# (internal/ingest). Object layout: {noticeID}/raw/{filename} and
+# {noticeID}/text/{filename}.txt. Idempotent: existing resources are left alone.
+echo -e "${YELLOW}Step 11: Zone-2 solicitation documents bucket${NC}"
+
+SOLICITATIONS_BUCKET="${PROJECT_ID}-solicitations"
+
+if ! gcloud storage buckets describe "gs://${SOLICITATIONS_BUCKET}" --project="$PROJECT_ID" &>/dev/null; then
+    gcloud storage buckets create "gs://${SOLICITATIONS_BUCKET}" \
+        --location="$REGION" --project="$PROJECT_ID" \
+        --uniform-bucket-level-access --public-access-prevention
+fi
+# Least-privilege: the pipeline SA only needs object read/write, not bucket admin.
+gcloud storage buckets add-iam-policy-binding "gs://${SOLICITATIONS_BUCKET}" \
+    --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+    --role=roles/storage.objectAdmin >/dev/null
+echo -e "${GREEN}✓ Solicitations bucket gs://${SOLICITATIONS_BUCKET} ready (uniform access, public access prevented)${NC}"
+echo -e "${YELLOW}  Record GCS_SOLICITATIONS_BUCKET=${SOLICITATIONS_BUCKET} where the app reads config (.env / Cloud Run env).${NC}"
 echo ""
 
 # Summary
