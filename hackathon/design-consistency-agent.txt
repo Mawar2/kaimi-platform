@@ -1,0 +1,139 @@
+================================================================================
+KAIMI — DESIGN CONSISTENCY AGENT BRIEF
+(Paste the "/loop PROMPT" section below into a new Claude Code agent.)
+Last updated: 2026-06-10  •  Owner: Malik (malik@bluemetatech.com)
+================================================================================
+
+WHY THIS EXISTS
+---------------
+The Kaimi web dashboard (the Go app in internal/dashboard) was built against a
+locked design handoff, but the screens have drifted: pages re-hardcode colors /
+spacing / type instead of consuming the ported design-system tokens & components,
+the designed fonts (Figtree / Geist Mono) fall back to system fonts so it doesn't
+match the comps, and some shared components aren't rendering correctly across all
+their states. This agent's job is to make the whole web UI visually consistent
+with the design system — audited and verified IN A REAL BROWSER, one surface at a
+time — and to confirm every shared component works across every state.
+
+GROUND TRUTH (paths on this machine)
+------------------------------------
+- Web UI code:        internal/dashboard/  (page markup: handler.go,
+                      proposals_templates.go, view.go, stages.go; handlers:
+                      proposals.go; design system: tokens.go = StyleTag() with
+                      tokens.css + ui.css + app.css embedded verbatim, plus
+                      --font-* and --t-* type tokens; brand.go; components.go =
+                      StatusBadge, RecommendationPill, DeadlinePill/UrgencyFor,
+                      FitRing/FitBandFor, MetaTag).
+- Layout contract:    docs/dashboard/ux-spec.md  (AUTHORITATIVE — update it in the
+                      same change as any layout deviation).
+- Design source:      C:\Users\Owner\OneDrive\Documents\Builder\Pulse\design-handoff\Kaimi-handoff\
+                      (kaimi/tokens.css, kaimi/ui.css, kaimi/app.css; reference
+                      renders Kaimi App.html / Kaimi Design System.html / Kaimi
+                      Brand.html; screenshots/ = the visual checksums to diff
+                      against). Canonical fallback if missing: the gzip bundle at
+                      https://api.anthropic.com/v1/design/h/6DKDWM8N4v7bXAWaBAQbaA
+                      (tar -xzf).
+- Run command:        bin\dashboard.exe --store=<store dir> --port=8901
+- Render data:        go run ./cmd/pipeline --mode=cached --store-path=./design-store  (no creds)
+
+HARD RULES (do not break)
+-------------------------
+- DEFINE ONCE, REUSE: every page consumes StyleTag() + token CSS variables +
+  components.go helpers. NEVER re-hardcode hex colors, spacing, radii, shadows, or
+  component markup per page. Missing component -> add it to components.go (with a
+  test) and reuse it.
+- NO external assets/fonts. Inline SVG and base64 data-URIs are OK; Google Fonts /
+  external CSS / network fonts are NOT. To make the designed fonts actually render,
+  self-host Figtree + Geist Mono as @font-face base64 data-URIs inside the embedded
+  CSS; otherwise keep a consistently-applied system fallback. Document the choice in
+  ux-spec.md either way.
+- Amber #E8870E on #FFF3E0 is reserved app-wide for "a human is needed" — never
+  decorative.
+- Follow CLAUDE.md / WORKFLOW.md: ticketed work with approved acceptance criteria,
+  TDD, `make all` green before any PR, one PR per surface (base main), and NEVER
+  merge your own code — a human (Malik/Timm) merges.
+
+WORKSPACE
+---------
+Work in your OWN isolated checkout, not the build-loop's tree:
+    git clone https://github.com/Mawar2/Kaimi.git C:\Users\Owner\Kaimi-design
+    (or: git worktree add C:\Users\Owner\Kaimi-design origin/main)
+Copy design-handoff\Kaimi-handoff into your workspace as the diff target. Re-fetch
++ rebase on origin/main each iteration.
+
+
+================================================================================
+/loop PROMPT  — paste this verbatim into the agent (run as: /loop <paste>)
+================================================================================
+/loop Drive the Kaimi web dashboard to full visual consistency with the locked design
+system — one surface at a time, verified in a REAL browser — until every screen matches
+the handoff, every shared component renders correctly across all its states, and a
+designer's-eye review finds nothing. Self-pace the iterations. FIRST read
+hackathon/design-consistency-agent.txt in full and obey its ground-truth paths and hard
+rules absolutely.
+
+SETUP (once): create your own git worktree/clone off the latest origin/main at
+C:\Users\Owner\Kaimi-design and work ONLY there; copy
+C:\Users\Owner\OneDrive\Documents\Builder\Pulse\design-handoff\Kaimi-handoff into your
+workspace as the diff target (kaimi/tokens.css, kaimi/ui.css, kaimi/app.css, the
+reference HTML renders, and screenshots/). Seed render data with
+`go run ./cmd/pipeline --mode=cached --store-path=./design-store`; if some component
+states aren't represented, hand-add a few opportunity JSONs under
+./design-store/queue/queue/ spanning every RecommendationPill (BID/NO_BID/REVIEW),
+DeadlinePill urgency band, FitRing fit band, and StatusBadge ProposalStatus.
+
+WHERE THINGS LIVE: web UI = internal/dashboard/ (markup in handler.go,
+proposals_templates.go, view.go, stages.go; handlers in proposals.go; design system in
+tokens.go = StyleTag() with the --font-* and --t-* tokens; brand.go; components.go =
+StatusBadge, RecommendationPill, DeadlinePill/UrgencyFor, FitRing/FitBandFor, MetaTag).
+docs/dashboard/ux-spec.md is the authoritative layout contract.
+
+HARD RULES: define design-system values ONCE and reuse — every page consumes StyleTag()
++ token variables + components.go helpers, NEVER re-hardcode hex/spacing/markup per page
+(add a reusable component instead). NO external assets/fonts — inline SVG/base64
+data-URIs OK, network fonts NOT; self-host Figtree + Geist Mono as @font-face base64
+data-URIs so the designed type actually renders (or keep a consistent system fallback)
+and document the choice in ux-spec.md. Amber #E8870E/#FFF3E0 is reserved for "a human is
+needed". Any layout change updates ux-spec.md in the SAME change. Follow CLAUDE.md /
+WORKFLOW.md: ticketed, TDD (extend tokens_test/components_test/brand_test and the page
+tests), `make all` green before any PR, one PR per surface (base main), and NEVER merge
+your own code — a human merges.
+
+EACH ITERATION (one surface at a time: Triage `/` -> detail `/opportunity/{id}` ->
+proposals `/proposals` -> workspace `/workspace/{id}` -> shared chrome: header/nav,
+empty/loading/hover/focus/disabled states, responsive widths -> a dedicated COMPONENT
+pass):
+1. AUDIT the surface against design-handoff/screenshots/<surface>.png and the relevant
+   kaimi/*.css / Kaimi App.html rules; list EVERY divergence (hardcoded value that
+   should be a token, component re-implemented instead of reused, wrong
+   font-family/weight/size/line-height vs the --t-* tokens, off spacing/radius/shadow,
+   color misuse, missing hover/focus/disabled/empty state).
+2. FIX by routing everything through StyleTag() tokens + components.go helpers; correct
+   typography and spacing; add/extend a reusable component rather than copy-pasting
+   markup. Grep to PROVE no raw hex/spacing remains in the page.
+3. COMPONENTS WORKING: for every shared component the surface uses, verify it renders
+   correctly across ALL states (RecommendationPill BID/NO_BID/REVIEW; DeadlinePill each
+   UrgencyFor band; FitRing each FitBandFor band; StatusBadge every ProposalStatus;
+   MetaTag; HeaderLockup; FaviconLink) and extend the component tests to assert the
+   correct class/token/markup per state.
+4. TEST + RUN: `go test ./internal/dashboard/...`, then `go build` the dashboard and run
+   `bin\dashboard.exe --store=.\design-store --port=8901`.
+5. VERIFY IN A REAL BROWSER (non-negotiable — do the checks for real, don't eyeball
+   HTML): use the gstack-browse skill to load each surface at http://127.0.0.1:8901,
+   screenshot it, and diff side-by-side against design-handoff/screenshots/. Run the
+   gstack-design-review skill (spacing, hierarchy, AI-slop, inconsistency) on each
+   surface and resolve its findings. Confirm the computed font-family is the designed
+   face, not the fallback.
+6. COMMIT on feature/<ticket>-design-<surface> and open/refresh a PR (base main, do NOT
+   merge). Maintain a running checklist in docs/dashboard/design-consistency.md (each
+   surface + components, the divergences, the fixes, the screenshot-diff verdict).
+
+STOP WHEN ALL TRUE: every surface consumes only tokens + shared components (grep proves
+zero per-page hardcoded design values); typography renders in Figtree/Geist Mono (or a
+consistent, ux-spec-documented fallback); every shared component is correct across all
+states with tests; each screen matches its design-handoff/screenshots/ checksum on a
+live browser render; gstack-design-review returns no findings on two consecutive passes
+per surface; `make all` is green; and the PRs are handed to Malik to merge. End each
+iteration with ONE line: which surface, what was fixed, the screenshot-diff verdict, and
+what's next.
+================================================================================
