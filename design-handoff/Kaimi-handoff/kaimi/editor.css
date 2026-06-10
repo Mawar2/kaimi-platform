@@ -1,0 +1,54 @@
+/* ============================================================
+   KAIMI — Working-draft editor styles (web)
+   Mirror of the editor section in desktop.css — keep in sync.
+   ============================================================ */
+.ed-fullpage{ height:100vh; }
+
+/* ============================================================
+   DRAFT EDITOR
+   ============================================================ */
+.ed{ display:grid; grid-template-columns:252px 1fr; height:100%; min-height:0; }
+.ed-rail{ border-right:1px solid var(--line, rgba(16,30,60,0.08)); background:#fff; overflow-y:auto; padding:14px 12px; }
+.ed-rail .er-h{ font:600 11px/1 var(--font-sans); text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-4); padding:8px 10px 10px; }
+.ed-sec{ display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left; padding:9px 10px; border-radius:var(--r-md);
+  border:0; background:transparent; cursor:pointer; transition:background var(--m-fast); }
+.ed-sec:hover{ background:var(--n-50); }
+.ed-sec.cur{ background:var(--blue-50); }
+.ed-sec .dot{ width:8px; height:8px; border-radius:50%; margin-top:5px; flex:none; background:var(--st-done); }
+.ed-sec.warn .dot{ background:var(--st-human); box-shadow:0 0 0 3px var(--st-human-bg); }
+.ed-sec b{ font:600 13px/1.35 var(--font-sans); color:var(--ink-2); display:block; }
+.ed-sec.cur b{ color:var(--blue-700); }
+.ed-sec .sub{ font:500 11px/1 var(--font-mono); color:var(--ink-4); display:block; margin-top:4px; }
+
+.ed-main{ display:flex; flex-direction:column; min-width:0; min-height:0; }
+.ed-top{ flex:none; display:flex; align-items:center; gap:14px; padding:12px 22px; border-bottom:1px solid var(--line, rgba(16,30,60,0.08)); background:#fff; }
+.ed-top .ed-name{ font:650 14.5px/1.2 var(--font-sans); }
+.ed-top .ed-name span{ display:block; font:500 11.5px/1 var(--font-mono); color:var(--ink-4); margin-top:4px; }
+.ed-ver{ display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 11px; border-radius:var(--r-pill);
+  background:var(--n-100); font:600 12px/1 var(--font-sans); color:var(--ink-2); white-space:nowrap; }
+.ed-ver.you{ background:var(--blue-50); color:var(--blue-700); }
+.ed-save{ font:550 12px/1 var(--font-sans); color:var(--ink-4); display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.ed-save .sdot{ width:7px; height:7px; border-radius:50%; background:var(--st-done); }
+.ed-save.saving .sdot{ background:var(--st-progress); animation:kBlink 0.9s infinite; }
+.ed-scroll{ flex:1; overflow-y:auto; padding:30px 22px 80px; background:var(--app-bg, #FBFCFE); }
+.ed-doc{ max-width:740px; margin:0 auto; background:#fff; border:1px solid var(--line, rgba(16,30,60,0.08));
+  border-radius:var(--r-lg); box-shadow:var(--e-2); padding:52px 58px 64px; }
+.ed-doc .ed-title{ font:750 23px/1.25 var(--font-sans); letter-spacing:-0.015em; }
+.ed-doc .ed-meta{ font:500 11.5px/1.6 var(--font-mono); color:var(--ink-4); margin-top:8px; padding-bottom:22px; border-bottom:1px solid var(--line, rgba(16,30,60,0.08)); }
+.ed-doc section{ margin-top:30px; }
+.ed-doc .sec-head2{ display:flex; align-items:baseline; gap:10px; }
+.ed-doc h3{ font:700 16px/1.3 var(--font-sans); color:var(--ink); }
+.ed-doc h3 .no{ color:var(--cyan-600); font-family:var(--font-mono); font-weight:600; font-size:13px; margin-right:8px; }
+.ed-doc .reqtag{ margin-left:auto; font:500 10.5px/1 var(--font-mono); color:var(--ink-4); background:var(--n-50);
+  border:1px solid var(--line, rgba(16,30,60,0.08)); padding:4px 8px; border-radius:var(--r-pill); white-space:nowrap; flex:none; }
+.ed-doc [contenteditable]{ font:450 14.5px/1.75 var(--font-sans); color:var(--ink-2); margin-top:10px; outline:none;
+  border-radius:6px; transition:box-shadow var(--m-fast); }
+.ed-doc [contenteditable] p{ margin:0 0 12px; }
+.ed-doc [contenteditable]:hover{ box-shadow:0 0 0 6px var(--n-25), 0 0 0 7px var(--n-200); }
+.ed-doc [contenteditable]:focus{ box-shadow:0 0 0 6px var(--n-25), 0 0 0 7px var(--cyan-300); color:var(--ink); }
+.ed-flag{ display:flex; gap:12px; margin-top:14px; padding:13px 15px; border-radius:var(--r-md);
+  background:var(--st-human-bg); border:1px solid color-mix(in oklab,var(--st-human) 32%,transparent); }
+.ed-flag .ef-ic{ width:30px; height:30px; border-radius:9px; flex:none; display:grid; place-items:center;
+  background:color-mix(in oklab,var(--st-human) 20%,transparent); color:var(--st-human); }
+.ed-flag b{ font:650 13px/1.35 var(--font-sans); color:color-mix(in oklab,var(--st-human) 75%,black); display:block; }
+.ed-flag p{ font:450 12.5px/1.5 var(--font-sans); color:var(--ink-soft); margin:3px 0 0; }

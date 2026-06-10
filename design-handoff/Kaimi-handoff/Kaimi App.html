@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kaimi</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230A1B3D'/%3E%3Ccircle cx='44' cy='21' r='8' fill='%2322D3EE'/%3E%3Cpath d='M10 40C18 30 25 30 32 40C39 50 46 50 54 40' stroke='white' stroke-width='6.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="kaimi/tokens.css" />
+<link rel="stylesheet" href="kaimi/ui.css" />
+<link rel="stylesheet" href="kaimi/app.css" />
+<link rel="stylesheet" href="kaimi/editor.css" />
+<style>
+  #root{ min-height:100vh; }
+  .route-fade{ animation: routeIn .28s var(--ease) both; }
+  @keyframes routeIn{ from{ transform:translateY(6px);} to{ transform:none;} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="kaimi/app-data.js"></script>
+<script type="text/babel" src="kaimi/lifecycle-components.jsx"></script>
+<script type="text/babel" src="kaimi/app-screens.jsx"></script>
+<script type="text/babel" src="kaimi/app-proposals.jsx"></script>
+<script type="text/babel" src="kaimi/app-submitted.jsx"></script>
+<script type="text/babel" src="kaimi/app-workspace.jsx"></script>
+<script type="text/babel" src="kaimi/desktop-editor.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+function App(){
+  const [route, setRoute] = useState(() => localStorage.getItem("kaimi_app_route") || "opps");
+  const [proposals, setProposals] = useState(window.KAIMI_PROPOSALS);
+  const [filter, setFilter] = useState("all");
+  const [drawerOpp, setDrawerOpp] = useState(null);
+  const [pursued, setPursued] = useState(()=> new Set());
+  const [workspaceId, setWorkspaceId] = useState(null);
+
+  useEffect(()=>{ localStorage.setItem("kaimi_app_route", route); }, [route]);
+
+  const needsCount = proposals.filter(p=>p.status==="human").length;
+  const go = (r)=> setRoute(r);
+
+  /* Pursued or in-flight opportunities leave the queue — they live in Proposals now. */
+  const visibleOpps = window.KAIMI_OPPS.filter(o =>
+    !pursued.has(o.id) && !proposals.some(p => p.oppId === o.id));
+
+  /* The submitted archive: live submissions (just now) + history. */
+  const liveSubmitted = proposals.filter(p=>p.status==="submitted").map(p=>({
+    id:"live-"+p.id, title:p.title, agency:p.agency, sol:p.sol||"—", fit:p.fit,
+    value:p.value||"—", valueNum:p.valueNum||0, submitted:"Just now", status:"pending",
+    award:"Confirmation logged · Kaimi is watching for amendments", isNew:true,
+    docs:[ {name:"technical-volume-final.docx", meta:"18 pp"}, {name:"compliance-matrix.xlsx", meta:"24 reqs"}, {name:"solicitation-"+(p.sol||"")+".pdf", meta:"SAM.gov"} ],
+  }));
+  const submittedAll = [...liveSubmitted, ...window.KAIMI_SUBMITTED];
+  const activeProposals = proposals.filter(p=>p.status!=="submitted");
+
+  const openOpp = (o)=> setDrawerOpp(o);
+  const selectOpp = (o)=>{
+    const id = "np-"+o.id;
+    setProposals(prev => prev.some(x=>x.id===id) ? prev : [{
+      id, title:o.title, agency:o.agency, fit:o.fit,
+      oppId:o.id, sol:o.sol, value:o.value ? o.value.split(" ")[0] : "—", valueNum:o.valueNum||0,
+      deadlineLabel:o.deadlineLabel, deadlineLevel:o.deadlineLevel,
+      stageIndex:0, status:"progress", agents:1, when:"Noa outlining now"
+    }, ...prev]);
+    setPursued(prev => { const n=new Set(prev); n.add(o.id); return n; });
+    setDrawerOpp(null);
+    setRoute("proposals");
+  };
+
+  const openProposal = (p)=>{ setWorkspaceId(p.id); setRoute("workspace"); };
+  const openDraft = (p)=>{ setWorkspaceId(p.id); setRoute("editor"); };
+
+  const approve = (p)=>{
+    setProposals(prev => prev.map(x=> x.id===p.id ? {...x, stageIndex:3, status:"progress", agents:1, when:"Vera finalizing"} : x));
+    setTimeout(()=> setProposals(prev => prev.map(x=> x.id===p.id ? {...x, stageIndex:4, status:"done", agents:0, when:"Ready to submit"} : x)), 2600);
+  };
+  const requestChanges = (p)=>{
+    setProposals(prev => prev.map(x=> x.id===p.id ? {...x, stageIndex:1, status:"progress", agents:2, when:"Tomás revising"} : x));
+    setTimeout(()=> setProposals(prev => prev.map(x=> x.id===p.id ? {...x, stageIndex:2, status:"human", agents:0, when:"Paused just now"} : x)), 2600);
+  };
+  const submit = (p)=>{
+    setProposals(prev => prev.map(x=> x.id===p.id ? {...x, status:"submitted", agents:0, when:"Submitted just now"} : x));
+  };
+
+  // Ambient autonomy: agents keep working in the background.
+  useEffect(()=>{
+    const t1 = setTimeout(()=>{
+      setProposals(prev => prev.map(x=> (x.id==="p3" && x.status==="progress" && x.stageIndex===1)
+        ? {...x, stageIndex:2, status:"human", agents:0, when:"Paused just now"} : x));
+    }, 14000);
+    const t2 = setTimeout(()=>{
+      setProposals(prev => prev.map(x=> (x.id==="p5" && x.status==="progress" && x.stageIndex===0)
+        ? {...x, stageIndex:1, agents:2, when:"Tomás drafting now"} : x));
+    }, 26000);
+    return ()=>{ clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
+  const wsProp = proposals.find(p=>p.id===workspaceId) || null;
+  let effRoute = route;
+  if((route==="workspace" || route==="editor") && !wsProp) effRoute = "proposals";
+
+  if(effRoute==="editor"){
+    return (
+      <div className="ed-fullpage route-fade">
+        <window.DraftEditor proposal={wsProp} online={true} onBack={()=>setRoute("workspace")} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <window.Sidebar route={effRoute} go={go} needsCount={needsCount}
+        queueCount={visibleOpps.length} activeCount={activeProposals.length} submittedCount={submittedAll.length} />
+      <main className="main">
+        <div className="route-fade" key={effRoute}>
+          {effRoute==="opps" && (
+            <window.OpportunitiesScreen opps={visibleOpps} onOpen={openOpp} filter={filter} setFilter={setFilter} />
+          )}
+          {effRoute==="proposals" && (
+            <window.ProposalsScreen proposals={activeProposals} onOpen={openProposal} />
+          )}
+          {effRoute==="submitted" && (
+            <window.SubmittedScreen items={submittedAll} />
+          )}
+          {effRoute==="workspace" && (
+            <window.WorkspaceScreen p={wsProp} onBack={()=>setRoute("proposals")} onApprove={approve} onChanges={requestChanges} onSubmit={submit} onOpenDraft={openDraft} />
+          )}
+        </div>
+      </main>
+
+      {drawerOpp && (
+        <window.OppDrawer opp={drawerOpp} onClose={()=>setDrawerOpp(null)}
+          onSelect={selectOpp} pursued={pursued.has(drawerOpp.id)} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

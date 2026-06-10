@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="focus">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kaimi · Proposal Lifecycle</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230A1B3D'/%3E%3Ccircle cx='44' cy='21' r='8' fill='%2322D3EE'/%3E%3Cpath d='M10 40C18 30 25 30 32 40C39 50 46 50 54 40' stroke='white' stroke-width='6.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="kaimi/tokens.css" />
+<link rel="stylesheet" href="kaimi/ui.css" />
+<link rel="stylesheet" href="kaimi/lifecycle.css" />
+<link rel="stylesheet" href="kaimi/lifecycle-bc.css" />
+<style>
+  /* take description strip */
+  .take-strip { display:flex; align-items:center; gap:12px; padding:0 38px 6px; }
+  .take-strip .ts-tag { font:700 12px/1 var(--font-mono); color:var(--accent); padding:5px 9px; border-radius:var(--r-xs);
+    background: color-mix(in oklab, var(--accent) 14%, transparent); }
+  .take-strip .ts-name { font:650 14px/1 var(--font-sans); }
+  .take-strip .ts-desc { font-size:13px; color:var(--ink-3); }
+  .take-strip .ts-sep { width:3px;height:3px;border-radius:50%;background:var(--ink-4); }
+  .head-divider { height:1px; background:var(--border); margin:6px 38px 0; }
+  #root { min-height:100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="kaimi/lifecycle-data.js"></script>
+<script type="text/babel" src="kaimi/lifecycle-components.jsx"></script>
+<script type="text/babel" src="kaimi/lifecycle-shared.jsx"></script>
+<script type="text/babel" src="kaimi/take-a.jsx"></script>
+<script type="text/babel" src="kaimi/take-b.jsx"></script>
+<script type="text/babel" src="kaimi/take-c.jsx"></script>
+<script type="text/babel" src="kaimi/tweaks-panel.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const TAKES = {
+  A: { name: "Timeline Rail",  desc: "The whole pipeline as a vertical timeline of stage cards. Most legible." },
+  B: { name: "Focus Stage",    desc: "One stage at a time, in depth. The gate becomes a calm spotlight handoff." },
+  C: { name: "Split Command",  desc: "Live agent feed beside the document being built. Command-center scale." },
+};
+
+const TWEAK_DEFAULTS = {
+  accent: "#22D3EE",
+  human:  "#E8870E",
+  calmMotion: false,
+};
+
+function App(){
+  const [take, setTake] = useState(() => localStorage.getItem("kaimi_take") || "A");
+  const [tw, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
+  const lc = window.useLifecycle(1);
+  useEffect(()=>{ localStorage.setItem("kaimi_take", take); }, [take]);
+
+  useEffect(()=>{
+    const r = document.documentElement;
+    r.style.setProperty("--accent", tw.accent);
+    r.style.setProperty("--cyan-400", tw.accent);
+    r.style.setProperty("--st-human", tw.human);
+    r.style.setProperty("--st-human-tint", `color-mix(in oklab, ${tw.human} 72%, white)`);
+    r.style.setProperty("--st-human-glow", `color-mix(in oklab, ${tw.human} 55%, transparent)`);
+    r.classList.toggle("calm", tw.calmMotion);
+  }, [tw.accent, tw.human, tw.calmMotion]);
+
+  const t = TAKES[take];
+  const Take = take==="A" ? window.TakeA : take==="B" ? window.TakeB : window.TakeC;
+  const TP = window.TweaksPanel, TSec = window.TweakSection, TColor = window.TweakColor, TToggle = window.TweakToggle;
+
+  return (
+    <div className="focus-app">
+      <div className="topnav-focus">
+        <a className="back-triage" href="Kaimi Design System.html" title="Back to the design system">
+          <window.I.back/>
+        </a>
+        <div className="brand-focus">
+          <div className="mk">
+            <svg width="20" height="20" viewBox="0 0 64 64" fill="none">
+              <circle cx="45" cy="19" r="7" fill="#22D3EE"/>
+              <path d="M9 38C17 28 24 28 31 38C38 48 45 48 53 38" stroke="#67E0F4" strokeWidth="5.4" strokeLinecap="round"/>
+              <path d="M9 48C17 38 24 38 31 48C38 58 45 58 53 48" stroke="#fff" strokeWidth="5.4" strokeLinecap="round" opacity="0.9"/>
+            </svg>
+          </div>
+          <div className="nm">Kaimi <small>· Focus</small></div>
+        </div>
+        <div className="switcher" role="tablist" aria-label="Hero take">
+          {["A","B","C"].map(k=>(
+            <button key={`${k}${take===k?"-on":""}`} className={take===k ? "is-active" : ""} aria-pressed={take===k} onClick={()=>setTake(k)}>
+              <span className="n">{k}</span>{TAKES[k].name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <window.ProposalHeader/>
+
+      <div className="take-strip">
+        <span className="ts-tag">TAKE {take}</span>
+        <span className="ts-name">{t.name}</span>
+        <span className="ts-sep"></span>
+        <span className="ts-desc">{t.desc}</span>
+      </div>
+      <div className="head-divider"></div>
+
+      <Take lc={lc} />
+
+      <TP title="Tweaks">
+        <TSec label="Kaimi signal" />
+        <TColor label="Accent" value={tw.accent}
+          options={["#22D3EE","#2DD4A7","#38BDF8","#A99BFF"]}
+          onChange={(v)=>setTweak("accent", v)} />
+        <TSec label="Human attention" />
+        <TColor label="Needs-Human" value={tw.human}
+          options={["#E8870E","#F5A623","#F2683C","#EAB308"]}
+          onChange={(v)=>setTweak("human", v)} />
+        <TToggle label="Calm motion" value={tw.calmMotion}
+          onChange={(v)=>setTweak("calmMotion", v)} />
+      </TP>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
