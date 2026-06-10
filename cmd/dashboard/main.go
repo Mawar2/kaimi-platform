@@ -161,7 +161,7 @@ func run() error {
 	liveWriter := flag.Bool("live-writer", false, "Draft with the real Gemini writer (Vertex AI ADC; needs GCP_PROJECT_ID)")
 	liveReview := flag.Bool("live-review", false, "Run the Gemini compliance pass in Final Review (Vertex AI ADC; needs GCP_PROJECT_ID)")
 	liveIngest := flag.Bool("live-ingest", false, "Ingest solicitation documents (GCS + Document AI; needs GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, DOCUMENTAI_PROCESSOR_ID)")
-	profilePath := flag.String("profile", "", "Capability profile JSON for grounding the writer (optional)")
+	profilePath := flag.String("profile", "config/bluemeta_scorer_profile.json", "Capability profile JSON for grounding the writer (BlueMeta's real profile by default)")
 	flag.Parse()
 
 	if *storePath == "" {
