@@ -1,0 +1,2314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kaimi · Pitch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230A1B3D'/%3E%3Ccircle cx='44' cy='21' r='8' fill='%2322D3EE'/%3E%3Cpath d='M10 40C18 30 25 30 32 40C39 50 46 50 54 40' stroke='white' stroke-width='6.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   KAIMI — Pitch deck styles
+   Navy primary + light breather slides. Cyan accent, amber = human.
+   ============================================================ */
+:root{
+  --navy:#0A1B3D; --navy-2:#102450; --blue:#2563EB; --blue-l:#5B9BFF; --cyan:#22D3EE; --cyan-d:#0EA5C4;
+  --ink:#0A1B3D; --ink-2:#475569; --ink-3:#7587AE; --paper:#F4F6FA; --line:#E2E8F2;
+  --green:#15A06B; --violet:#7C6BF5; --amber:#E8870E; --amber-l:#F6A938;
+  --font:"Figtree", system-ui, sans-serif; --mono:"IBM Plex Mono", monospace;
+}
+*{ box-sizing:border-box; margin:0; padding:0; }
+deck-stage:not(:defined){ visibility:hidden; }
+body{ background:#05112B; font-family:var(--font); }
+deck-stage{ --w:1920px; }
+
+/* every slide fills the canvas */
+section{ width:1920px; height:1080px; overflow:hidden; position:relative;
+  font-family:var(--font); color:#fff; background:var(--navy); }
+section.dark{ background:
+  radial-gradient(1100px 600px at 84% -8%, rgba(34,211,238,0.12), transparent 60%),
+  radial-gradient(900px 700px at -6% 108%, rgba(37,99,235,0.18), transparent 55%),
+  linear-gradient(165deg,#0C1E46,var(--navy) 58%,#06112B); }
+section.light{ background:var(--paper); color:var(--ink); }
+
+/* shared building blocks */
+.pad{ position:absolute; inset:0; padding:108px 130px; display:flex; flex-direction:column; }
+.eyebrow{ font:700 24px/1 var(--font); letter-spacing:0.2em; text-transform:uppercase; color:var(--cyan); }
+section.light .eyebrow{ color:var(--cyan-d); }
+.kicker-row{ display:flex; align-items:center; gap:18px; }
+.kicker-num{ font:600 24px/1 var(--mono); color:var(--ink-3); }
+
+h1.big{ font:800 92px/1.02 var(--font); letter-spacing:-0.03em; }
+h1.big em{ font-style:normal; color:var(--cyan); }
+h2.title{ font:800 66px/1.05 var(--font); letter-spacing:-0.025em; }
+section.light h2.title{ color:var(--ink); }
+.lead{ font:420 30px/1.5 var(--font); color:#C3D0E8; max-width:34ch; }
+section.light .lead{ color:var(--ink-2); }
+
+.mk-row{ display:flex; align-items:center; gap:22px; }
+.mk-row .nm{ font:800 34px/1 var(--font); letter-spacing:-0.02em; color:#fff; }
+.mk-row .nm small{ display:block; font:600 15px/1 var(--font); letter-spacing:0.2em; color:#67E0F4; margin-top:9px; }
+
+/* footer brand on content slides */
+.foot{ position:absolute; left:130px; bottom:54px; display:flex; align-items:center; gap:13px;
+  font:600 24px/1 var(--font); color:var(--ink-3); }
+.foot svg{ width:26px; height:26px; }
+.pageno{ position:absolute; right:130px; bottom:54px; font:600 24px/1 var(--mono); color:var(--ink-3); }
+
+/* ---------- cover ---------- */
+.cover-waves{ position:absolute; right:-60px; top:80px; width:1000px; opacity:0.55; }
+.cover-pipe{ display:flex; align-items:center; gap:14px; margin-top:60px; }
+.cp-node{ width:54px; height:54px; border-radius:16px; display:grid; place-items:center; flex:none; }
+.cp-line{ width:46px; height:3px; border-radius:2px; background:rgba(150,180,230,0.3); }
+.cp-line.amber{ background:linear-gradient(90deg,rgba(150,180,230,0.3),var(--amber-l)); }
+
+/* ---------- stat / problem ---------- */
+.prob-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:34px; margin-top:auto; }
+.prob-card{ background:rgba(255,255,255,0.04); border:1px solid rgba(150,180,230,0.16); border-radius:24px; padding:40px; }
+.prob-card .pn{ font:800 76px/1 var(--font); letter-spacing:-0.02em; color:#fff; }
+.prob-card .pn.cy{ color:var(--cyan); }
+.prob-card .pl{ font:450 24px/1.45 var(--font); color:#A8B8DA; margin-top:18px; }
+
+/* ---------- solution statement ---------- */
+.sol-statement{ font:800 80px/1.12 var(--font); letter-spacing:-0.03em; max-width:24ch; margin-top:30px; }
+.sol-statement .hl{ color:var(--cyan-d); }
+.sol-sub{ font:420 30px/1.5 var(--font); color:var(--ink-2); margin-top:36px; max-width:50ch; }
+
+/* ---------- pipeline (how it works) ---------- */
+.flow{ display:flex; align-items:flex-start; justify-content:space-between; margin-top:auto; margin-bottom:30px; }
+.fnode{ display:flex; flex-direction:column; align-items:center; gap:18px; width:200px; text-align:center; }
+.fring{ width:96px; height:96px; border-radius:28px; display:grid; place-items:center; }
+.fring svg{ width:44px; height:44px; }
+.fnode .fnm{ font:750 28px/1.1 var(--font); color:var(--ink); }
+.fnode .fro{ font:500 24px/1.3 var(--mono); color:var(--ink-3); }
+.fconn{ flex:1; height:3px; background:var(--line); margin-top:46px; border-radius:2px; min-width:20px; }
+.fconn.amber{ background:linear-gradient(90deg,var(--line),var(--amber-l)); }
+.fnode.gate .fnm{ color:var(--amber); }
+
+/* ---------- meet the team lineup ---------- */
+.lineup{ display:grid; grid-template-columns:repeat(5,1fr); gap:26px; margin-top:auto; }
+.lu{ background:rgba(255,255,255,0.04); border:1px solid rgba(150,180,230,0.16); border-radius:24px; padding:34px 26px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; gap:18px; }
+.lu .luav{ width:96px; height:96px; border-radius:28px; display:grid; place-items:center; font:800 38px/1 var(--font); color:#fff; }
+.lu .lunm{ font:800 30px/1 var(--font); color:#fff; }
+.lu .luro{ font:600 24px/1.3 var(--font); letter-spacing:0.04em; text-transform:uppercase; color:var(--cyan); margin-top:-8px; }
+.lu .luwhat{ font:450 24px/1.4 var(--font); color:#A8B8DA; }
+.lu .luglyph svg{ width:40px; height:40px; }
+
+/* ---------- individual agent slide ---------- */
+.agent-wrap{ display:grid; grid-template-columns:560px 1fr; gap:90px; height:100%; align-items:center; }
+.agent-portrait{ display:flex; flex-direction:column; align-items:flex-start; gap:34px; }
+.agent-av{ width:230px; height:230px; border-radius:60px; display:grid; place-items:center; font:800 96px/1 var(--font); color:#fff;
+  box-shadow:0 30px 80px rgba(0,0,0,0.4); position:relative; }
+.agent-av .gly svg{ width:104px; height:104px; }
+.agent-av .ring2{ position:absolute; inset:-16px; border-radius:74px; border:2px solid rgba(34,211,238,0.3); }
+.agent-portrait .zone{ display:inline-flex; align-items:center; gap:11px; padding:11px 20px; border-radius:999px;
+  background:rgba(255,255,255,0.06); border:1px solid rgba(150,180,230,0.2); font:600 24px/1 var(--font); color:#A8B8DA; }
+.agent-portrait .zone .zd{ width:11px; height:11px; border-radius:50%; }
+.agent-info .arole{ font:700 24px/1 var(--font); letter-spacing:0.06em; text-transform:uppercase; color:var(--cyan); }
+.agent-info h2{ font:800 104px/0.98 var(--font); letter-spacing:-0.03em; margin-top:18px; }
+.agent-info .asays{ font:420 34px/1.45 var(--font); color:#C3D0E8; margin-top:30px; max-width:30ch; }
+.agent-value{ display:flex; gap:40px; margin-top:54px; }
+.agent-value .av-item{ flex:1; }
+.agent-value .av-n{ font:800 52px/1 var(--font); color:#fff; }
+.agent-value .av-n.cy{ color:var(--cyan); }
+.agent-value .av-l{ font:450 21px/1.4 var(--font); color:#8A9BBC; margin-top:14px; }
+
+/* ---------- human gate slide ---------- */
+.gate-hero{ display:flex; flex-direction:column; height:100%; justify-content:center; }
+.handoff-big{ display:flex; align-items:center; gap:50px; margin-top:60px; }
+.hb-av{ width:150px; height:150px; border-radius:42px; display:grid; place-items:center; font:800 62px/1 var(--font); color:#fff; }
+.hb-arrow{ display:flex; flex-direction:column; align-items:center; gap:14px; color:var(--amber); }
+.hb-arrow svg{ width:90px; height:50px; }
+.hb-arrow .hl{ font:600 24px/1 var(--font); letter-spacing:0.1em; text-transform:uppercase; }
+.hb-you{ width:150px; height:150px; border-radius:42px; display:grid; place-items:center;
+  background:linear-gradient(155deg,var(--amber-l),var(--amber)); color:#fff; box-shadow:0 24px 60px rgba(232,135,14,0.4); }
+.hb-you svg{ width:74px; height:74px; }
+.gate-quote{ font:800 64px/1.12 var(--font); letter-spacing:-0.025em; max-width:24ch; margin-top:54px; }
+.gate-quote .am{ color:var(--amber-l); }
+
+/* ---------- product slide ---------- */
+.prod-grid{ display:grid; grid-template-columns:1.3fr 1fr; gap:56px; margin-top:50px; flex:1; align-items:center; }
+.prod-shot{ border-radius:24px; overflow:hidden; border:1px solid var(--line); box-shadow:0 30px 70px rgba(10,27,61,0.18); background:#fff; }
+.prod-points{ display:flex; flex-direction:column; gap:32px; }
+.pp{ display:flex; gap:22px; }
+.pp .ppic{ width:60px; height:60px; border-radius:17px; flex:none; display:grid; place-items:center; background:var(--paper); border:1px solid var(--line); color:var(--blue); }
+.pp .ppic svg{ width:28px; height:28px; }
+.pp b{ font:750 28px/1.2 var(--font); color:var(--ink); display:block; }
+.pp span{ font:450 21px/1.45 var(--font); color:var(--ink-2); display:block; margin-top:8px; }
+
+/* ---------- value / why now ---------- */
+.val-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:34px; margin-top:auto; }
+.val-card{ background:rgba(255,255,255,0.04); border:1px solid rgba(150,180,230,0.16); border-radius:24px; padding:42px 46px; display:flex; gap:30px; align-items:flex-start; }
+.val-card .vic{ width:64px; height:64px; border-radius:18px; flex:none; display:grid; place-items:center; background:rgba(34,211,238,0.12); color:var(--cyan); }
+.val-card .vic svg{ width:30px; height:30px; }
+.val-card b{ font:750 30px/1.2 var(--font); color:#fff; display:block; }
+.val-card span{ font:450 22px/1.45 var(--font); color:#A8B8DA; display:block; margin-top:10px; }
+
+.stack-row{ display:flex; gap:24px; margin-top:auto; }
+.stack-chip{ flex:1; background:#fff; border:1px solid var(--line); border-radius:22px; padding:34px; }
+.stack-chip .sc-l{ font:600 17px/1 var(--font); letter-spacing:0.05em; text-transform:uppercase; color:var(--ink-3); }
+.stack-chip .sc-v{ font:800 38px/1.05 var(--font); color:var(--ink); margin-top:16px; letter-spacing:-0.01em; }
+.stack-chip .sc-d{ font:450 19px/1.4 var(--font); color:var(--ink-2); margin-top:12px; }
+
+/* ---------- close ---------- */
+.close-cta{ display:inline-flex; align-items:center; gap:16px; margin-top:54px; padding:26px 44px; border-radius:20px;
+  background:linear-gradient(180deg,var(--cyan),var(--cyan-d)); color:#042530; font:800 30px/1 var(--font); }
+.close-cta svg{ width:32px; height:32px; }
+.close-aud{ display:flex; gap:40px; margin-top:60px; }
+.close-aud .ca{ font:450 24px/1.4 var(--font); color:#A8B8DA; display:flex; align-items:center; gap:13px; }
+.close-aud .ca b{ color:#fff; font-weight:700; }
+.close-aud .ca .cd{ width:12px; height:12px; border-radius:50%; background:var(--cyan); }
+
+/* entrance animations — translate-only so content is ALWAYS visible
+   (never animate opacity from 0: if an animation stalls, content must still show) */
+@media (prefers-reduced-motion: no-preference){
+  [data-deck-active] .anim{ animation:rise .7s cubic-bezier(0.16,1,0.3,1) both; }
+  [data-deck-active] .anim.d1{ animation-delay:.08s; }
+  [data-deck-active] .anim.d2{ animation-delay:.16s; }
+  [data-deck-active] .anim.d3{ animation-delay:.24s; }
+  [data-deck-active] .anim.d4{ animation-delay:.32s; }
+  @keyframes rise{ from{ transform:translateY(26px);} to{ transform:none;} }
+}
+
+</style>
+</head>
+<body>
+<deck-stage width="1920" height="1080">
+
+  <!-- 1 · COVER -->
+  <section class="dark" data-label="Cover">
+    <svg class="cover-waves" viewBox="0 0 1000 500" fill="none">
+      <path d="M-20 200C180 80 380 80 580 200C780 320 980 320 1180 200" stroke="rgba(34,211,238,0.4)" stroke-width="4"/>
+      <path d="M-20 300C180 180 380 180 580 300C780 420 980 420 1180 300" stroke="rgba(91,155,255,0.28)" stroke-width="4"/>
+      <path d="M-20 400C180 280 380 280 580 400C780 520 980 520 1180 400" stroke="rgba(255,255,255,0.12)" stroke-width="4"/>
+    </svg>
+    <div class="pad">
+      <div class="mk-row anim">
+        <svg width="68" height="68" viewBox="0 0 64 64" fill="none">
+          <circle cx="45" cy="18.5" r="6.6" fill="#22D3EE"/>
+          <path d="M9 37.5C16.5 28 23.5 28 31 37.5C38.5 47 45.5 47 53 37.5" stroke="#67E0F4" stroke-width="4.8" stroke-linecap="round"/>
+          <path d="M9 47.5C16.5 38 23.5 38 31 47.5C38.5 57 45.5 57 53 47.5" stroke="#fff" stroke-width="4.8" stroke-linecap="round" opacity="0.92"/>
+        </svg>
+        <div class="nm">Kaimi<small>THE SEEKER · BY BLUEMETA</small></div>
+      </div>
+      <div style="margin-top:auto;">
+        <h1 class="big anim d1">The agents hunt.<br/><em>You</em> make the calls.</h1>
+        <p class="lead anim d2" style="margin-top:38px; max-width:48ch;">Autonomous federal business development — Kaimi finds, scores, and drafts the right opportunities, and pauses for your review before anything ships.</p>
+        <div class="cover-pipe anim d3">
+          <div class="cp-node" style="background:#EAF0FB;color:#2563EB"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 12a9 9 0 1 0 6.36 2.64" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12L19 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.3" fill="currentColor"/></svg></div>
+          <div class="cp-line"></div>
+          <div class="cp-node" style="background:linear-gradient(155deg,#5B9BFF,#2563EB);color:#fff"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="cp-line"></div>
+          <div class="cp-node" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#06303b"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M20 4C12 5 7 10 5.5 16.5L4 20l3.5-1.5C14 17 19 12 20 4z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M5.5 16.5l7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+          <div class="cp-line amber"></div>
+          <div class="cp-node" style="background:linear-gradient(180deg,#F6A938,#E8870E);color:#fff"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V6a1.5 1.5 0 0 1 3 0v7c0 3.5-2.2 7-6.5 7C10 20 8.4 18.6 7 16.5l-2.2-3.4a1.5 1.5 0 0 1 2.4-1.8L8 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="cp-line"></div>
+          <div class="cp-node" style="background:linear-gradient(155deg,#A99BFF,#7C6BF5);color:#fff"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="11" r="7.5" stroke="currentColor" stroke-width="1.9"/><path d="M9 11l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 17.5L7 22l5-2 5 2-1.5-4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · PROBLEM -->
+  <section class="dark" data-label="The problem">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">The problem</span></div>
+      <h2 class="title anim d1" style="margin-top:30px; max-width:22ch;">Federal BD is a full-time hunt — and most of it is wasted motion.</h2>
+      <div class="prob-grid">
+        <div class="prob-card anim d2"><div class="pn">11k+</div><div class="pl">notices posted to SAM.gov every week. The right ones hide in the noise.</div></div>
+        <div class="prob-card anim d3"><div class="pn cy">days</div><div class="pl">to draft one compliant proposal — time small BD teams simply don't have.</div></div>
+        <div class="prob-card anim d4"><div class="pn">~3%</div><div class="pl">of opportunities are a real fit. Bid/no-bid calls are slow and subjective.</div></div>
+      </div>
+    </div>
+    <div class="foot"><svg viewBox="0 0 64 64" fill="none"><circle cx="45" cy="19" r="7" fill="#0EA5C4"/><path d="M9 38C17 28 24 28 31 38C38 48 45 48 53 38" stroke="#5B9BFF" stroke-width="5.4" stroke-linecap="round"/><path d="M9 48C17 38 24 38 31 48C38 58 45 58 53 48" stroke="#7587AE" stroke-width="5.4" stroke-linecap="round"/></svg>Kaimi</div>
+    <div class="pageno">02</div>
+  </section>
+
+  <!-- 3 · SOLUTION -->
+  <section class="light" data-label="The solution">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">The solution</span></div>
+      <div class="sol-statement anim d1">A pipeline of <span class="hl">agents that never sleeps</span> — with a human in command.</div>
+      <p class="sol-sub anim d2">Kaimi runs the nightly hunt, scores every opportunity for fit, and drafts the proposals worth pursuing. You review once and approve. It turns a team's worth of busywork into a single confident decision.</p>
+    </div>
+    <div class="foot" style="color:#7587AE"><svg viewBox="0 0 64 64" fill="none"><circle cx="45" cy="19" r="7" fill="#0EA5C4"/><path d="M9 38C17 28 24 28 31 38C38 48 45 48 53 38" stroke="#2563EB" stroke-width="5.4" stroke-linecap="round"/><path d="M9 48C17 38 24 38 31 48C38 58 45 58 53 48" stroke="#0A1B3D" stroke-width="5.4" stroke-linecap="round" opacity="0.5"/></svg>Kaimi</div>
+    <div class="pageno" style="color:#94A3BE">03</div>
+  </section>
+
+  <!-- 4 · HOW IT WORKS -->
+  <section class="light" data-label="How it works">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">How it works</span></div>
+      <h2 class="title anim d1" style="margin-top:26px;">Two scouts find the work. Three writers draft it. You decide.</h2>
+      <div class="flow anim d2">
+        <div class="fnode"><div class="fring" style="background:#EAF0FB;color:#2563EB"><svg viewBox="0 0 24 24" fill="none"><path d="M12 12a9 9 0 1 0 6.36 2.64" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12L19 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.3" fill="currentColor"/></svg></div><div class="fnm">Hunter</div><div class="fro">scans SAM.gov</div></div>
+        <div class="fconn"></div>
+        <div class="fnode"><div class="fring" style="background:#EAF0FB;color:#2563EB"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 1-8.6 6.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M5 5.5L7 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div><div class="fnm">Scorer</div><div class="fro">fit 0–100</div></div>
+        <div class="fconn"></div>
+        <div class="fnode"><div class="fring" style="background:linear-gradient(155deg,#5B9BFF,#2563EB);color:#fff"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div><div class="fnm">Noa</div><div class="fro">outline</div></div>
+        <div class="fconn"></div>
+        <div class="fnode"><div class="fring" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#06303b"><svg viewBox="0 0 24 24" fill="none"><path d="M20 4C12 5 7 10 5.5 16.5L4 20l3.5-1.5C14 17 19 12 20 4z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M5.5 16.5l7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div><div class="fnm">Tomás</div><div class="fro">draft</div></div>
+        <div class="fconn amber"></div>
+        <div class="fnode gate"><div class="fring" style="background:linear-gradient(180deg,#F6A938,#E8870E);color:#fff"><svg viewBox="0 0 24 24" fill="none"><path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V6a1.5 1.5 0 0 1 3 0v7c0 3.5-2.2 7-6.5 7C10 20 8.4 18.6 7 16.5l-2.2-3.4a1.5 1.5 0 0 1 2.4-1.8L8 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="fnm">You</div><div class="fro">review gate</div></div>
+        <div class="fconn"></div>
+        <div class="fnode"><div class="fring" style="background:linear-gradient(155deg,#A99BFF,#7C6BF5);color:#fff"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="11" r="7.5" stroke="currentColor" stroke-width="1.9"/><path d="M9 11l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 17.5L7 22l5-2 5 2-1.5-4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="fnm">Vera</div><div class="fro">final review</div></div>
+        <div class="fconn"></div>
+        <div class="fnode"><div class="fring" style="background:#E2F6EE;color:#15A06B"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="fnm">Submit</div><div class="fro">to SAM.gov</div></div>
+      </div>
+    </div>
+    <div class="foot" style="color:#7587AE"><svg viewBox="0 0 64 64" fill="none"><circle cx="45" cy="19" r="7" fill="#0EA5C4"/><path d="M9 38C17 28 24 28 31 38C38 48 45 48 53 38" stroke="#2563EB" stroke-width="5.4" stroke-linecap="round"/><path d="M9 48C17 38 24 38 31 48C38 58 45 58 53 48" stroke="#0A1B3D" stroke-width="5.4" stroke-linecap="round" opacity="0.5"/></svg>Kaimi</div>
+    <div class="pageno" style="color:#94A3BE">04</div>
+  </section>
+
+  <!-- 5 · MEET THE TEAM -->
+  <section class="dark" data-label="Meet the team">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">Meet the team</span></div>
+      <h2 class="title anim d1" style="margin-top:26px; color:#fff;">Five agents. One mission. Each with a job to own.</h2>
+      <div class="lineup">
+        <div class="lu anim d1"><div class="luav" style="background:#16284C"><span class="luglyph"><svg viewBox="0 0 24 24" fill="none"><path d="M12 12a9 9 0 1 0 6.36 2.64" stroke="#67E0F4" stroke-width="2" stroke-linecap="round"/><path d="M12 12L19 5" stroke="#67E0F4" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.3" fill="#67E0F4"/></svg></span></div><div class="lunm">Hunter</div><div class="luro">Finds</div><div class="luwhat">Scans SAM.gov nightly for your fit.</div></div>
+        <div class="lu anim d2"><div class="luav" style="background:#16284C"><span class="luglyph"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 1-8.6 6.3" stroke="#67E0F4" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.2" fill="#67E0F4"/><path d="M5 5.5L7 7.5" stroke="#67E0F4" stroke-width="2.2" stroke-linecap="round"/></svg></span></div><div class="lunm">Scorer</div><div class="luro">Qualifies</div><div class="luwhat">Bid/no-bid fit, with reasoning.</div></div>
+        <div class="lu anim d2"><div class="luav" style="background:linear-gradient(155deg,#5B9BFF,#2563EB)">N</div><div class="lunm">Noa</div><div class="luro">Outlines</div><div class="luwhat">Maps every requirement to a section.</div></div>
+        <div class="lu anim d3"><div class="luav" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#06303b">T</div><div class="lunm">Tomás</div><div class="luro">Writes</div><div class="luwhat">Drafts the full technical volume.</div></div>
+        <div class="lu anim d4"><div class="luav" style="background:linear-gradient(155deg,#A99BFF,#7C6BF5)">V</div><div class="lunm">Vera</div><div class="luro">Verifies</div><div class="luwhat">Final compliance pass before ready.</div></div>
+      </div>
+    </div>
+    <div class="pageno">05</div>
+  </section>
+
+  <!-- 6 · HUNTER -->
+  <section class="dark" data-label="Agent · Hunter">
+    <div class="pad">
+      <div class="agent-wrap">
+        <div class="agent-portrait anim">
+          <div class="agent-av" style="background:linear-gradient(155deg,#1B3565,#16284C)"><span class="gly"><svg viewBox="0 0 24 24" fill="none"><path d="M12 12a9 9 0 1 0 6.36 2.64" stroke="#67E0F4" stroke-width="2" stroke-linecap="round"/><path d="M12 12L19 5" stroke="#67E0F4" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.3" fill="#67E0F4"/></svg></span><div class="ring2"></div></div>
+          <div class="zone"><span class="zd" style="background:#5B9BFF"></span>Zone 1 · Scout</div>
+        </div>
+        <div class="agent-info">
+          <div class="arole anim">The Hunter · Finds the work</div>
+          <h2 class="anim d1">Hunter</h2>
+          <p class="asays anim d2">“Every night I read all of SAM.gov so you don't have to — and surface only what matches your NAICS codes and capabilities.”</p>
+          <div class="agent-value anim d3">
+            <div class="av-item"><div class="av-n cy">02:00</div><div class="av-l">Runs a full hunt nightly — your queue is ready by morning.</div></div>
+            <div class="av-item"><div class="av-n">11k → 9</div><div class="av-l">Filters thousands of notices down to a focused shortlist.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno">06</div>
+  </section>
+
+  <!-- 7 · SCORER -->
+  <section class="dark" data-label="Agent · Scorer">
+    <div class="pad">
+      <div class="agent-wrap">
+        <div class="agent-portrait anim">
+          <div class="agent-av" style="background:linear-gradient(155deg,#1B3565,#16284C)"><span class="gly"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 1-8.6 6.3" stroke="#67E0F4" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.2" fill="#67E0F4"/><path d="M5 5.5L7 7.5" stroke="#67E0F4" stroke-width="2.2" stroke-linecap="round"/></svg></span><div class="ring2"></div></div>
+          <div class="zone"><span class="zd" style="background:#5B9BFF"></span>Zone 1 · Scout</div>
+        </div>
+        <div class="agent-info">
+          <div class="arole anim">The Scorer · Qualifies the fit</div>
+          <h2 class="anim d1">Scorer</h2>
+          <p class="asays anim d2">“I score every opportunity 0–100 against your past performance and capabilities — and I show my reasoning, so the call is never a black box.”</p>
+          <div class="agent-value anim d3">
+            <div class="av-item"><div class="av-n cy">0–100</div><div class="av-l">An explainable bid/no-bid fit score on each opportunity.</div></div>
+            <div class="av-item"><div class="av-n">Why</div><div class="av-l">Every score comes with the reasoning behind it.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno">07</div>
+  </section>
+
+  <!-- 8 · NOA -->
+  <section class="dark" data-label="Agent · Noa">
+    <div class="pad">
+      <div class="agent-wrap">
+        <div class="agent-portrait anim">
+          <div class="agent-av" style="background:linear-gradient(155deg,#5B9BFF,#2563EB)">N<div class="ring2"></div></div>
+          <div class="zone"><span class="zd" style="background:#5B9BFF"></span>Zone 2 · Proposal team</div>
+        </div>
+        <div class="agent-info">
+          <div class="arole anim">Outline agent</div>
+          <h2 class="anim d1">Noa</h2>
+          <p class="asays anim d2">“Before a single word is written, I map the solicitation into a section plan — every requirement matched to an evaluation factor.”</p>
+          <div class="agent-value anim d3">
+            <div class="av-item"><div class="av-n cy">24/24</div><div class="av-l">Requirements mapped to sections — compliance from line one.</div></div>
+            <div class="av-item"><div class="av-n">7</div><div class="av-l">A clean section structure the whole draft is built on.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno">08</div>
+  </section>
+
+  <!-- 9 · TOMÁS -->
+  <section class="dark" data-label="Agent · Tomás">
+    <div class="pad">
+      <div class="agent-wrap">
+        <div class="agent-portrait anim">
+          <div class="agent-av" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#06303b">T<div class="ring2"></div></div>
+          <div class="zone"><span class="zd" style="background:#22D3EE"></span>Zone 2 · Proposal team</div>
+        </div>
+        <div class="agent-info">
+          <div class="arole anim">Technical Writer agent</div>
+          <h2 class="anim d1">Tomás</h2>
+          <p class="asays anim d2">“I draft the full technical volume in the agency's required format — and I'm honest about gaps I can't close alone, so you're never surprised.”</p>
+          <div class="agent-value anim d3">
+            <div class="av-item"><div class="av-n cy">18 pp</div><div class="av-l">A complete first draft in minutes, not days.</div></div>
+            <div class="av-item"><div class="av-n">Flags</div><div class="av-l">Surfaces weak spots — like thin past performance — for you.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno">09</div>
+  </section>
+
+  <!-- 10 · VERA -->
+  <section class="dark" data-label="Agent · Vera">
+    <div class="pad">
+      <div class="agent-wrap">
+        <div class="agent-portrait anim">
+          <div class="agent-av" style="background:linear-gradient(155deg,#A99BFF,#7C6BF5)">V<div class="ring2"></div></div>
+          <div class="zone"><span class="zd" style="background:#A99BFF"></span>Zone 2 · Proposal team</div>
+        </div>
+        <div class="agent-info">
+          <div class="arole anim">Final Review agent</div>
+          <h2 class="anim d1">Vera</h2>
+          <p class="asays anim d2">“After your approval, I run the final pass — every requirement, format rule, and cross-reference — so what reaches submission is truly ready.”</p>
+          <div class="agent-value anim d3">
+            <div class="av-item"><div class="av-n cy">24/24</div><div class="av-l">Every requirement validated before anything is called ready.</div></div>
+            <div class="av-item"><div class="av-n">0</div><div class="av-l">Open issues at hand-off — submission-ready confidence.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno">10</div>
+  </section>
+
+  <!-- 11 · HUMAN GATE -->
+  <section class="dark" data-label="The human gate">
+    <div class="pad">
+      <div class="gate-hero">
+        <div class="kicker-row anim"><span class="eyebrow" style="color:#F6A938">The soul of Kaimi</span></div>
+        <div class="gate-quote anim d1">Between the draft and the decision, there's exactly <span class="am">one human gate</span> — yours.</div>
+        <div class="handoff-big anim d2">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:18px;">
+            <div class="hb-av" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#06303b">T</div>
+            <div style="font:600 19px/1 var(--font);color:#A8B8DA;">Tomás</div>
+          </div>
+          <div class="hb-arrow"><svg viewBox="0 0 90 50" fill="none"><path d="M4 25h70M64 12l16 13-16 13" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/></svg><span class="hl">hands you the draft</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:18px;">
+            <div class="hb-you"><svg viewBox="0 0 24 24" fill="none"><path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V6a1.5 1.5 0 0 1 3 0v7c0 3.5-2.2 7-6.5 7C10 20 8.4 18.6 7 16.5l-2.2-3.4a1.5 1.5 0 0 1 2.4-1.8L8 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div style="font:700 19px/1 var(--font);color:#F6A938;">You</div>
+          </div>
+        </div>
+        <p class="lead anim d3" style="margin-top:50px; max-width:62ch;">You read it, edit it directly, and approve — or send it back. Confident autonomy, never blind automation. It's how Kaimi earns trust on work that carries your company's name.</p>
+      </div>
+    </div>
+    <div class="pageno">11</div>
+  </section>
+
+  <!-- 12 · PRODUCT -->
+  <section class="light" data-label="The product">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">The product</span></div>
+      <h2 class="title anim d1" style="margin-top:24px;">A calm command center — on the web and on your desktop.</h2>
+      <div class="prod-grid">
+        <div class="prod-shot anim d2"><img src="data:image/png;base64,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vmZYChXIucvmYyLnL5mWBaRXIucvmYyLnL5mWAoRkXOXzMZFzl8zJAotGRc5fMxkXOXzMsBRauRc5fMxkXOXzMsBRauRc5fMxkXOXzMsC0WrkXOXzMZFzl8zLAVBauRc5fMxkXOXzMsBUFoyLnL5mMi5y+ZlgKhLVyLnL5mMi5y+ZlgKgtXIucvmYyLnL5mWAqC1ci5y+ZjIucvmZYFqC1ci5y+ZjIucvmZYCoLVyLnL5mMi5y+ZlgKgtXdrnL5mN2v3fMy4FQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mN2v3fMywFQWru1+75mRkt7smvPUuBUFqKWtmrMsVqaRzd8dSxYSQAAAAAAAEgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAiXuvyAl7r8gAAAAAAc5+/Hyf8Agkifvx8n/gk5z5ajwAGXGvGRSlhJ4aEUm5uspP8As0BqB5Wzto154Kpi9oSo06F/5coRazLnq3x7jR+rYLcTrOvlhCSjLNGScW+F01dFqS20GSptPCUacJ1Kkoqo2oRdOWaXlG1/jY7YbE0cXRVXD1FOD4NCh1B408VteO0Y4NPA3lTdRSyT4J2txNcd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UpVhvacoN2uuPI5zjiJwt2I8L2k+19NDuCKwwpVKVaCtCUrSdnJ6Xt32L+yzUHFOLThlvyfE1gtpTNuKk6meeRdqLsnfhfoV9leaWaKmm21epJcenA1gWU5U4VFSlGpJNvRa3svPvOCws9M8YyWVRa3klw8lqbALVjlhq023KUW8sldybvfhp3F5YZveWyrMopdLGkC0oABFAAAAAAAAAABEuHxRJD7vMkCJe6/ICXuvyAAAAAABDJTuCLctALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNea9ALArrzXoNe9gG7u3qSQSAAAAAAAABIAAi1uAu+TJAEXfJi75MkARd8mLvkyQBF3yYu+TJAEXfJi75MkARd8mLvkyQBF3yYu+TJAEXfJi75MkARd8mLvkyQBF3yYu+TJAEXfJi75MkARd8mLvkyQBF3yYu+TJAEJd7JAAiXuvyAl7r8gAAAAAAAQEr8fQCQMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXJAAMq5IZVyQADKuSGVckAAyrkhlXdoABHfZkgAAAAAAAASAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACJe6/ICXuvyAAAAAABHeixX/AHLyLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARLh5AS91+QAAAAAAAAA//Z" alt="Kaimi proposals command view" style="width:100%;display:block;" /></div>
+        <div class="prod-points">
+          <div class="pp anim d2"><div class="ppic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div><div><b>One queue, every pipeline</b><span>See what the agents found, what they're drafting, and what's waiting on you — at a glance.</span></div></div>
+          <div class="pp anim d3"><div class="ppic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16M14 4l6 6L9 21H4v-5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><b>Edit the draft in-app</b><span>Review and revise the working document directly — section by section, with the agent's flags in context.</span></div></div>
+          <div class="pp anim d4"><div class="ppic"><svg viewBox="0 0 24 24" fill="none"><path d="M2 8.5C7.5 4 16.5 4 22 8.5M5 12.5c4-3.5 10-3.5 14 0M8.5 16.5c2-1.8 5-1.8 7 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div><div><b>Works offline</b><span>Desktop app for Mac &amp; Windows — review and approve on a plane; it syncs when you reconnect.</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="pageno" style="color:#94A3BE">12</div>
+  </section>
+
+  <!-- 13 · VALUE -->
+  <section class="dark" data-label="Why it matters">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">Why it matters</span></div>
+      <h2 class="title anim d1" style="margin-top:26px; color:#fff;">More pipeline, less payroll — and you never lose control.</h2>
+      <div class="val-grid">
+        <div class="val-card anim d1"><div class="vic"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 9v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div><div><b>Hours, not weeks</b><span>From notice to submission-ready draft in a fraction of the time — without adding headcount.</span></div></div>
+        <div class="val-card anim d2"><div class="vic"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 1 1-8.6 6.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M5 5.5L7 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div><div><b>Bid on the right things</b><span>Objective, explainable fit scoring means you chase the work you can actually win.</span></div></div>
+        <div class="val-card anim d3"><div class="vic"><svg viewBox="0 0 24 24" fill="none"><path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1V4.5a1.5 1.5 0 0 1 3 0V10m0-.5V6a1.5 1.5 0 0 1 3 0v7c0 3.5-2.2 7-6.5 7C10 20 8.4 18.6 7 16.5l-2.2-3.4a1.5 1.5 0 0 1 2.4-1.8L8 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><b>Human-in-command</b><span>One review gate per proposal. Nothing your name goes on ships without you.</span></div></div>
+        <div class="val-card anim d4"><div class="vic"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg></div><div><b>Your data, your keys</b><span>Runs on your own SAM.gov and Vertex AI credentials — cost and data stay yours.</span></div></div>
+      </div>
+    </div>
+    <div class="pageno">13</div>
+  </section>
+
+  <!-- 14 · WHY NOW / STACK -->
+  <section class="light" data-label="Why now">
+    <div class="pad">
+      <div class="kicker-row anim"><span class="eyebrow">Why now</span></div>
+      <h2 class="title anim d1" style="margin-top:24px; max-width:24ch;">Built on production-grade AI infrastructure — for years of operation, not a demo.</h2>
+      <div class="stack-row">
+        <div class="stack-chip anim d1"><div class="sc-l">Reasoning</div><div class="sc-v">Gemini · Vertex AI</div><div class="sc-d">Frontier models, now reliable enough to draft real federal proposals.</div></div>
+        <div class="stack-chip anim d2"><div class="sc-l">Engine</div><div class="sc-v">Go · Google ADK</div><div class="sc-d">Concurrent by design — many proposal lifecycles running in parallel.</div></div>
+        <div class="stack-chip anim d3"><div class="sc-l">Cloud</div><div class="sc-v">Google Cloud</div><div class="sc-d">Single-binary deployment on infrastructure you already trust.</div></div>
+        <div class="stack-chip anim d4"><div class="sc-l">Market</div><div class="sc-v">$700B+ / yr</div><div class="sc-d">U.S. federal contracting spend — and BD is still done by hand.</div></div>
+      </div>
+    </div>
+    <div class="pageno" style="color:#94A3BE">14</div>
+  </section>
+
+  <!-- 15 · CLOSE -->
+  <section class="dark" data-label="Close">
+    <svg class="cover-waves" viewBox="0 0 1000 500" fill="none" style="opacity:0.4;">
+      <path d="M-20 250C180 130 380 130 580 250C780 370 980 370 1180 250" stroke="rgba(34,211,238,0.4)" stroke-width="4"/>
+      <path d="M-20 350C180 230 380 230 580 350C780 470 980 470 1180 350" stroke="rgba(255,255,255,0.12)" stroke-width="4"/>
+    </svg>
+    <div class="pad">
+      <div class="mk-row anim">
+        <svg width="58" height="58" viewBox="0 0 64 64" fill="none">
+          <circle cx="45" cy="18.5" r="6.6" fill="#22D3EE"/>
+          <path d="M9 37.5C16.5 28 23.5 28 31 37.5C38.5 47 45.5 47 53 37.5" stroke="#67E0F4" stroke-width="4.8" stroke-linecap="round"/>
+          <path d="M9 47.5C16.5 38 23.5 38 31 47.5C38.5 57 45.5 57 53 47.5" stroke="#fff" stroke-width="4.8" stroke-linecap="round" opacity="0.92"/>
+        </svg>
+        <div class="nm">Kaimi<small>THE SEEKER · BY BLUEMETA</small></div>
+      </div>
+      <div style="margin-top:auto;">
+        <h1 class="big anim d1" style="font-size:84px;">Let the agents hunt.<br/>Come see it work.</h1>
+        <div class="close-cta anim d2">Start a pilot<svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="close-aud anim d3">
+          <div class="ca"><span class="cd"></span><b>Testers</b> — get early access</div>
+          <div class="ca"><span class="cd"></span><b>Customers</b> — book a pilot</div>
+          <div class="ca"><span class="cd"></span><b>Investors</b> — let's talk</div>
+        </div>
+        <p class="lead anim d4" style="margin-top:48px; color:#7587AE; font-size:24px;">kaimi@bluemetatech.com · bluemetatech.com/kaimi</p>
+      </div>
+    </div>
+    <div class="pageno">15</div>
+  </section>
+
+</deck-stage>
+<script>
+// @ds-adherence-ignore -- omelette starter scaffold (raw elements/hex/px by design)
+/* BEGIN USAGE */
+/**
+ * <deck-stage> — reusable web component for HTML decks.
+ *
+ * Handles:
+ *  (a) speaker notes — reads <script type="application/json" id="speaker-notes">
+ *      and posts {slideIndexChanged: N} to the parent window on nav.
+ *  (b) keyboard navigation — ←/→, PgUp/PgDn, Space, Home/End, number keys.
+ *      On touch devices, tapping the left/right half of the stage goes
+ *      prev/next — taps on links, buttons and other interactive slide
+ *      content are left alone.
+ *  (c) press R to reset to slide 0 (with a tasteful keyboard hint).
+ *  (d) bottom-center overlay showing slide count + hints, fades out on idle.
+ *  (e) auto-scaling — inner canvas is a fixed design size (default 1920×1080)
+ *      scaled with `transform: scale()` to fit the viewport, letterboxed.
+ *      Set the `noscale` attribute to render at authored size (1:1) — the
+ *      PPTX exporter sets this so its DOM capture sees unscaled geometry.
+ *  (f) print — `@media print` lays every slide out as its own page at the
+ *      design size, so the browser's Print → Save as PDF produces a clean
+ *      one-page-per-slide PDF with no extra setup.
+ *  (g) thumbnail rail — resizable left-hand column of per-slide thumbnails
+ *      (static clones). Click to navigate; ↑/↓ with a thumbnail focused to
+ *      step between slides; drag to reorder; right-click for
+ *      Skip / Move up / Move down / Duplicate / Delete (Delete opens a
+ *      Cancel/Delete confirm dialog). Drag the rail's right edge to resize;
+ *      width persists to
+ *      localStorage. Skipped slides carry `data-deck-skip`, are dimmed in
+ *      the rail, omitted from prev/next navigation, and hidden at print.
+ *      The rail is suppressed in presenting mode, in the host's Preview
+ *      mode (ViewerMode='none'), on `noscale`, on narrow viewports
+ *      (≤640px), and via the `no-rail` attribute. Rail mutations dispatch
+ *      a `deckchange`
+ *      CustomEvent on the element: detail = {action, from, to, slide}.
+ *
+ * Slides are HIDDEN, not unmounted. Non-active slides stay in the DOM with
+ * `visibility: hidden` + `opacity: 0`, so their state (videos, iframes,
+ * form inputs, React trees) is preserved across navigation.
+ *
+ * Lifecycle event — the component dispatches a `slidechange` CustomEvent on
+ * itself whenever the active slide changes (including the initial mount).
+ * The event bubbles and composes out of shadow DOM, so you can listen on
+ * the <deck-stage> element or on document:
+ *
+ *   document.querySelector('deck-stage').addEventListener('slidechange', (e) => {
+ *     e.detail.index         // new 0-based index
+ *     e.detail.previousIndex // previous index, or -1 on init
+ *     e.detail.total         // total slide count
+ *     e.detail.slide         // the new active slide element
+ *     e.detail.previousSlide // the prior slide element, or null on init
+ *     e.detail.reason        // 'init' | 'keyboard' | 'click' | 'tap' | 'api'
+ *   });
+ *
+ * Persistence: none at the deck level. The host app keeps the current slide
+ * in its own URL (?slide=) and re-delivers it via location.hash on load, so a
+ * bare load with no hash always starts at slide 1.
+ *
+ * Usage:
+ *   <style>deck-stage:not(:defined){visibility:hidden}</style>
+ *   <deck-stage width="1920" height="1080">
+ *     <section data-label="Title">...</section>
+ *     <section data-label="Agenda">...</section>
+ *   </deck-stage>
+ *   <script src="deck-stage.js"></script>
+ *
+ * The :not(:defined) rule prevents a flash of the first slide at its
+ * authored styles before this script runs and attaches the shadow root.
+ *
+ * Slides are the direct element children of <deck-stage>. Each slide is
+ * automatically tagged with:
+ *   - data-screen-label="NN Label"   (1-indexed, for comment flow)
+ *   - data-om-validate="no_overflowing_text,no_overlapping_text,slide_sized_text"
+ *
+ * Speaker notes stay in sync because the component posts {slideIndexChanged: N}
+ * to the parent — just include the #speaker-notes script tag if asked for notes.
+ *
+ * Authoring guidance:
+ *   - Write slide bodies as static HTML inside <deck-stage>, with sizing via
+ *     CSS custom properties in a <style> block rather than JS constants.
+ *     Static slide markup is what lets the user click a heading in edit mode
+ *     and retype it directly; a slide rendered through <script type="text/babel">,
+ *     React, or a loop over a JS array has to round-trip every tweak through a
+ *     chat message instead. Reach for script-generated slides only when the
+ *     content genuinely needs interactive behaviour static HTML can't express.
+ *   - Do NOT set position/inset/width/height on the slide <section> elements —
+ *     the component absolutely positions every slotted child for you.
+ *   - Entrance animations: make the visible end-state the base style and
+ *     animate *from* hidden, so print and reduced-motion show content.
+ *     Gate the animation on [data-deck-active] and the motion query, e.g.
+ *     `@media (prefers-reduced-motion:no-preference){ [data-deck-active] .x{animation:fade-in .5s both} }`.
+ *     Avoid infinite decorative loops on slide content.
+ */
+/* END USAGE */
+
+(() => {
+  const DESIGN_W_DEFAULT = 1920;
+  const DESIGN_H_DEFAULT = 1080;
+  const OVERLAY_HIDE_MS = 1800;
+  const VALIDATE_ATTR = 'no_overflowing_text,no_overlapping_text,slide_sized_text';
+  const FINE_POINTER_MQ = matchMedia('(hover: hover) and (pointer: fine)');
+  const NARROW_MQ = matchMedia('(max-width: 640px)');
+  // Slide-authored controls that should keep a tap instead of it navigating.
+  const INTERACTIVE_SEL = 'a[href], button, input, select, textarea, summary, label, video[controls], audio[controls], [role="button"], [onclick], [tabindex]:not([tabindex^="-"]), [contenteditable]:not([contenteditable="false" i])';
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  // Label precedence: data-label → data-screen-label (number stripped) → first heading → "Slide".
+  const getSlideLabel = (el) => {
+    const explicit = el.getAttribute('data-label');
+    if (explicit) return explicit;
+
+    const existing = el.getAttribute('data-screen-label');
+    if (existing) return existing.replace(/^\s*\d+\s*/, '').trim() || existing;
+
+    const h = el.querySelector('h1, h2, h3, [data-title]');
+    const t = h && (h.textContent || '').trim().slice(0, 40);
+    if (t) return t;
+
+    return 'Slide';
+  };
+
+  const stylesheet = `
+    :host {
+      position: fixed;
+      inset: 0;
+      display: block;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* connectedCallback holds this until document.fonts.ready (capped 2s) so
+     * the first visible paint has the deck's real typography + final rail
+     * layout. opacity (not visibility) so the active slide can't un-hide
+     * itself via the ::slotted([data-deck-active]) visibility:visible rule.
+     * Only the stage/rail hide — the black :host background stays, so the
+     * iframe doesn't flash the page's default white. */
+    :host([data-fonts-pending]) .stage,
+    :host([data-fonts-pending]) .rail { opacity: 0; pointer-events: none; }
+
+    .stage {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .canvas {
+      position: relative;
+      transform-origin: center center;
+      flex-shrink: 0;
+      background: #fff;
+      will-change: transform;
+    }
+
+    /* Slides live in light DOM (via <slot>) so authored CSS still applies.
+       We absolutely position each slotted child to stack them. */
+    ::slotted(*) {
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      box-sizing: border-box !important;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+      visibility: hidden;
+    }
+    ::slotted([data-deck-active]) {
+      opacity: 1;
+      pointer-events: auto;
+      visibility: visible;
+    }
+
+    .overlay {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translate(-50%, 6px) scale(0.92);
+      filter: blur(6px);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      background: #000;
+      color: #fff;
+      border-radius: 999px;
+      font-size: 12px;
+      font-feature-settings: "tnum" 1;
+      letter-spacing: 0.01em;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 260ms ease, transform 260ms cubic-bezier(.2,.8,.2,1), filter 260ms ease;
+      transform-origin: center bottom;
+      z-index: 2147483000;
+      user-select: none;
+    }
+    .overlay[data-visible] {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0) scale(1);
+      filter: blur(0);
+    }
+
+    .btn {
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      border: 0;
+      margin: 0;
+      padding: 0;
+      color: inherit;
+      font: inherit;
+      cursor: default;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 28px;
+      min-width: 28px;
+      border-radius: 999px;
+      color: rgba(255,255,255,0.72);
+      transition: background 140ms ease, color 140ms ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .btn:active { background: rgba(255,255,255,0.18); }
+    .btn:focus { outline: none; }
+    .btn:focus-visible { outline: none; }
+    .btn::-moz-focus-inner { border: 0; }
+    .btn svg { width: 14px; height: 14px; display: block; }
+    .btn.reset {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      padding: 0 10px 0 12px;
+      gap: 6px;
+      color: rgba(255,255,255,0.72);
+    }
+    .btn.reset .kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1;
+      color: rgba(255,255,255,0.88);
+      background: rgba(255,255,255,0.12);
+      border-radius: 4px;
+    }
+
+    .count {
+      font-variant-numeric: tabular-nums;
+      color: #fff;
+      font-weight: 500;
+      padding: 0 8px;
+      min-width: 42px;
+      text-align: center;
+      font-size: 12px;
+    }
+    .count .sep { color: rgba(255,255,255,0.45); margin: 0 3px; font-weight: 400; }
+    .count .total { color: rgba(255,255,255,0.55); }
+
+    .divider {
+      width: 1px;
+      height: 14px;
+      background: rgba(255,255,255,0.18);
+      margin: 0 2px;
+    }
+
+    /* ── Thumbnail rail ──────────────────────────────────────────────────
+       Fixed column on the left; each thumbnail is a static deep-clone of
+       the light-DOM slide scaled into a 16:9 (or design-aspect) frame. The
+       stage re-fits around it (see _fit); hidden during present / noscale
+       / print so capture geometry and fullscreen output are unchanged. */
+    .rail {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--deck-rail-w, 188px);
+      background: #141414;
+      border-right: 1px solid rgba(255,255,255,0.08);
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 12px 10px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 2147482500;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.18) transparent;
+    }
+    .rail::-webkit-scrollbar { width: 8px; }
+    .rail::-webkit-scrollbar-track { background: transparent; margin: 2px; }
+    .rail::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.18);
+      border-radius: 4px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+    .rail::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,255,255,0.28);
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+    :host([no-rail]) .rail,
+    :host([noscale]) .rail { display: none; }
+    .rail[data-presenting] { display: none; }
+    @media (max-width: 640px) {
+      .rail, .rail-resize { display: none; }
+    }
+    /* User-driven show/hide (the TweaksPanel toggle) slides instead of
+       popping. Transitions are gated on :host([data-rail-anim]) — set only
+       for the 200ms around the toggle — so window-resize and rail-width
+       drag (which also call _fit) don't lag behind the cursor. */
+    .rail[data-user-hidden] { transform: translateX(-100%); }
+    :host([data-rail-anim]) .rail { transition: transform 200ms cubic-bezier(.3,.7,.4,1); }
+    :host([data-rail-anim]) .stage { transition: left 200ms cubic-bezier(.3,.7,.4,1); }
+    :host([data-rail-anim]) .canvas { transition: transform 200ms cubic-bezier(.3,.7,.4,1); }
+    /* transition shorthand replaces rather than merges — repeat the base
+       .overlay opacity/transform/filter transitions so visibility changes
+       during the 200ms toggle window still fade instead of popping. */
+    :host([data-rail-anim]) .overlay {
+      transition: margin-left 200ms cubic-bezier(.3,.7,.4,1),
+                  opacity 260ms ease,
+                  transform 260ms cubic-bezier(.2,.8,.2,1),
+                  filter 260ms ease;
+    }
+
+    .thumb {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .thumb .num {
+      width: 16px;
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 500;
+      text-align: right;
+      color: rgba(255,255,255,0.55);
+      padding-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .thumb .frame {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      aspect-ratio: var(--deck-aspect);
+      background: #fff;
+      border-radius: 4px;
+      outline: 2px solid transparent;
+      outline-offset: 0;
+      overflow: hidden;
+      transition: outline-color 120ms ease;
+    }
+    .thumb:hover .frame { outline-color: rgba(255,255,255,0.25); }
+    .thumb { outline: none; }
+    .thumb:focus-visible .frame { outline-color: rgba(255,255,255,0.5); }
+    .thumb[data-current] .num { color: #fff; }
+    .thumb[data-current] .frame { outline-color: #D97757; }
+    .thumb[data-dragging] { opacity: 0.35; }
+    .thumb::before {
+      content: '';
+      position: absolute;
+      left: 24px;
+      right: 0;
+      height: 3px;
+      border-radius: 2px;
+      background: #D97757;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .thumb[data-drop="before"]::before { top: -8px; opacity: 1; }
+    .thumb[data-drop="after"]::before { bottom: -8px; opacity: 1; }
+    .thumb[data-skip] .frame { opacity: 0.35; }
+    .thumb[data-skip] .frame::after {
+      content: 'Skipped';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.45);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+
+    .ctxmenu {
+      position: fixed;
+      min-width: 150px;
+      padding: 4px;
+      background: #242424;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 7px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      z-index: 2147483100;
+      display: none;
+      font-size: 12px;
+    }
+    .ctxmenu[data-open] { display: block; }
+    .ctxmenu button {
+      display: block;
+      width: 100%;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: #e8e8e8;
+      font: inherit;
+      text-align: left;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .ctxmenu button:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+    .ctxmenu button:disabled { opacity: 0.35; cursor: default; }
+    .ctxmenu hr {
+      border: 0;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      margin: 4px 2px;
+    }
+
+    .rail-resize {
+      position: fixed;
+      left: calc(var(--deck-rail-w, 188px) - 3px);
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: col-resize;
+      z-index: 2147482600;
+      touch-action: none;
+    }
+    .rail-resize:hover,
+    .rail-resize[data-dragging] { background: rgba(255,255,255,0.12); }
+    :host([no-rail]) .rail-resize,
+    :host([noscale]) .rail-resize,
+    .rail[data-presenting] + .rail-resize,
+    .rail[data-user-hidden] + .rail-resize { display: none; }
+
+    /* Delete-confirm popup — matches the SPA's ConfirmDialog layout
+       (title + message body, depressed footer with Cancel / Delete). */
+    .confirm-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 2147483200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .confirm-backdrop[data-open] { display: flex; }
+    .confirm {
+      width: 320px;
+      max-width: calc(100vw - 32px);
+      background: #2a2a2a;
+      color: #e8e8e8;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      overflow: hidden;
+      font-family: inherit;
+      animation: deck-confirm-in 0.18s ease;
+    }
+    @keyframes deck-confirm-in {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .confirm .body { padding: 20px 20px 16px; }
+    .confirm .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .confirm .msg { font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.65); }
+    .confirm .footer {
+      padding: 14px 20px;
+      background: #1f1f1f;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .confirm button {
+      appearance: none;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .confirm .cancel {
+      background: transparent;
+      border: 0;
+      color: rgba(255,255,255,0.8);
+    }
+    .confirm .cancel:hover { background: rgba(255,255,255,0.08); }
+    .confirm .danger {
+      background: #c96442;
+      border: 1px solid rgba(0,0,0,0.15);
+      color: #fff;
+      box-shadow: 0 1px 3px rgba(166,50,68,0.3), 0 2px 6px rgba(166,50,68,0.18);
+    }
+    .confirm .danger:hover { background: #b5563a; }
+
+    /* ── Print: one page per slide, no chrome ────────────────────────────
+       The screen layout stacks every slide at inset:0 inside a scaled
+       canvas; for print we want them in document flow at the authored
+       design size so the browser paginates one slide per sheet. The
+       @page size is set from the width/height attributes via the inline
+       <style id="deck-stage-print-page"> that connectedCallback injects
+       into <head> (the @page at-rule has no effect inside shadow DOM). */
+    @media print {
+      :host {
+        position: static;
+        inset: auto;
+        background: none;
+        overflow: visible;
+        color: inherit;
+      }
+      .stage { position: static; display: block; }
+      .canvas {
+        transform: none !important;
+        width: auto !important;
+        height: auto !important;
+        background: none;
+        will-change: auto;
+      }
+      ::slotted(*) {
+        position: relative !important;
+        inset: auto !important;
+        width: var(--deck-design-w) !important;
+        height: var(--deck-design-h) !important;
+        box-sizing: border-box !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto;
+        break-after: page;
+        page-break-after: always;
+        break-inside: avoid;
+        overflow: hidden;
+      }
+      /* :last-child alone isn't enough once data-deck-skip hides the
+         trailing slide(s) — the last *visible* slide still carries
+         break-after:page and prints a blank sheet. _markLastVisible()
+         maintains data-deck-last-visible on the last non-skipped slide. */
+      ::slotted(*:last-child),
+      ::slotted([data-deck-last-visible]) {
+        break-after: auto;
+        page-break-after: auto;
+      }
+      ::slotted([data-deck-skip]) { display: none !important; }
+      .overlay, .rail, .rail-resize, .ctxmenu, .confirm-backdrop { display: none !important; }
+    }
+  `;
+
+  class DeckStage extends HTMLElement {
+    static get observedAttributes() { return ['width', 'height', 'noscale', 'no-rail']; }
+
+    constructor() {
+      super();
+      this._root = this.attachShadow({ mode: 'open' });
+      this._index = 0;
+      this._slides = [];
+      this._notes = [];
+      this._hideTimer = null;
+      this._mouseIdleTimer = null;
+      this._menuIndex = -1;
+
+      this._onKey = this._onKey.bind(this);
+      this._onResize = this._onResize.bind(this);
+      this._onSlotChange = this._onSlotChange.bind(this);
+      this._onMouseMove = this._onMouseMove.bind(this);
+      this._onTap = this._onTap.bind(this);
+      this._onMessage = this._onMessage.bind(this);
+      // Capture-phase close so a click anywhere dismisses the menu, but
+      // ignore clicks that land inside the menu itself — otherwise the
+      // capture handler runs before the menu's own (bubble) handler and
+      // clears _menuIndex out from under it.
+      this._onDocClick = (e) => {
+        if (this._menu && e.composedPath && e.composedPath().includes(this._menu)) return;
+        this._closeMenu();
+      };
+    }
+
+    get designWidth() {
+      return parseInt(this.getAttribute('width'), 10) || DESIGN_W_DEFAULT;
+    }
+    get designHeight() {
+      return parseInt(this.getAttribute('height'), 10) || DESIGN_H_DEFAULT;
+    }
+
+    connectedCallback() {
+      // Presenter-view popup loads deckUrl?_snthumb=...#N for its prev/cur/
+      // next thumbnails — the rail has no business rendering inside those
+      // (wrong scale, and it offsets the stage so the thumb shows a gutter).
+      if (/[?&]_snthumb=/.test(location.search)) this.setAttribute('no-rail', '');
+      this._render();
+      this._loadNotes();
+      this._syncPrintPageRule();
+      window.addEventListener('keydown', this._onKey);
+      window.addEventListener('resize', this._onResize);
+      window.addEventListener('mousemove', this._onMouseMove, { passive: true });
+      window.addEventListener('message', this._onMessage);
+      window.addEventListener('click', this._onDocClick, true);
+      this.addEventListener('click', this._onTap);
+      // Print lays every slide out as its own page, so [data-deck-active]-
+      // gated entrance styles need the attribute on every slide (not just
+      // the current one) or their content prints at the hidden base style.
+      // The transient freeze style lands BEFORE the attributes so any
+      // attribute-keyed transition fires at 0s (changing transition-
+      // duration after a transition has started doesn't affect it).
+      this._onBeforePrint = () => {
+        if (this._freezeStyle) this._freezeStyle.remove();
+        this._freezeStyle = document.createElement('style');
+        this._freezeStyle.textContent = '*,*::before,*::after{transition-duration:0s !important}';
+        document.head.appendChild(this._freezeStyle);
+        this._slides.forEach((s) => s.setAttribute('data-deck-active', ''));
+      };
+      this._onAfterPrint = () => {
+        this._applyIndex({ showOverlay: false, broadcast: false });
+        if (this._freezeStyle) { this._freezeStyle.remove(); this._freezeStyle = null; }
+      };
+      window.addEventListener('beforeprint', this._onBeforePrint);
+      window.addEventListener('afterprint', this._onAfterPrint);
+      // Initial collection + layout happens via slotchange, which fires on mount.
+      this._enableRail();
+      // Hold the stage hidden until webfonts are ready so the first visible
+      // paint has the deck's real typography — the :not(:defined) guard in
+      // the page HTML only covers custom-element upgrade, not font load.
+      // Capped so a 404'd font URL can't blank the deck indefinitely.
+      this.setAttribute('data-fonts-pending', '');
+      const reveal = () => this.removeAttribute('data-fonts-pending');
+      // rAF first: fonts.ready is a pre-resolved promise until layout has
+      // resolved the slotted text's font-family and pushed a FontFace into
+      // 'loading'. Reading it here in connectedCallback (parse-time) would
+      // settle the race in a microtask before any font fetch starts.
+      requestAnimationFrame(() => {
+        Promise.race([
+          document.fonts ? document.fonts.ready : Promise.resolve(),
+          new Promise((r) => setTimeout(r, 2000)),
+        ]).then(reveal, reveal);
+      });
+    }
+
+    _enableRail() {
+      // Idempotent — older host builds still post __omelette_rail_enabled.
+      // no-rail guard keeps the observers/stylesheet walk off the cheap path
+      // for presenter-popup thumbnail iframes (up to 9 per view).
+      if (this._railEnabled || this.hasAttribute('no-rail')) return;
+      this._railEnabled = true;
+      // Per-viewer preference — restored alongside rail width. Default on;
+      // only a stored '0' (from the TweaksPanel toggle) hides it.
+      this._railVisible = true;
+      try {
+        if (localStorage.getItem('deck-stage.railVisible') === '0') this._railVisible = false;
+      } catch (e) {}
+      // Live thumbnail updates: watch the light-DOM slides for content
+      // edits and re-clone just the affected thumb(s), debounced. Ignore
+      // the data-deck-* / data-screen-label / data-om-validate attributes
+      // this component itself writes so nav and skip don't trigger
+      // spurious refreshes.
+      const OWN_ATTRS = /^data-(deck-|screen-label$|om-validate$)/;
+      this._liveDirty = new Set();
+      this._liveObserver = new MutationObserver((records) => {
+        for (const r of records) {
+          if (r.type === 'attributes' && OWN_ATTRS.test(r.attributeName || '')) continue;
+          let n = r.target;
+          while (n && n.parentElement !== this) n = n.parentElement;
+          if (n && this._slideSet && this._slideSet.has(n)) this._liveDirty.add(n);
+        }
+        if (this._liveDirty.size && !this._liveTimer) {
+          this._liveTimer = setTimeout(() => {
+            this._liveTimer = null;
+            this._liveDirty.forEach((s) => this._refreshThumb(s));
+            this._liveDirty.clear();
+          }, 200);
+        }
+      });
+      this._liveObserver.observe(this, {
+        subtree: true, childList: true, characterData: true, attributes: true,
+      });
+      // Lazy thumbnail materialization — clone the slide only when its
+      // frame scrolls into (or near) the rail viewport. rootMargin gives
+      // ~4 thumbs of pre-load so fast scrolling doesn't flash blanks.
+      this._railObserver = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && e.target.__deckThumb) {
+            this._materialize(e.target.__deckThumb);
+          }
+        });
+      }, { root: this._rail, rootMargin: '400px 0px' });
+      // Tweaks typically change CSS vars / attrs OUTSIDE <deck-stage>
+      // (on <html>, <body>, a wrapper div, or a <style> tag), which
+      // _liveObserver can't see. Re-snapshot author CSS (constructable
+      // sheet is shared by reference, so one replaceSync updates every
+      // thumb shadow root) and re-sync each thumb host's attrs + custom
+      // properties. In-slide DOM mutations are _liveObserver's job.
+      // Debounced so slider drags don't thrash.
+      this._onTweakChange = () => {
+        clearTimeout(this._tweakTimer);
+        this._tweakTimer = setTimeout(() => {
+          this._snapshotAuthorCss();
+          // One getComputedStyle for the whole batch — each
+          // getPropertyValue read below reuses the same computed style
+          // as long as nothing invalidates layout between thumbs.
+          const cs = getComputedStyle(this);
+          (this._thumbs || []).forEach((t) => {
+            if (t.host) this._syncThumbHostAttrs(t.host, cs);
+          });
+        }, 120);
+      };
+      window.addEventListener('tweakchange', this._onTweakChange);
+      this._snapshotAuthorCss();
+      // Build the rail now that it's enabled — slotchange already fired,
+      // so _renderRail's early-return skipped the initial build.
+      this._syncRailHidden();
+      this._renderRail();
+      this._fit();
+    }
+
+    /** Snapshot document stylesheets into a constructable sheet that each
+     *  thumbnail's nested shadow root adopts — so author CSS styles the
+     *  cloned slide content without touching this component's chrome.
+     *  Cross-origin sheets throw on .cssRules — skip them. Re-callable:
+     *  the existing constructable sheet is reused via replaceSync so every
+     *  already-adopted shadow root picks up the fresh CSS without re-adopt. */
+    _snapshotAuthorCss() {
+      // :root in an adopted sheet inside a shadow root matches nothing
+      // (only the document root qualifies), so author rules like
+      // `:root[data-voice="modern"] .serif` never reach the clones.
+      // Rewrite :root → :host and mirror <html>'s data-*/class/lang onto
+      // each thumb host (see _syncThumbHostAttrs) so the same selectors
+      // match inside the thumbnail's shadow tree.
+      const authorCss = Array.from(document.styleSheets).map((sh) => {
+        try {
+          return Array.from(sh.cssRules).map((r) => r.cssText).join('\n');
+        } catch (e) { return ''; }
+      }).join('\n')
+        // The shadow host is featureless outside the functional :host(...)
+        // form, so any compound on :root — [attr], .class, #id, :pseudo —
+        // must become :host(<compound>) not :host<compound>. Same for the
+        // html type selector (Tailwind class-strategy dark mode emits
+        // html.dark; Pico uses html[data-theme]), which has nothing to
+        // match inside the thumb's shadow tree.
+        .replace(/:root((?:\[[^\]]*\]|[.#][-\w]+|:[-\w]+(?:\([^)]*\))?)+)/g, ':host($1)')
+        .replace(/:root\b/g, ':host')
+        .replace(/(^|[\s,>~+(}])html((?:\[[^\]]*\]|[.#][-\w]+|:[-\w]+(?:\([^)]*\))?)+)(?![-\w])/g, '$1:host($2)')
+        .replace(/(^|[\s,>~+(}])html(?![-\w])/g, '$1:host');
+      // Every custom property the author references. _syncThumbHostAttrs
+      // mirrors each one's *computed* value at <deck-stage> onto the
+      // thumb host so the live value wins over the :host default above
+      // regardless of which ancestor the tweak wrote to (<html>, <body>,
+      // a wrapper div, or the deck-stage element itself all inherit
+      // down to getComputedStyle(this)).
+      this._authorVars = new Set(authorCss.match(/--[\w-]+/g) || []);
+      try {
+        if (!this._adoptedSheet) this._adoptedSheet = new CSSStyleSheet();
+        this._adoptedSheet.replaceSync(authorCss);
+      } catch (e) {
+        this._adoptedSheet = null;
+        this._authorCss = authorCss;
+      }
+    }
+
+    _syncThumbHostAttrs(host, cs) {
+      const de = document.documentElement;
+      // setAttribute overwrites but can't delete — an attr removed from
+      // <html> (toggleAttribute off, classList emptied) would linger on
+      // the host and :host([data-*]) / :host(.foo) rules would keep
+      // matching. Remove stale mirrored attrs first; iterate backward
+      // because removeAttribute mutates the live NamedNodeMap.
+      for (let i = host.attributes.length - 1; i >= 0; i--) {
+        const n = host.attributes[i].name;
+        if ((n.startsWith('data-') || n === 'class' || n === 'lang')
+            && !de.hasAttribute(n)) {
+          host.removeAttribute(n);
+        }
+      }
+      for (const a of de.attributes) {
+        if (a.name.startsWith('data-') || a.name === 'class' || a.name === 'lang') {
+          host.setAttribute(a.name, a.value);
+        }
+      }
+      // The :root→:host rewrite in _snapshotAuthorCss pins each custom
+      // property to its stylesheet default on the thumb host, shadowing
+      // the live value that would otherwise inherit. Tweaks can write the
+      // live value on any ancestor — <html>, <body>, a wrapper div, the
+      // deck-stage element — so read it as the *computed* value at
+      // <deck-stage> (which sees the whole inheritance chain) rather than
+      // trying to guess which element the author wrote to. Inline on the
+      // host beats the :host{} rule. remove-stale covers vars dropped
+      // from the stylesheet between snapshots.
+      const vars = this._authorVars || new Set();
+      for (let i = host.style.length - 1; i >= 0; i--) {
+        const p = host.style[i];
+        if (p.startsWith('--') && !vars.has(p)) host.style.removeProperty(p);
+      }
+      const live = cs || getComputedStyle(this);
+      vars.forEach((p) => {
+        const v = live.getPropertyValue(p);
+        if (v) host.style.setProperty(p, v.trim());
+        else host.style.removeProperty(p);
+      });
+    }
+
+    disconnectedCallback() {
+      window.removeEventListener('keydown', this._onKey);
+      window.removeEventListener('resize', this._onResize);
+      window.removeEventListener('mousemove', this._onMouseMove);
+      window.removeEventListener('message', this._onMessage);
+      window.removeEventListener('click', this._onDocClick, true);
+      window.removeEventListener('beforeprint', this._onBeforePrint);
+      window.removeEventListener('afterprint', this._onAfterPrint);
+      if (this._freezeStyle) { this._freezeStyle.remove(); this._freezeStyle = null; }
+      this.removeEventListener('click', this._onTap);
+      if (this._hideTimer) clearTimeout(this._hideTimer);
+      if (this._mouseIdleTimer) clearTimeout(this._mouseIdleTimer);
+      if (this._liveTimer) clearTimeout(this._liveTimer);
+      if (this._tweakTimer) clearTimeout(this._tweakTimer);
+      if (this._railAnimTimer) clearTimeout(this._railAnimTimer);
+      if (this._scaleRaf) cancelAnimationFrame(this._scaleRaf);
+      if (this._liveObserver) this._liveObserver.disconnect();
+      if (this._railObserver) this._railObserver.disconnect();
+      if (this._onTweakChange) window.removeEventListener('tweakchange', this._onTweakChange);
+    }
+
+    attributeChangedCallback() {
+      if (this._canvas) {
+        this._canvas.style.width = this.designWidth + 'px';
+        this._canvas.style.height = this.designHeight + 'px';
+        this._canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');
+        this._canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');
+        if (this._rail) {
+          this._rail.style.setProperty('--deck-aspect', this.designWidth + '/' + this.designHeight);
+        }
+        this._fit();
+        this._scaleThumbs();
+        this._syncPrintPageRule();
+      }
+    }
+
+    _render() {
+      const style = document.createElement('style');
+      style.textContent = stylesheet;
+
+      const stage = document.createElement('div');
+      stage.className = 'stage';
+
+      const canvas = document.createElement('div');
+      canvas.className = 'canvas';
+      canvas.style.width = this.designWidth + 'px';
+      canvas.style.height = this.designHeight + 'px';
+      canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');
+      canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');
+
+      const slot = document.createElement('slot');
+      slot.addEventListener('slotchange', this._onSlotChange);
+      canvas.appendChild(slot);
+      stage.appendChild(canvas);
+
+      // Overlay: compact, solid black, with clickable controls.
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay export-hidden';
+      overlay.setAttribute('role', 'toolbar');
+      overlay.setAttribute('aria-label', 'Deck controls');
+      overlay.setAttribute('data-omelette-chrome', '');
+      overlay.innerHTML = `
+        <button class="btn prev" type="button" aria-label="Previous slide" title="Previous (←)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>
+        </button>
+        <span class="count" aria-live="polite"><span class="current">1</span><span class="sep">/</span><span class="total">1</span></span>
+        <button class="btn next" type="button" aria-label="Next slide" title="Next (→)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg>
+        </button>
+        <span class="divider"></span>
+        <button class="btn reset" type="button" aria-label="Reset to first slide" title="Reset (R)">Reset<span class="kbd">R</span></button>
+      `;
+
+      overlay.querySelector('.prev').addEventListener('click', () => this._advance(-1, 'click'));
+      overlay.querySelector('.next').addEventListener('click', () => this._advance(1, 'click'));
+      overlay.querySelector('.reset').addEventListener('click', () => this._go(0, 'click'));
+
+      // Thumbnail rail + context menu. Thumbnails are populated in
+      // _renderRail() after _collectSlides().
+      const rail = document.createElement('div');
+      rail.className = 'rail export-hidden';
+      rail.setAttribute('data-omelette-chrome', '');
+      rail.style.setProperty('--deck-aspect', this.designWidth + '/' + this.designHeight);
+      // Edge auto-scroll while dragging a thumb near the rail's top/bottom
+      // so off-screen drop targets are reachable. Native dragover fires
+      // continuously while the pointer is stationary, so a per-event nudge
+      // (ramped by edge proximity) is enough — no rAF loop needed.
+      rail.addEventListener('dragover', (e) => {
+        if (this._dragFrom == null) return;
+        const r = rail.getBoundingClientRect();
+        const EDGE = 40;
+        const dt = e.clientY - r.top;
+        const db = r.bottom - e.clientY;
+        if (dt < EDGE) rail.scrollTop -= Math.ceil((EDGE - dt) / 3);
+        else if (db < EDGE) rail.scrollTop += Math.ceil((EDGE - db) / 3);
+      });
+
+      const menu = document.createElement('div');
+      menu.className = 'ctxmenu export-hidden';
+      menu.setAttribute('data-omelette-chrome', '');
+      menu.innerHTML = `
+        <button type="button" data-act="skip">Skip slide</button>
+        <button type="button" data-act="up">Move up</button>
+        <button type="button" data-act="down">Move down</button>
+        <button type="button" data-act="duplicate">Duplicate slide</button>
+        <hr>
+        <button type="button" data-act="delete">Delete slide</button>
+      `;
+      menu.addEventListener('click', (e) => {
+        const act = e.target && e.target.getAttribute && e.target.getAttribute('data-act');
+        if (!act) return;
+        const i = this._menuIndex;
+        this._closeMenu();
+        if (act === 'skip') this._toggleSkip(i);
+        else if (act === 'up') this._moveSlide(i, i - 1);
+        else if (act === 'down') this._moveSlide(i, i + 1);
+        else if (act === 'duplicate') this._duplicateSlide(i);
+        else if (act === 'delete') this._openConfirm(i);
+      });
+      menu.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // Rail resize handle — drag to set --deck-rail-w, persisted to
+      // localStorage so the width survives reloads.
+      const resize = document.createElement('div');
+      resize.className = 'rail-resize export-hidden';
+      resize.setAttribute('data-omelette-chrome', '');
+      resize.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        resize.setPointerCapture(e.pointerId);
+        resize.setAttribute('data-dragging', '');
+        const move = (ev) => this._setRailWidth(ev.clientX);
+        const up = () => {
+          resize.removeEventListener('pointermove', move);
+          resize.removeEventListener('pointerup', up);
+          resize.removeEventListener('pointercancel', up);
+          resize.removeAttribute('data-dragging');
+          try { localStorage.setItem('deck-stage.railWidth', String(this._railPx)); } catch (err) {}
+        };
+        resize.addEventListener('pointermove', move);
+        resize.addEventListener('pointerup', up);
+        resize.addEventListener('pointercancel', up);
+      });
+
+      // Delete-confirm dialog — mirrors the SPA's ConfirmDialog layout.
+      const confirm = document.createElement('div');
+      confirm.className = 'confirm-backdrop export-hidden';
+      confirm.setAttribute('data-omelette-chrome', '');
+      confirm.innerHTML = `
+        <div class="confirm" role="dialog" aria-modal="true">
+          <div class="body">
+            <div class="title">Delete slide?</div>
+            <div class="msg">This slide will be removed from the deck.</div>
+          </div>
+          <div class="footer">
+            <button type="button" class="cancel">Cancel</button>
+            <button type="button" class="danger">Delete</button>
+          </div>
+        </div>
+      `;
+      confirm.addEventListener('click', (e) => {
+        if (e.target === confirm) this._closeConfirm();
+      });
+      confirm.querySelector('.cancel').addEventListener('click', () => this._closeConfirm());
+      confirm.querySelector('.danger').addEventListener('click', () => {
+        const i = this._confirmIndex;
+        this._closeConfirm();
+        this._deleteSlide(i);
+      });
+
+      this._root.append(style, rail, resize, stage, overlay, menu, confirm);
+      this._canvas = canvas;
+      this._stage = stage;
+      this._slot = slot;
+      this._overlay = overlay;
+      this._rail = rail;
+      this._resize = resize;
+      this._menu = menu;
+      this._confirm = confirm;
+      this._countEl = overlay.querySelector('.current');
+      this._totalEl = overlay.querySelector('.total');
+
+      // Restore persisted rail width.
+      let rw = 188;
+      try {
+        const s = localStorage.getItem('deck-stage.railWidth');
+        if (s) rw = parseInt(s, 10) || rw;
+      } catch (err) {}
+      this._setRailWidth(rw);
+      this._syncRailHidden();
+    }
+
+    _setRailWidth(px) {
+      const w = Math.max(120, Math.min(360, Math.round(px)));
+      this._railPx = w;
+      this.style.setProperty('--deck-rail-w', w + 'px');
+      this._fit();
+      // _scaleThumbs forces a sync layout (frame.offsetWidth) then writes
+      // N transforms. During a resize drag this runs per-pointermove;
+      // coalesce to one per frame.
+      if (!this._scaleRaf) {
+        this._scaleRaf = requestAnimationFrame(() => {
+          this._scaleRaf = null;
+          this._scaleThumbs();
+        });
+      }
+    }
+
+    /** @page must live in the document stylesheet — it's a no-op inside
+     *  shadow DOM. Inject/update a single <head> style tag so the print
+     *  sheet matches the design size and Save-as-PDF yields one slide per
+     *  page with no margins. */
+    _syncPrintPageRule() {
+      const id = 'deck-stage-print-page';
+      let tag = document.getElementById(id);
+      if (!tag) {
+        tag = document.createElement('style');
+        tag.id = id;
+        document.head.appendChild(tag);
+      }
+      tag.textContent =
+        '@page { size: ' + this.designWidth + 'px ' + this.designHeight + 'px; margin: 0; } ' +
+        '@media print { html, body { margin: 0 !important; padding: 0 !important; background: none !important; overflow: visible !important; height: auto !important; } ' +
+        '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; } ' +
+        // Jump authored animations/transitions to their end state so print
+        // never captures mid-entrance — pairs with the beforeprint handler
+        // in connectedCallback that sets data-deck-active on every slide.
+        '*, *::before, *::after { animation-delay: -99s !important; animation-duration: .001s !important; ' +
+        'animation-iteration-count: 1 !important; animation-fill-mode: both !important; ' +
+        'animation-play-state: running !important; transition-duration: 0s !important; } }';
+    }
+
+    _onSlotChange() {
+      // Rail mutations (delete/move/duplicate) already reconcile synchronously and
+      // emit slidechange with reason 'api'; skip the async slotchange that
+      // would otherwise re-broadcast with reason 'init'.
+      if (this._squelchSlotChange) { this._squelchSlotChange = false; return; }
+      this._collectSlides();
+      this._restoreIndex();
+      this._applyIndex({ showOverlay: false, broadcast: true, reason: 'init' });
+      this._fit();
+    }
+
+    _collectSlides() {
+      const assigned = this._slot.assignedElements({ flatten: true });
+      this._slides = assigned.filter((el) => {
+        // Skip template/style/script nodes even if someone slots them.
+        const tag = el.tagName;
+        return tag !== 'TEMPLATE' && tag !== 'SCRIPT' && tag !== 'STYLE';
+      });
+      this._slideSet = new Set(this._slides);
+
+      this._slides.forEach((slide, i) => {
+        const n = i + 1;
+        slide.setAttribute('data-screen-label', `${pad2(n)} ${getSlideLabel(slide)}`);
+
+        // Validation attribute for comment flow / auto-checks.
+        if (!slide.hasAttribute('data-om-validate')) {
+          slide.setAttribute('data-om-validate', VALIDATE_ATTR);
+        }
+
+        slide.setAttribute('data-deck-slide', String(i));
+      });
+
+      if (this._totalEl) this._totalEl.textContent = String(this._slides.length || 1);
+      if (this._index >= this._slides.length) this._index = Math.max(0, this._slides.length - 1);
+      this._markLastVisible();
+      this._renderRail();
+    }
+
+    /** Tag the last non-skipped slide so print CSS can drop its
+     *  break-after (see the @media print comment above — :last-child
+     *  alone matches a hidden skipped slide). */
+    _markLastVisible() {
+      let last = null;
+      this._slides.forEach((s) => {
+        s.removeAttribute('data-deck-last-visible');
+        if (!s.hasAttribute('data-deck-skip')) last = s;
+      });
+      if (last) last.setAttribute('data-deck-last-visible', '');
+    }
+
+    _loadNotes() {
+      const tag = document.getElementById('speaker-notes');
+      if (!tag) { this._notes = []; return; }
+      try {
+        const parsed = JSON.parse(tag.textContent || '[]');
+        if (Array.isArray(parsed)) this._notes = parsed;
+      } catch (e) {
+        console.warn('[deck-stage] Failed to parse #speaker-notes JSON:', e);
+        this._notes = [];
+      }
+    }
+
+    _restoreIndex() {
+      // The host's ?slide= param is delivered as a #<int> hash (1-indexed) on
+      // the iframe src. No hash → slide 1; the deck itself keeps no position
+      // state across loads.
+      const h = (location.hash || '').match(/^#(\d+)$/);
+      if (h) {
+        const n = parseInt(h[1], 10) - 1;
+        if (n >= 0 && n < this._slides.length) this._index = n;
+      }
+    }
+
+    _applyIndex({ showOverlay = true, broadcast = true, reason = 'init' } = {}) {
+      if (!this._slides.length) return;
+      const prev = this._prevIndex == null ? -1 : this._prevIndex;
+      const curr = this._index;
+      // Keep the iframe's own hash in sync so an in-iframe location.reload()
+      // (reload banner path in viewer-handle.ts) lands on the current slide,
+      // not the stale deep-link hash from initial load.
+      try { history.replaceState(null, '', '#' + (curr + 1)); } catch (e) {}
+      this._slides.forEach((s, i) => {
+        if (i === curr) s.setAttribute('data-deck-active', '');
+        else s.removeAttribute('data-deck-active');
+      });
+      if (this._countEl) this._countEl.textContent = String(curr + 1);
+      // Follow-scroll on every navigation (init deep-link, keyboard, click,
+      // tap, external goTo) — the only time we *don't* want the rail to
+      // track current is after a rail-internal mutation, where _renderRail
+      // has already restored the user's scroll position and yanking back to
+      // current would undo it.
+      this._syncRail(reason !== 'mutation');
+
+      if (broadcast) {
+        // (1) Legacy: host-window postMessage for speaker-notes renderers.
+        try { window.postMessage({ slideIndexChanged: curr, deckTotal: this._slides.length, deckSkipped: this._skippedIndices() }, '*'); } catch (e) {}
+
+        // (2) In-page CustomEvent on the <deck-stage> element itself.
+        //     Bubbles and composes out of shadow DOM so slide code can listen:
+        //       document.querySelector('deck-stage').addEventListener('slidechange', e => {
+        //         e.detail.index, e.detail.previousIndex, e.detail.total, e.detail.slide, e.detail.reason
+        //       });
+        const detail = {
+          index: curr,
+          previousIndex: prev,
+          total: this._slides.length,
+          slide: this._slides[curr] || null,
+          previousSlide: prev >= 0 ? (this._slides[prev] || null) : null,
+          reason: reason, // 'init' | 'keyboard' | 'click' | 'tap' | 'api'
+        };
+        this.dispatchEvent(new CustomEvent('slidechange', {
+          detail,
+          bubbles: true,
+          composed: true,
+        }));
+      }
+
+      this._prevIndex = curr;
+      if (showOverlay) this._flashOverlay();
+    }
+
+    _flashOverlay() {
+      // Host posts __omelette_presenting while in fullscreen/tab presentation
+      // mode — suppress the nav footer entirely (both hover and slide-change
+      // flash) so the audience sees clean slides.
+      if (!this._overlay || this._presenting) return;
+      this._overlay.setAttribute('data-visible', '');
+      if (this._hideTimer) clearTimeout(this._hideTimer);
+      this._hideTimer = setTimeout(() => {
+        this._overlay.removeAttribute('data-visible');
+      }, OVERLAY_HIDE_MS);
+    }
+
+    _railWidth() {
+      // State-based, no offsetWidth: the first _fit() can run before the
+      // rail has had layout on some load paths, and a 0 there paints the
+      // slide full-width for one frame before the post-slotchange _fit()
+      // corrects it.
+      if (!this._railEnabled || !this._railVisible || this.hasAttribute('no-rail')
+          || this.hasAttribute('noscale') || this._presenting || this._previewMode
+          || NARROW_MQ.matches) return 0;
+      return this._railPx || 0;
+    }
+
+    _fit() {
+      if (!this._canvas) return;
+      const stage = this._canvas.parentElement;
+      // PPTX export sets noscale so the DOM capture sees authored-size
+      // geometry — the scaled canvas is in shadow DOM, so the exporter's
+      // resetTransformSelector can't reach .canvas.style.transform directly.
+      if (this.hasAttribute('noscale')) {
+        this._canvas.style.transform = 'none';
+        if (stage) stage.style.left = '0';
+        if (this._overlay) this._overlay.style.marginLeft = '0';
+        return;
+      }
+      const rw = this._railWidth();
+      if (stage) stage.style.left = rw + 'px';
+      // Overlay is centred on the viewport via left:50% + translate(-50%);
+      // marginLeft shifts the centre by rw/2 so it lands in the middle of
+      // the [rw, innerWidth] stage region.
+      if (this._overlay) this._overlay.style.marginLeft = (rw / 2) + 'px';
+      const vw = window.innerWidth - rw;
+      const vh = window.innerHeight;
+      const s = Math.min(vw / this.designWidth, vh / this.designHeight);
+      this._canvas.style.transform = `scale(${s})`;
+    }
+
+    _onResize() {
+      this._fit();
+      // Crossing the narrow-viewport breakpoint reveals the rail — rerun the
+      // thumbnail scale the same way _setRailWidth does.
+      if (!this._scaleRaf) {
+        this._scaleRaf = requestAnimationFrame(() => {
+          this._scaleRaf = null;
+          this._scaleThumbs();
+        });
+      }
+    }
+
+    _onMouseMove() {
+      // Keep overlay visible while mouse moves; hide after idle.
+      this._flashOverlay();
+    }
+
+    _onMessage(e) {
+      const d = e.data;
+      if (d && typeof d.__omelette_presenting === 'boolean') {
+        this._presenting = d.__omelette_presenting;
+        if (this._presenting && this._overlay) {
+          this._overlay.removeAttribute('data-visible');
+          if (this._hideTimer) clearTimeout(this._hideTimer);
+        }
+        this._syncRailHidden();
+        this._closeMenu();
+        this._closeConfirm();
+        this._fit();
+        this._scaleThumbs();
+      }
+      // Host's Preview segment (ViewerMode='none'): the rail's drag-reorder /
+      // right-click skip-delete affordances are editing chrome, so hide it
+      // while the user is just looking at the deck. Same hard-hide path as
+      // presenting; independent of the user's _railVisible preference so
+      // returning to Edit restores whatever they had.
+      if (d && typeof d.__omelette_preview_mode === 'boolean') {
+        if (d.__omelette_preview_mode === this._previewMode) return;
+        this._previewMode = d.__omelette_preview_mode;
+        this._syncRailHidden();
+        this._closeMenu();
+        this._closeConfirm();
+        this._fit();
+        this._scaleThumbs();
+      }
+      // Per-viewer show/hide, driven by the TweaksPanel's auto-injected
+      // "Thumbnail rail" toggle (or any author script). Independent of
+      // whether the Tweaks panel itself is open — closing the panel
+      // doesn't change rail visibility. Persists alongside rail width.
+      if (d && d.type === '__deck_rail_visible' && typeof d.on === 'boolean') {
+        if (d.on === this._railVisible) return;
+        this._railVisible = d.on;
+        try { localStorage.setItem('deck-stage.railVisible', d.on ? '1' : '0'); } catch (e) {}
+        // Arm the transition, commit it, then flip state — otherwise the
+        // browser coalesces both writes and nothing animates on show.
+        this.setAttribute('data-rail-anim', '');
+        void (this._rail && this._rail.offsetHeight);
+        this._syncRailHidden();
+        this._fit();
+        this._scaleThumbs();
+        clearTimeout(this._railAnimTimer);
+        this._railAnimTimer = setTimeout(() => this.removeAttribute('data-rail-anim'), 220);
+      }
+      if (d && d.type === '__omelette_rail_enabled') this._enableRail();
+    }
+
+    _syncRailHidden() {
+      if (!this._rail) return;
+      // data-presenting is the hard hide (display:none) for flag-off,
+      // presentation mode, and the host's Preview segment — instant, no
+      // transition. data-user-hidden is the soft hide (translateX(-100%))
+      // for the viewer's rail toggle, so show/hide slides under
+      // :host([data-rail-anim]).
+      const hard = !this._railEnabled || this._presenting || this._previewMode;
+      if (hard) this._rail.setAttribute('data-presenting', '');
+      else this._rail.removeAttribute('data-presenting');
+      if (!this._railVisible) this._rail.setAttribute('data-user-hidden', '');
+      else this._rail.removeAttribute('data-user-hidden');
+      // translateX hide leaves thumbs (tabIndex=0) in the tab order —
+      // inert keeps them unfocusable while the rail is off-screen.
+      this._rail.inert = hard || !this._railVisible;
+    }
+
+    _onTap(e) {
+      // Touch-only — keyboard + the overlay toolbar cover nav on desktop.
+      if (FINE_POINTER_MQ.matches) return;
+      // Only taps that land on the stage (slide content or letterbox); the
+      // overlay / rail / menus are siblings with their own click handlers.
+      const path = e.composedPath();
+      if (!this._stage || !path.includes(this._stage)) return;
+      // Let interactive slide content keep the tap. composedPath (not
+      // e.target.closest) so we see through open shadow roots — a <button>
+      // inside a slide-authored custom element retargets e.target to the
+      // host but still appears in the composed path.
+      if (e.defaultPrevented) return;
+      for (const n of path) {
+        if (n === this._stage) break;
+        if (n.matches && n.matches(INTERACTIVE_SEL)) return;
+      }
+      e.preventDefault();
+      const rw = this._railWidth();
+      const mid = rw + (window.innerWidth - rw) / 2;
+      this._advance(e.clientX < mid ? -1 : 1, 'tap');
+    }
+
+    _onKey(e) {
+      // Ignore when the user is typing.
+      const t = e.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      // Confirm dialog swallows nav keys while open; Escape cancels. Enter
+      // is left to the focused button's native activation so Tab→Cancel
+      // →Enter activates Cancel, not the window-level confirm path.
+      if (this._confirm && this._confirm.hasAttribute('data-open')) {
+        if (e.key === 'Escape') { this._closeConfirm(); e.preventDefault(); }
+        return;
+      }
+      if (e.key === 'Escape' && this._menu && this._menu.hasAttribute('data-open')) {
+        this._closeMenu();
+        e.preventDefault();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key;
+      let handled = true;
+
+      if (key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'Spacebar') {
+        this._advance(1, 'keyboard');
+      } else if (key === 'ArrowLeft' || key === 'PageUp') {
+        this._advance(-1, 'keyboard');
+      } else if (key === 'Home') {
+        this._go(0, 'keyboard');
+      } else if (key === 'End') {
+        this._go(this._slides.length - 1, 'keyboard');
+      } else if (key === 'r' || key === 'R') {
+        this._go(0, 'keyboard');
+      } else if (/^[0-9]$/.test(key)) {
+        // 1..9 jump to that slide; 0 jumps to 10.
+        const n = key === '0' ? 9 : parseInt(key, 10) - 1;
+        if (n < this._slides.length) this._go(n, 'keyboard');
+      } else {
+        handled = false;
+      }
+
+      if (handled) {
+        e.preventDefault();
+        this._flashOverlay();
+      }
+    }
+
+    _go(i, reason = 'api') {
+      if (!this._slides.length) return;
+      const clamped = Math.max(0, Math.min(this._slides.length - 1, i));
+      if (clamped === this._index) {
+        this._flashOverlay();
+        return;
+      }
+      this._index = clamped;
+      this._applyIndex({ showOverlay: true, broadcast: true, reason });
+    }
+
+    /** Step forward/back skipping any slide marked data-deck-skip. Falls
+     *  back to _go's clamp-at-ends behaviour (flash overlay) when there's
+     *  nothing further in that direction. */
+    _advance(dir, reason) {
+      if (!this._slides.length) return;
+      let i = this._index + dir;
+      while (i >= 0 && i < this._slides.length && this._slides[i].hasAttribute('data-deck-skip')) {
+        i += dir;
+      }
+      if (i < 0 || i >= this._slides.length) { this._flashOverlay(); return; }
+      this._go(i, reason);
+    }
+
+    // ── Thumbnail rail ────────────────────────────────────────────────────
+    //
+    // Thumbs are keyed by slide element and reused across _renderRail()
+    // calls, so a reorder/delete is an O(changed) DOM shuffle instead of an
+    // O(N) teardown-and-re-clone. Each thumb starts as a lightweight shell
+    // (num + empty frame); the clone is materialized lazily by an
+    // IntersectionObserver when the frame scrolls into (or near) view, so
+    // only visible-ish slides pay the clone + image-decode cost.
+
+    _renderRail() {
+      if (!this._rail || !this._railEnabled) { this._thumbs = []; return; }
+      // FLIP: record each *materialized* thumb's top before the reconcile.
+      // Off-screen (non-materialized) thumbs don't need the animation and
+      // skipping their getBoundingClientRect saves a forced layout per
+      // off-screen thumb on large decks.
+      const prevTops = new Map();
+      (this._thumbs || []).forEach(({ thumb, slide, host }) => {
+        if (host) prevTops.set(slide, thumb.getBoundingClientRect().top);
+      });
+      const st = this._rail.scrollTop;
+
+      // Reconcile: reuse thumbs that already exist for a slide, create
+      // shells for new slides, drop thumbs for removed slides.
+      const bySlide = new Map();
+      (this._thumbs || []).forEach((t) => bySlide.set(t.slide, t));
+      const next = [];
+      this._slides.forEach((slide) => {
+        let t = bySlide.get(slide);
+        if (t) bySlide.delete(slide);
+        else t = this._makeThumb(slide);
+        next.push(t);
+      });
+      // Orphans — slides removed since last render.
+      bySlide.forEach((t) => {
+        if (this._railObserver) this._railObserver.unobserve(t.frame);
+        t.thumb.remove();
+      });
+      // Put thumbs into document order to match _slides. insertBefore on
+      // an already-correctly-placed node is a no-op, so this is cheap
+      // when nothing moved.
+      next.forEach((t, i) => {
+        const want = t.thumb;
+        const at = this._rail.children[i];
+        if (at !== want) this._rail.insertBefore(want, at || null);
+        t.i = i;
+        t.num.textContent = String(i + 1);
+        if (t.slide.hasAttribute('data-deck-skip')) t.thumb.setAttribute('data-skip', '');
+        else t.thumb.removeAttribute('data-skip');
+      });
+      this._thumbs = next;
+
+      this._rail.scrollTop = st;
+      if (prevTops.size) {
+        const moved = [];
+        this._thumbs.forEach(({ thumb, slide }) => {
+          const old = prevTops.get(slide);
+          if (old == null) return;
+          const dy = old - thumb.getBoundingClientRect().top;
+          if (Math.abs(dy) < 1) return;
+          thumb.style.transition = 'none';
+          thumb.style.transform = `translateY(${dy}px)`;
+          moved.push(thumb);
+        });
+        if (moved.length) {
+          // Commit the inverted positions before flipping the transition
+          // on — otherwise the browser coalesces both style writes and
+          // nothing animates.
+          void this._rail.offsetHeight;
+          moved.forEach((t) => {
+            t.style.transition = 'transform 180ms cubic-bezier(.2,.7,.3,1)';
+            t.style.transform = '';
+          });
+          setTimeout(() => moved.forEach((t) => { t.style.transition = ''; }), 220);
+        }
+      }
+      requestAnimationFrame(() => this._scaleThumbs());
+      this._syncRail(false);
+    }
+
+    /** Create a lightweight thumb shell for one slide. The clone is
+     *  materialized later by the IntersectionObserver. Event handlers
+     *  look up the thumb's *current* index (via _thumbs.indexOf) so the
+     *  same element can be reused across reorders. */
+    _makeThumb(slide) {
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      thumb.tabIndex = 0;
+      const num = document.createElement('div');
+      num.className = 'num';
+      const frame = document.createElement('div');
+      frame.className = 'frame';
+      thumb.append(num, frame);
+
+      const entry = { thumb, num, frame, slide, clone: null, host: null, i: -1 };
+      // entry.i is refreshed on every _renderRail reconcile pass, so
+      // handlers read the thumb's current position without an O(N) scan.
+      const idx = () => entry.i;
+
+      thumb.addEventListener('click', () => this._go(idx(), 'click'));
+      // ↑/↓ step through the rail when a thumb has focus. _go clamps at the
+      // ends and _applyIndex→_syncRail scrolls the new current thumb into
+      // view; we move focus to it (preventScroll — _syncRail already
+      // scrolled) so a held key walks the whole list. stopPropagation keeps
+      // this out of the window-level _onKey nav handler.
+      thumb.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this._go(idx() + (e.key === 'ArrowDown' ? 1 : -1), 'keyboard');
+        const cur = this._thumbs && this._thumbs[this._index];
+        if (cur) cur.thumb.focus({ preventScroll: true });
+      });
+      thumb.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._openMenu(idx(), e.clientX, e.clientY);
+      });
+      thumb.draggable = true;
+      thumb.addEventListener('dragstart', (e) => {
+        this._dragFrom = idx();
+        thumb.setAttribute('data-dragging', '');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(this._dragFrom)); } catch (err) {}
+      });
+      thumb.addEventListener('dragend', () => {
+        thumb.removeAttribute('data-dragging');
+        this._clearDrop();
+        this._dragFrom = null;
+      });
+      thumb.addEventListener('dragover', (e) => {
+        if (this._dragFrom == null) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const r = thumb.getBoundingClientRect();
+        this._setDrop(idx(), e.clientY < r.top + r.height / 2 ? 'before' : 'after');
+      });
+      thumb.addEventListener('drop', (e) => {
+        if (this._dragFrom == null) return;
+        e.preventDefault();
+        const i = idx();
+        const r = thumb.getBoundingClientRect();
+        let to = e.clientY >= r.top + r.height / 2 ? i + 1 : i;
+        if (this._dragFrom < to) to--;
+        const from = this._dragFrom;
+        this._clearDrop();
+        this._dragFrom = null;
+        if (to !== from) this._moveSlide(from, to);
+      });
+
+      if (this._railObserver) this._railObserver.observe(frame);
+      frame.__deckThumb = entry;
+      return entry;
+    }
+
+    /** Lazily build the clone for a thumb that has scrolled into view. */
+    _materialize(entry) {
+      if (entry.host) return;
+      const dw = this.designWidth, dh = this.designHeight;
+      let clone = entry.slide.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.removeAttribute('data-deck-active');
+      clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+      // Neuter heavy media; replace <video> with its poster so the box
+      // keeps a visual. <iframe>/<audio> become empty placeholders.
+      clone.querySelectorAll('iframe, audio, object, embed').forEach((el) => {
+        el.removeAttribute('src');
+        el.removeAttribute('srcdoc');
+        el.removeAttribute('data');
+        el.innerHTML = '';
+      });
+      clone.querySelectorAll('video').forEach((el) => {
+        if (!el.poster) { el.removeAttribute('src'); el.innerHTML = ''; return; }
+        const img = document.createElement('img');
+        img.src = el.poster;
+        img.alt = '';
+        img.style.cssText = el.style.cssText + ';object-fit:cover;width:100%;height:100%;';
+        img.className = el.className;
+        el.replaceWith(img);
+      });
+      // Images: defer decode and let the browser pick the smallest
+      // srcset candidate for the ~140px thumb. Same-URL clones reuse the
+      // slide's decoded bitmap (URL-keyed cache), so the remaining cost
+      // is paint/composite — lazy+async keeps that off the main thread.
+      clone.querySelectorAll('img').forEach((el) => {
+        el.loading = 'lazy';
+        el.decoding = 'async';
+        if (el.srcset) el.sizes = (this._railPx || 188) + 'px';
+      });
+      // Custom elements inside the slide would have their
+      // connectedCallback fire when the clone is appended. Replace them
+      // with inert boxes so a component-heavy deck doesn't run N copies
+      // of each component's mount logic in the rail. Children are
+      // preserved so layout-wrapper elements (<my-column><h2>…</h2>)
+      // still show their authored content; the querySelectorAll NodeList
+      // is static, so nested custom elements in the moved subtree are
+      // still visited on later iterations.
+      const neuter = (el) => {
+        const box = document.createElement('div');
+        box.style.cssText = (el.getAttribute('style') || '') +
+          ';background:rgba(0,0,0,0.06);border:1px dashed rgba(0,0,0,0.15);';
+        box.className = el.className;
+        // Preserve theming/i18n hooks so [data-*] / :lang() / [dir]
+        // descendant selectors still match the neutered root.
+        for (const a of el.attributes) {
+          const n = a.name;
+          if (n.startsWith('data-') || n.startsWith('aria-') ||
+              n === 'lang' || n === 'dir' || n === 'role' || n === 'title') {
+            box.setAttribute(n, a.value);
+          }
+        }
+        while (el.firstChild) box.appendChild(el.firstChild);
+        return box;
+      };
+      // querySelectorAll('*') returns descendants only — a custom-element
+      // slide root (<my-slide>…</my-slide>) would slip through and upgrade
+      // on append. Swap the root first.
+      if (clone.tagName.includes('-')) clone = neuter(clone);
+      clone.querySelectorAll('*').forEach((el) => {
+        if (el.tagName.includes('-')) el.replaceWith(neuter(el));
+      });
+      clone.style.cssText += ';position:absolute;top:0;left:0;transform-origin:0 0;' +
+        'pointer-events:none;width:' + dw + 'px;height:' + dh + 'px;' +
+        'box-sizing:border-box;overflow:hidden;visibility:visible;opacity:1;';
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;inset:0;';
+      this._syncThumbHostAttrs(host);
+      const sr = host.attachShadow({ mode: 'open' });
+      if (this._adoptedSheet) sr.adoptedStyleSheets = [this._adoptedSheet];
+      else {
+        const st = document.createElement('style');
+        st.textContent = this._authorCss || '';
+        sr.appendChild(st);
+      }
+      sr.appendChild(clone);
+      entry.frame.appendChild(host);
+      entry.host = host;
+      entry.clone = clone;
+      if (this._thumbScale) clone.style.transform = 'scale(' + this._thumbScale + ')';
+      // Once materialized the IO callback is a no-op early-return —
+      // unobserve so scroll doesn't keep firing it.
+      if (this._railObserver) this._railObserver.unobserve(entry.frame);
+    }
+
+    /** Re-clone a single thumb (live-update path). No-op if the thumb
+     *  hasn't been materialized yet — it'll pick up current content when
+     *  it scrolls into view. */
+    _refreshThumb(slide) {
+      const entry = (this._thumbs || []).find((t) => t.slide === slide);
+      if (!entry || !entry.host) return;
+      entry.host.remove();
+      entry.host = entry.clone = null;
+      this._materialize(entry);
+    }
+
+    _scaleThumbs() {
+      if (!this._thumbs || !this._thumbs.length) return;
+      // Every frame is the same width; if it reads 0 the rail is
+      // display:none (noscale / no-rail / presenting / print) — leave the
+      // clones as-is and re-run when the rail is revealed.
+      const fw = this._thumbs[0].frame.offsetWidth;
+      if (!fw) return;
+      this._thumbScale = fw / this.designWidth;
+      this._thumbs.forEach(({ clone }) => {
+        if (clone) clone.style.transform = 'scale(' + this._thumbScale + ')';
+      });
+    }
+
+    _setDrop(i, where) {
+      // dragover fires at pointer-event rate; touch only the previous
+      // and new target rather than sweeping all N thumbs.
+      const t = this._thumbs && this._thumbs[i];
+      if (this._dropOn && this._dropOn !== t) {
+        this._dropOn.thumb.removeAttribute('data-drop');
+      }
+      if (t) t.thumb.setAttribute('data-drop', where);
+      this._dropOn = t || null;
+    }
+
+    _clearDrop() {
+      if (this._dropOn) this._dropOn.thumb.removeAttribute('data-drop');
+      this._dropOn = null;
+    }
+
+    _syncRail(follow) {
+      if (!this._thumbs) return;
+      this._thumbs.forEach(({ thumb }, i) => {
+        if (i === this._index) {
+          thumb.setAttribute('data-current', '');
+          if (follow && typeof thumb.scrollIntoView === 'function') {
+            thumb.scrollIntoView({ block: 'nearest' });
+          }
+        } else {
+          thumb.removeAttribute('data-current');
+        }
+      });
+    }
+
+    _openMenu(i, x, y) {
+      if (!this._menu) return;
+      this._menuIndex = i;
+      const slide = this._slides[i];
+      const skip = slide && slide.hasAttribute('data-deck-skip');
+      this._menu.querySelector('[data-act="skip"]').textContent = skip ? 'Unskip slide' : 'Skip slide';
+      this._menu.querySelector('[data-act="up"]').disabled = i <= 0;
+      this._menu.querySelector('[data-act="down"]').disabled = i >= this._slides.length - 1;
+      this._menu.querySelector('[data-act="delete"]').disabled = this._slides.length <= 1;
+      // Place, then clamp to viewport after it's measurable.
+      this._menu.style.left = x + 'px';
+      this._menu.style.top = y + 'px';
+      this._menu.setAttribute('data-open', '');
+      const r = this._menu.getBoundingClientRect();
+      const nx = Math.min(x, window.innerWidth - r.width - 4);
+      const ny = Math.min(y, window.innerHeight - r.height - 4);
+      this._menu.style.left = Math.max(4, nx) + 'px';
+      this._menu.style.top = Math.max(4, ny) + 'px';
+    }
+
+    _closeMenu() {
+      if (this._menu) this._menu.removeAttribute('data-open');
+      this._menuIndex = -1;
+    }
+
+    _openConfirm(i) {
+      if (!this._confirm) return;
+      this._confirmIndex = i;
+      this._confirm.querySelector('.title').textContent = 'Delete slide ' + (i + 1) + '?';
+      this._confirm.setAttribute('data-open', '');
+      const btn = this._confirm.querySelector('.danger');
+      if (btn && btn.focus) btn.focus();
+    }
+
+    _closeConfirm() {
+      if (this._confirm) this._confirm.removeAttribute('data-open');
+      this._confirmIndex = -1;
+    }
+
+    _emitDeckChange(detail) {
+      this.dispatchEvent(new CustomEvent('deckchange', {
+        detail, bubbles: true, composed: true,
+      }));
+    }
+
+    _deleteSlide(i) {
+      const slide = this._slides[i];
+      if (!slide || this._slides.length <= 1) return;
+      const wasCurrent = i === this._index;
+      if (i < this._index || (wasCurrent && i === this._slides.length - 1)) this._index--;
+      this._squelchSlotChange = true;
+      slide.remove();
+      this._emitDeckChange({ action: 'delete', from: i, slide });
+      this._collectSlides();
+      this._applyIndex({ showOverlay: true, broadcast: true, reason: 'mutation' });
+    }
+
+    _duplicateSlide(i) {
+      const slide = this._slides[i];
+      if (!slide) return;
+      const copy = slide.cloneNode(true);
+      // Strip ids so the document stays valid (no duplicate-id collisions
+      // with the original). Same treatment _materialize gives rail clones.
+      copy.removeAttribute('id');
+      copy.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+      // Insert after the original and make the copy active so it's the one
+      // on screen. _collectSlides re-derives data-screen-label / data-deck-*
+      // attrs, so the cloned values are overwritten.
+      this._index = i + 1;
+      this._squelchSlotChange = true;
+      this.insertBefore(copy, slide.nextSibling);
+      this._emitDeckChange({ action: 'duplicate', from: i, to: i + 1, slide: copy });
+      this._collectSlides();
+      this._applyIndex({ showOverlay: true, broadcast: true, reason: 'mutation' });
+    }
+
+    _toggleSkip(i) {
+      const slide = this._slides[i];
+      if (!slide) return;
+      const on = !slide.hasAttribute('data-deck-skip');
+      if (on) slide.setAttribute('data-deck-skip', '');
+      else slide.removeAttribute('data-deck-skip');
+      if (this._thumbs && this._thumbs[i]) {
+        if (on) this._thumbs[i].thumb.setAttribute('data-skip', '');
+        else this._thumbs[i].thumb.removeAttribute('data-skip');
+      }
+      this._markLastVisible();
+      this._emitDeckChange({ action: on ? 'skip' : 'unskip', from: i, slide });
+      // Re-broadcast so the presenter popup's prev/next thumbnails re-pick
+      // the nearest non-skipped slide without waiting for a nav event.
+      try { window.postMessage({ slideIndexChanged: this._index, deckTotal: this._slides.length, deckSkipped: this._skippedIndices() }, '*'); } catch (e) {}
+    }
+
+    _skippedIndices() {
+      const out = [];
+      for (let i = 0; i < this._slides.length; i++) {
+        if (this._slides[i].hasAttribute('data-deck-skip')) out.push(i);
+      }
+      return out;
+    }
+
+    _moveSlide(i, j) {
+      if (j < 0 || j >= this._slides.length || j === i) return;
+      const slide = this._slides[i];
+      const ref = j < i ? this._slides[j] : this._slides[j].nextSibling;
+      // Track the active slide across the reorder so the same content
+      // stays on screen.
+      const cur = this._index;
+      if (cur === i) this._index = j;
+      else if (i < cur && j >= cur) this._index = cur - 1;
+      else if (i > cur && j <= cur) this._index = cur + 1;
+      this._squelchSlotChange = true;
+      this.insertBefore(slide, ref);
+      this._emitDeckChange({ action: 'move', from: i, to: j, slide });
+      this._collectSlides();
+      this._applyIndex({ showOverlay: false, broadcast: true, reason: 'mutation' });
+    }
+
+    // Public API ------------------------------------------------------------
+
+    /** Current slide index (0-based). */
+    get index() { return this._index; }
+    /** Total slide count. */
+    get length() { return this._slides.length; }
+    /** Programmatically navigate. */
+    goTo(i) { this._go(i, 'api'); }
+    next() { this._advance(1, 'api'); }
+    prev() { this._advance(-1, 'api'); }
+    reset() { this._go(0, 'api'); }
+  }
+
+  if (!customElements.get('deck-stage')) {
+    customElements.define('deck-stage', DeckStage);
+  }
+})();
+
+</script>
+</body>
+</html>
