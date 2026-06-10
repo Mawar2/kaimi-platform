@@ -38,7 +38,7 @@ demo. Optimize for a system that will be operated for years, not a one-off.
 |-------|--------|---------------|
 | **Language** | Go | Concurrency model required for end-state parallel proposal lifecycles; Google-native fit for ADK/GCP; single-binary deployment; strong readability for team learning. Python explicitly rejected. |
 | **Agent Framework** | Google ADK (Agent Development Kit) v1.0+ Go SDK | Required for Google's Gemini Enterprise Agent Platform. Use current Agent Platform SDK, NOT deprecated Vertex AI SDK modules. |
-| **LLM** | Gemini 3 Pro via Vertex AI | Google-native integration with ADK; enterprise platform support; reasoning capability required for bid/no-bid scoring and proposal generation. |
+| **LLM** | Gemini 2.5 Pro via Vertex AI | Google-native integration with ADK; enterprise platform support; reasoning capability required for bid/no-bid scoring and proposal generation. |
 | **Cloud** | Google Cloud Platform (project: `kaimi-seeker`) | Required by ADK/Gemini integration; federal-compatible (FedRAMP Moderate available if needed later). |
 | **Data Layer (Phase 0)** | JSON-backed Store interface | Provision lazily: JSON file sufficient for Phase 0. Interface designed for Firestore swap in Phase 1+ without touching Hunter code. |
 | **Data Layer (Phase 1+)** | Firestore | Native GCP integration; document model fits Opportunity enrichment pattern; serverless scaling. |
@@ -96,7 +96,7 @@ one per active proposal.
 │  └─────────┘      └─────────┘      └──────────────────────┘    │
 │       │                │                       │                 │
 │       ▼                ▼                       │                 │
-│  SAM.gov API    Gemini 3 Pro            JSON/Firestore          │
+│  SAM.gov API    Gemini 2.5 Pro            JSON/Firestore          │
 └─────────────────────────────────────────────┬───────────────────┘
                                                │
                                     [HUMAN SELECTS OPPORTUNITY]
@@ -172,7 +172,7 @@ Zone 2 specialists for proposal generation. **Built** (`internal/outline`, `inte
 | Dependency | Purpose | Justification | Failure mode if unavailable |
 |------------|---------|---------------|------------------------------|
 | **SAM.gov Opportunities API** | Source of federal contract opportunities | Only authoritative source for federal opportunities; registered account grants 1,000 req/day. | Hunter cannot run; system falls back to cached opportunities from previous successful runs. Must cache aggressively. |
-| **Gemini 3 Pro (Vertex AI)** | LLM reasoning for scoring and proposal generation | Required by ADK framework; enterprise platform with federal compliance path (FedRAMP Moderate). | Scorer and Zone 2 agents cannot run; fall back to human-only BD workflow. |
+| **Gemini 2.5 Pro (Vertex AI)** | LLM reasoning for scoring and proposal generation | Required by ADK framework; enterprise platform with federal compliance path (FedRAMP Moderate). | Scorer and Zone 2 agents cannot run; fall back to human-only BD workflow. |
 | **Google Cloud Platform** | Hosting, Firestore (Phase 1+), ADK runtime | Required by Gemini/ADK integration; federal-compatible infrastructure. | Phase 0 unaffected (local only). Phase 1+ deployment fails; fall back to local dev environment. |
 
 ---

@@ -105,7 +105,7 @@ Since you're using a Google Hackathon billing account:
 
 **Phase 0 (Current):**
 - Infrastructure: < $1/month
-- Gemini 3 Pro: Pay-per-use (minimal until Hunter agent runs frequently)
+- Gemini 2.5 Pro: Pay-per-use (minimal until Hunter agent runs frequently)
 
 **Phase 1+ (Future):**
 - Firestore: Pay-per-read/write
@@ -143,7 +143,7 @@ All commands should succeed without errors.
 ## What Gets Created in Your GCP Project
 
 ### APIs Enabled
-- `aiplatform.googleapis.com` - Vertex AI for Gemini 3 Pro
+- `aiplatform.googleapis.com` - Vertex AI for Gemini 2.5 Pro
 - `secretmanager.googleapis.com` - Secure storage for API keys
 - `iam.googleapis.com` - Identity and Access Management
 - `cloudbuild.googleapis.com` - CI/CD pipeline support

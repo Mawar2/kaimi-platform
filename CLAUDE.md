@@ -94,7 +94,7 @@ Kaimi calls LLMs and external APIs, so tests have two layers:
 - These prove the code works against known inputs
 
 **End-to-end tests (run separately, less frequently):**
-- Real SAM.gov API, real Gemini 3 Pro calls
+- Real SAM.gov API, real Gemini 2.5 Pro calls
 - Slower, costlier, non-deterministic
 - Assert structure and behavior (did it return a valid scored Opportunity?), not exact output strings
 - Run separately from unit tests, not on every commit

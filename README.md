@@ -6,6 +6,39 @@
 
 This is production infrastructure for BlueMeta Technologies' BD operations, built to run for years, not as a demo.
 
+## 🏆 Judges — Start Here
+
+**Run the Kaimi pipeline in one command — no API keys required.** Cached mode reads
+bundled SAM.gov fixtures, runs the Hunter → Scorer agents, and writes scored
+opportunities to a local queue:
+
+```bash
+go run ./cmd/pipeline --mode=cached --store-path=./queue
+```
+
+You'll see a Zone-1 summary (Fetched / Eligible / Dropped / Scored) and scored
+`Opportunity` JSON records under `./queue/queue/`. Each record carries the Scorer's
+bid/no-bid recommendation **and its explainable reasoning**.
+
+**Verify the test suite (no keys, runs against fixtures):**
+
+```bash
+go test ./...
+```
+
+**Run it live (optional — needs keys):** real SAM.gov + Gemini 2.5 Pro via Vertex AI:
+
+```bash
+SAM_API_KEY=... GCP_PROJECT_ID=... go run ./cmd/pipeline --mode=live
+```
+
+**See the design:** [ARCHITECTURE.md](./ARCHITECTURE.md) has the two-zone system diagram;
+[hackathon/DEMO_SCRIPT.md](./hackathon/DEMO_SCRIPT.md) is the 3-minute video walkthrough.
+
+> 🖥️ **Dashboards:** web + desktop UIs that visualize the scored queue are in active
+> development. Until they land, the pipeline run above is the fastest way to watch
+> Kaimi work end to end; the scored JSON it produces is exactly what the dashboards render.
+
 ## Architecture
 
 Kaimi operates in two distinct zones:
@@ -28,27 +61,27 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full system design and [WORKFLOW.md
 
 ## Current Status
 
-**Phase 0-1 Complete**: Foundation, Hunter, and Capability Profile
-- ✅ Go module initialized with full project structure
-- ✅ Core interfaces defined (Store, SAM.gov Client, AgentResult contract)
-- ✅ Opportunity schema designed for all phases
-- ✅ **Hunter Agent** implemented with SAM.gov integration and eligibility gating
-- ✅ **CapabilityProfile** implemented with real BlueMeta data (Issue #9)
-  - UEI: XVUEA59LY579, CAGE: 9RY40
-  - 11 NAICS codes (3 primary, 3 secondary, 5 tertiary)
-  - Self-certified: Small Business, SDB, Minority-Owned
-  - 16 core competencies, 9 past performance projects
-- ✅ **Scorer Agent** implemented with Gemini 2.5 Pro integration (Issue #11)
-- ✅ **Outline Agent** skeleton and formatting rules extraction (Issues #2, #4)
-- ✅ **Final Review Agent** skeleton with validation logic (Issue #6)
-  - Input validation and deadline checking
-  - Ready for LLM-powered content checks (Issue #7)
-- ✅ **CI/CD Pipeline** with AI code review and auto-fix bot
-- ✅ GitHub API caching layer for performance
+**The full pipeline is built and deployed**, and we are completing the product (dashboards
++ Zone-2 polish) for the Google AI Agents Challenge submission (June 11, 2026).
 
-**In Progress**: Zone 2 agent development (Writer, Final Review checks)
+**Zone 1 — built & deployed:**
+- ✅ **Hunter Agent** — SAM.gov integration with NAICS/eligibility gating against the real BlueMeta CapabilityProfile (UEI XVUEA59LY579, CAGE 9RY40; 11 NAICS codes; Small Business / SDB / Minority-Owned; 16 competencies, 9 past-performance projects)
+- ✅ **Scorer Agent** — bid/no-bid scoring with explainable reasoning via **Gemini 2.5 Pro**
+- ✅ **`cmd/pipeline`** — single-command Zone-1 runner (cached + live modes)
+- ✅ **Deployed**: Cloud Run Job on Cloud Scheduler; scored queue persisted to GCS
 
-**Total Closed Issues**: 10 (including foundation, Hunter, Scorer, Outline, Final Review skeleton, CI/CD)
+**Zone 2 — built:**
+- ✅ **Manager**, **Outline**, **Writer**, **Final Review** agents (`internal/manager`, `internal/outline`, `internal/writer`, `internal/finalreview`) with the human review gate
+- ✅ **AgentResult** contract — the common return type every agent conforms to
+- ✅ **Google Docs/Drive** integration foundation (`internal/gdocs`)
+
+**Foundation & platform:**
+- ✅ Forward-compatible `Opportunity` schema and `Store` interface (JSON-backed)
+- ✅ **CI/CD** with automated AI code review + auto-fix bot (Gemini 2.5 Pro)
+- ✅ `internal/dashboard` data layer (stage derivation + store-backed views)
+
+**In active development:** web dashboard and offline-first desktop dashboard over the
+shared `internal/dashboard` layer.
 
 ## Tech Stack
 
@@ -74,13 +107,18 @@ go build -o bin/hunter ./cmd/hunter
 
 ## Run Instructions
 
-### Hunter Agent
+### Zone-1 pipeline (Hunter → Scorer → Queue)
+
 ```bash
-# Run the Hunter agent (placeholder in Phase 0)
-./bin/hunter
+# Offline, no credentials — fixtures in, scored opportunities out
+go run ./cmd/pipeline --mode=cached --store-path=./queue
+
+# Live — real SAM.gov + Gemini 2.5 Pro (requires SAM_API_KEY and GCP_PROJECT_ID)
+SAM_API_KEY=... GCP_PROJECT_ID=... go run ./cmd/pipeline --mode=live
 ```
 
-**Note**: Full Hunter implementation is in progress. Current binary is a placeholder.
+Scored `Opportunity` records are written under the `--store-path` directory. See
+[Judges — Start Here](#-judges--start-here) above for the full walkthrough.
 
 ## Test Instructions
 
@@ -134,18 +172,25 @@ make help       # Show all available targets
 ```
 .
 ├── cmd/
+│   ├── pipeline/            # Zone-1 pipeline runner (Hunter → Scorer → Queue)
 │   ├── hunter/              # Hunter agent entry point
 │   ├── scorer/              # Scorer agent entry point
-│   └── outline/             # Outline agent entry point
+│   └── outline-probe/       # Outline developer probe tool
 ├── internal/
 │   ├── agent/               # AgentResult contract and interfaces
 │   ├── capability/          # CapabilityProfile for company capabilities
 │   ├── opportunity/         # Opportunity schema
-│   ├── store/               # Store interface for persistence
+│   ├── store/               # Store interface for persistence (JSON-backed)
 │   ├── samgov/              # SAM.gov API client
+│   ├── pipeline/            # Zone-1 orchestration (Hunter + Scorer)
 │   ├── scorer/              # Scoring logic and Gemini integration
 │   ├── outline/             # Outline generation and formatting rules
-│   ├── finalreview/         # Final review agent with validation
+│   ├── writer/              # Technical Writer agent (draft generation)
+│   ├── manager/             # Zone-2 per-proposal orchestrator
+│   ├── finalreview/         # Final Review agent with validation
+│   ├── gdocs/               # Google Docs/Drive integration
+│   ├── dashboard/           # Dashboard data layer (stage derivation + views)
+│   ├── e2e/                 # End-to-end pipeline tests
 │   └── github/              # GitHub API caching layer
 ├── config/
 │   └── bluemeta_profile.yaml  # BlueMeta capability profile
