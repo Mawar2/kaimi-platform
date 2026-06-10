@@ -2,9 +2,32 @@ package dashboard
 
 import (
 	"fmt"
+	"html/template"
 	"strings"
 	"testing"
 )
+
+// TestAgentGradientIsStyleSafe proves each agent's HueBG (a linear-gradient)
+// survives interpolation into a style attribute. If HueBG were a plain string,
+// html/template's CSS sanitizer would reject the gradient and emit ZgotmplZ,
+// blanking the avatar background in the workspace progress + gate states. Typing
+// HueBG as template.CSS (the values are static constants) keeps it verbatim.
+func TestAgentGradientIsStyleSafe(t *testing.T) {
+	tmpl := template.Must(template.New("avatar").Parse(`<span style="background:{{.HueBG}}"></span>`))
+	for key, a := range agents {
+		var b strings.Builder
+		if err := tmpl.Execute(&b, a); err != nil {
+			t.Fatalf("execute agent %q: %v", key, err)
+		}
+		got := b.String()
+		if strings.Contains(got, "ZgotmplZ") {
+			t.Errorf("agent %q: HueBG sanitized to ZgotmplZ — it must be template.CSS, got:\n%s", key, got)
+		}
+		if !strings.Contains(got, "linear-gradient(") {
+			t.Errorf("agent %q: gradient missing from the style attr, got:\n%s", key, got)
+		}
+	}
+}
 
 func TestStatusBadgeKinds(t *testing.T) {
 	tests := []struct {

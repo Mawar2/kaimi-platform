@@ -223,7 +223,7 @@ const workspaceContentTmpl = `{{define "content"}}
         <p>Read and edit the working draft below — your edits are exactly what Vera reviews.</p>
       </div>
       <div class="r-hand">
-        <span class="av" style="background:linear-gradient(155deg,#67E0F4,#0EA5C4);color:#062a33">T</span>
+        <span class="av" style="background:{{.Agent.HueBG}};color:{{.Agent.HueFG}}">{{.Agent.Initial}}</span>
         <span class="arrow">` + iconHandoff + `</span>
         <span class="you">` + iconHand + `</span>
       </div>

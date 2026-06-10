@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -23,7 +24,13 @@ var stageNames = [5]string{"Outline", "Technical Writer", "Human Review", "Final
 // agentIdentity is the named-teammate vocabulary from the design handoff.
 // Status copy uses their names — the gate is a warm handoff, not an alarm.
 type agentIdentity struct {
-	Name, Role, Initial, HueBG, HueFG string
+	Name, Role, Initial string
+	// HueBG is the avatar's background — a linear-gradient. It is typed
+	// template.CSS (not string) so html/template interpolates it verbatim in a
+	// style attribute instead of sanitizing the gradient to ZgotmplZ. The values
+	// are static map constants below, never user input, so this is safe.
+	HueBG template.CSS
+	HueFG string
 }
 
 var agents = map[string]agentIdentity{

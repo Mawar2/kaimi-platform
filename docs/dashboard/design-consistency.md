@@ -86,6 +86,17 @@ maxWidth **22ch (265.74px)**, **no inline style attr**; `.kv td` padding **8px 1
 size **13px**, line-height **18.85px** (the designed 1.45 rhythm); no console errors.
 TDD `TestDetailRoutesThroughDesignTokens` added; `make all`-green; `golangci-lint` clean.
 
+### 2026-06-10 — Fix agent-avatar gradient ZgotmplZ (PR pending, issue #218)
+
+Follow-up from the Workspace surface. The progress-state avatar
+(`proposals_templates.go:290`) interpolates `{{.Agent.HueBG}}` (a `linear-gradient`) into a
+style attribute; with `HueBG` typed `string`, html/template sanitized it to `ZgotmplZ`,
+blanking the avatar background in the live-writer flow. Fix: type `agentIdentity.HueBG` as
+`template.CSS` (static map constants — safe). That also let the gate handoff avatar (`:226`)
+dedup through the `agents` map (define-once) instead of repeating the literal. Browser-verified:
+gate avatar renders `linear-gradient(155deg,#67E0F4,#0EA5C4)`, **no `ZgotmplZ`**. TDD
+`TestAgentGradientIsStyleSafe`; `make all`-green; lint clean.
+
 ## Audit backlog (found while auditing; not yet ticketed/fixed)
 
 - **Proposals/Workspace** re-hardcode agent-identity gradients and `#fff` surfaces
