@@ -61,7 +61,7 @@ func TestLive_OutlineAgent_CreatesGoogleDoc(t *testing.T) {
 	}
 
 	agent := New(client)
-	outline, result, err := agent.Run(ctx, opp)
+	outline, result, err := agent.Run(ctx, opp, nil)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}

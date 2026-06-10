@@ -35,7 +35,7 @@ type mockOutline struct {
 	called bool
 }
 
-func (m *mockOutline) Run(_ context.Context, _ *opportunity.Opportunity) (*outline.Outline, *agent.Result, error) {
+func (m *mockOutline) Run(_ context.Context, _ *opportunity.Opportunity, _ map[string]string) (*outline.Outline, *agent.Result, error) {
 	m.called = true
 	return &outline.Outline{OpportunityID: "opp-1", Sections: []outline.Section{{ID: "s1", Title: "Approach"}}}, m.res, m.err
 }

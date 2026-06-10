@@ -50,10 +50,11 @@ type Ingestor interface {
 	Ingest(ctx context.Context, opp *opportunity.Opportunity) ([]opportunity.SolicitationDoc, map[string]string, *agent.Result, error)
 }
 
-// OutlineRunner produces an outline and a Result for an opportunity.
-// The concrete *outline.Agent satisfies this.
+// OutlineRunner produces an outline and a Result for an opportunity, grounded on
+// the ingested solicitation document text. The concrete *outline.Agent satisfies
+// this.
 type OutlineRunner interface {
-	Run(ctx context.Context, opp *opportunity.Opportunity) (*outline.Outline, *agent.Result, error)
+	Run(ctx context.Context, opp *opportunity.Opportunity, documents map[string]string) (*outline.Outline, *agent.Result, error)
 }
 
 // WriterRunner produces a draft and a Result from a writer.Input.
@@ -158,7 +159,7 @@ func (m *Manager) Run(ctx context.Context, opp *opportunity.Opportunity, profile
 
 	// Stage 1: Outline. Capture the artifact before evaluating the halt so a human
 	// reviewing a halted run still sees whatever was produced.
-	ol, res, err := m.outline.Run(ctx, opp)
+	ol, res, err := m.outline.Run(ctx, opp, docText)
 	out.Outline = ol
 	if stop, e := m.after(ctx, out, stageOutline, res, err, opp); stop {
 		return out, e

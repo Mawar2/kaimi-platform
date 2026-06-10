@@ -253,10 +253,10 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 	}
 
 	// Step 0: ingest the solicitation documents (best-effort). Their text grounds
-	// the Writer and the Final Review compliance pass.
+	// the Outline, the Writer, and the Final Review compliance pass.
 	documents := s.ingestDocuments(ctx, opp)
 
-	out, res, err := s.deps.Outline.Run(ctx, opp)
+	out, res, err := s.deps.Outline.Run(ctx, opp, documents)
 	if err != nil || res == nil || res.IsFailed() || out == nil {
 		s.failStatus(ctx, oppID, "outline:failed")
 		return

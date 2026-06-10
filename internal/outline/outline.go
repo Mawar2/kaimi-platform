@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -81,8 +82,14 @@ func New(docsClient googledocs.Client) *Agent {
 //
 // Sparse opportunities get a best-effort outline rather than a failure.
 //
+// documents maps a solicitation document filename to its extracted text
+// (populated by the Manager's ingest stage). When present, its text is scanned
+// alongside the opportunity description for required sections and formatting
+// rules — the real Section L/M instructions live in the RFP documents, not the
+// thin SAM.gov summary. A nil/empty map reproduces the previous behavior exactly.
+//
 // TODO(phase-3): Replace buildSections with a Gemini call once LLM integration lands.
-func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline, *agent.Result, error) {
+func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents map[string]string) (*Outline, *agent.Result, error) {
 	if opp == nil {
 		return nil, &agent.Result{
 			AgentName: agentName,
@@ -91,8 +98,9 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity) (*Outline
 		}, fmt.Errorf("outline agent: opportunity must not be nil")
 	}
 
-	sections := buildSections(opp)
-	formatting := extractFormattingRules(opp)
+	source := combinedSource(opp, documents)
+	sections := buildSections(opp, source)
+	formatting := extractFormattingRules(source)
 
 	outline := &Outline{
 		OpportunityID:   opp.ID,
@@ -216,12 +224,33 @@ var (
 	ipRE = regexp.MustCompile(`(?i)\bip\b`)
 )
 
-// extractFormattingRules parses the opportunity description for stated formatting
+// combinedSource concatenates the opportunity description with the extracted text
+// of every ingested solicitation document, in a stable filename order, to form the
+// single body of text the deterministic parsers scan. With no documents it returns
+// just the description, so behavior is unchanged.
+func combinedSource(opp *opportunity.Opportunity, documents map[string]string) string {
+	if len(documents) == 0 {
+		return opp.Description
+	}
+	names := make([]string, 0, len(documents))
+	for name := range documents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var sb strings.Builder
+	sb.WriteString(opp.Description)
+	for _, name := range names {
+		sb.WriteString("\n")
+		sb.WriteString(documents[name])
+	}
+	return sb.String()
+}
+
+// extractFormattingRules parses the solicitation source text for stated formatting
 // requirements. Fields not mentioned in the solicitation are returned with
 // Specified=false and an empty Value — callers must not invent defaults for these.
-func extractFormattingRules(opp *opportunity.Opportunity) *FormattingRules {
-	desc := opp.Description
-
+func extractFormattingRules(desc string) *FormattingRules {
 	rules := &FormattingRules{
 		PageLimit:   unspecified(),
 		Font:        unspecified(),
@@ -290,8 +319,10 @@ func unspecified() *FormattingRule {
 // inclusion is traceable back to a field value.
 //
 // Returns at least the five standard federal proposal volumes even for sparse input.
-func buildSections(opp *opportunity.Opportunity) []Section {
-	desc := strings.ToLower(opp.Description)
+// source is the combined solicitation text (description plus any ingested document
+// text) scanned for the keyword-driven optional sections.
+func buildSections(opp *opportunity.Opportunity, source string) []Section {
+	desc := strings.ToLower(source)
 
 	sections := []Section{
 		{

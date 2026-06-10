@@ -72,7 +72,7 @@ func TestOutlineAgent_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	a := New(succeedingDocsClient())
 
-	outline, result, err := a.Run(ctx, baseOpportunity())
+	outline, result, err := a.Run(ctx, baseOpportunity(), nil)
 
 	if err != nil {
 		t.Fatalf("Run() returned unexpected error: %v", err)
@@ -114,6 +114,59 @@ func TestOutlineAgent_HappyPath(t *testing.T) {
 	}
 }
 
+// TestOutlineAgent_GroundsOnDocuments verifies the outline is driven by the
+// ingested solicitation document text, not just the thin SAM.gov description: a
+// page limit, a key-personnel section, and a required form that appear ONLY in
+// the document must surface in the outline.
+func TestOutlineAgent_GroundsOnDocuments(t *testing.T) {
+	ctx := context.Background()
+	a := New(succeedingDocsClient())
+
+	opp := baseOpportunity()
+	opp.Description = "Provide IT systems design and integration services." // no rules, no keywords
+	documents := map[string]string{
+		"Section_L.pdf": "Proposals are limited to 15 pages. Offerors shall identify key personnel by name. Submit a completed SF-330.",
+	}
+
+	outline, result, err := a.Run(ctx, opp, documents)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.Status != agent.StatusSuccess {
+		t.Fatalf("Status = %q, want success", result.Status)
+	}
+
+	// Page limit parsed from the document, not the (silent) description.
+	pl := outline.FormattingRules.PageLimit
+	if pl == nil || !pl.Specified || pl.Value != "15 pages" {
+		t.Errorf("page limit not parsed from document: %+v", pl)
+	}
+	// Key-personnel section derived from a document keyword.
+	if !hasSection(outline.Sections, "key_personnel") {
+		t.Error("key_personnel section not derived from document text")
+	}
+	// SF-330 form parsed from the document.
+	var hasForm bool
+	for _, f := range outline.FormattingRules.RequiredForms {
+		if f == "SF-330" {
+			hasForm = true
+		}
+	}
+	if !hasForm {
+		t.Errorf("SF-330 not parsed from document; forms=%v", outline.FormattingRules.RequiredForms)
+	}
+}
+
+// hasSection reports whether a section with the given id is present.
+func hasSection(sections []Section, id string) bool {
+	for _, s := range sections {
+		if s.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // TestOutlineAgent_DocCreationFails verifies that when the Google Doc cannot be
 // created, the agent returns a failed Result with an error AND still returns the
 // generated Outline — the outline must not be lost silently.
@@ -122,7 +175,7 @@ func TestOutlineAgent_DocCreationFails(t *testing.T) {
 	wantErr := errors.New("drive: permission denied")
 	a := New(failingDocsClient(wantErr))
 
-	outline, result, err := a.Run(ctx, baseOpportunity())
+	outline, result, err := a.Run(ctx, baseOpportunity(), nil)
 
 	if err == nil {
 		t.Fatal("Run() should return an error when Doc creation fails")
@@ -158,7 +211,7 @@ func TestOutlineAgent_NilOpportunity(t *testing.T) {
 	ctx := context.Background()
 	a := New(succeedingDocsClient())
 
-	outline, result, err := a.Run(ctx, nil)
+	outline, result, err := a.Run(ctx, nil, nil)
 
 	if err == nil {
 		t.Fatal("Run() should return an error when opportunity is nil")
@@ -188,7 +241,7 @@ func TestBuildSections_BaseSections(t *testing.T) {
 	opp.Description = "" // sparse: no description
 	opp.SetAsideCode = ""
 
-	sections := buildSections(opp)
+	sections := buildSections(opp, opp.Description)
 
 	required := []string{
 		"executive_summary",
@@ -211,7 +264,7 @@ func TestBuildSections_SetAside(t *testing.T) {
 	opp := baseOpportunity()
 	opp.SetAsideCode = "SBA"
 
-	sections := buildSections(opp)
+	sections := buildSections(opp, opp.Description)
 
 	if !contains(sectionIDs(sections), "small_business_subcontracting") {
 		t.Error("expected small_business_subcontracting section for SBA set-aside")
@@ -225,7 +278,7 @@ func TestBuildSections_NoSetAside(t *testing.T) {
 		opp := baseOpportunity()
 		opp.SetAsideCode = code
 
-		sections := buildSections(opp)
+		sections := buildSections(opp, opp.Description)
 
 		if contains(sectionIDs(sections), "small_business_subcontracting") {
 			t.Errorf("unexpected small_business_subcontracting section for SetAsideCode=%q", code)
@@ -278,7 +331,7 @@ func TestBuildSections_KeywordsAddSections(t *testing.T) {
 			opp := baseOpportunity()
 			opp.Description = tc.description
 
-			sections := buildSections(opp)
+			sections := buildSections(opp, opp.Description)
 
 			if !contains(sectionIDs(sections), tc.wantSection) {
 				t.Errorf("expected section %q when description is %q", tc.wantSection, tc.description)
@@ -294,7 +347,7 @@ func TestBuildSections_SectionRationaleSet(t *testing.T) {
 	opp.SetAsideCode = "8A"
 	opp.Description = "key personnel required. quality assurance plan mandatory."
 
-	for _, s := range buildSections(opp) {
+	for _, s := range buildSections(opp, opp.Description) {
 		if s.Rationale == "" {
 			t.Errorf("section %q has empty Rationale", s.ID)
 		}
@@ -307,7 +360,7 @@ func TestExtractFormattingRules_NothingSpecified(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = "Provide IT systems design and integration services."
 
-	rules := extractFormattingRules(opp)
+	rules := extractFormattingRules(opp.Description)
 
 	if rules == nil {
 		t.Fatal("extractFormattingRules() returned nil")
@@ -340,7 +393,7 @@ func TestExtractFormattingRules_PageLimit(t *testing.T) {
 		t.Run(tc.wantValue, func(t *testing.T) {
 			opp := baseOpportunity()
 			opp.Description = tc.desc
-			rules := extractFormattingRules(opp)
+			rules := extractFormattingRules(opp.Description)
 			if !rules.PageLimit.Specified {
 				t.Fatalf("PageLimit.Specified=false for %q", tc.desc)
 			}
@@ -365,7 +418,7 @@ func TestExtractFormattingRules_Font(t *testing.T) {
 		t.Run(tc.wantValue, func(t *testing.T) {
 			opp := baseOpportunity()
 			opp.Description = tc.desc
-			rules := extractFormattingRules(opp)
+			rules := extractFormattingRules(opp.Description)
 			if !rules.Font.Specified {
 				t.Fatalf("Font.Specified=false for %q", tc.desc)
 			}
@@ -380,7 +433,7 @@ func TestExtractFormattingRules_Font(t *testing.T) {
 func TestExtractFormattingRules_Margins(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = "All pages must have 1-inch margins."
-	rules := extractFormattingRules(opp)
+	rules := extractFormattingRules(opp.Description)
 	if !rules.Margins.Specified {
 		t.Fatal("Margins.Specified=false")
 	}
@@ -403,7 +456,7 @@ func TestExtractFormattingRules_LineSpacing(t *testing.T) {
 		t.Run(tc.wantValue, func(t *testing.T) {
 			opp := baseOpportunity()
 			opp.Description = tc.desc
-			rules := extractFormattingRules(opp)
+			rules := extractFormattingRules(opp.Description)
 			if !rules.LineSpacing.Specified {
 				t.Fatalf("LineSpacing.Specified=false for %q", tc.desc)
 			}
@@ -430,7 +483,7 @@ func TestExtractFormattingRules_FileFormat(t *testing.T) {
 		t.Run(tc.wantValue, func(t *testing.T) {
 			opp := baseOpportunity()
 			opp.Description = tc.desc
-			rules := extractFormattingRules(opp)
+			rules := extractFormattingRules(opp.Description)
 			if !rules.FileFormat.Specified {
 				t.Fatalf("FileFormat.Specified=false for %q", tc.desc)
 			}
@@ -447,7 +500,7 @@ func TestExtractFormattingRules_RequiredForms(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = "Offeror must submit SF-330, SF 1449, and DD Form 254. SF-330 is required again."
 
-	rules := extractFormattingRules(opp)
+	rules := extractFormattingRules(opp.Description)
 
 	want := []string{"SF-330", "SF-1449", "DD-254"}
 	if len(rules.RequiredForms) != len(want) {
@@ -467,7 +520,7 @@ func TestExtractFormattingRules_Partial(t *testing.T) {
 	// Only page limit and file format are stated; font/margins/spacing are silent.
 	opp.Description = "Proposals shall not to exceed 20 pages and must be submitted in PDF format."
 
-	rules := extractFormattingRules(opp)
+	rules := extractFormattingRules(opp.Description)
 
 	if !rules.PageLimit.Specified || rules.PageLimit.Value != "20 pages" {
 		t.Errorf("PageLimit = {%v, %q}, want {true, \"20 pages\"}", rules.PageLimit.Specified, rules.PageLimit.Value)
@@ -490,7 +543,7 @@ func TestOutlineAgent_FormattingRulesNonNil(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = ""
 
-	outline, _, err := New(succeedingDocsClient()).Run(context.Background(), opp)
+	outline, _, err := New(succeedingDocsClient()).Run(context.Background(), opp, nil)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
