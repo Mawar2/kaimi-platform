@@ -2,8 +2,8 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "kaimi-desktop",
   "outputfilename": "kaimi-desktop",
-  "frontend:install": "",
-  "frontend:build": "",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
   "wailsjsdir": "./frontend",
   "author": {
     "name": "BlueMeta Technologies"

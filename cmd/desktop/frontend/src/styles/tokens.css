@@ -1,0 +1,210 @@
+/* ============================================================
+   KAIMI — Design Tokens
+   "the seeker" · a BlueMeta product
+   Two modes: light TRIAGE (:root) · dark FOCUS ([data-theme="focus"])
+   ============================================================ */
+
+:root {
+  /* ---- Brand ramp (BlueMeta house blue) ---- */
+  --blue-50:  #EEF4FF;
+  --blue-100: #DCE6FF;
+  --blue-200: #B9CEFF;
+  --blue-300: #8DAEFF;
+  --blue-400: #5B86F7;
+  --blue-500: #2563EB;   /* BlueMeta primary */
+  --blue-600: #1D4ED8;
+  --blue-700: #1A3FAE;
+  --blue-800: #16327F;
+  --blue-900: #0A1B3D;   /* deep navy — the house ink */
+
+  /* ---- Kaimi accent (cyan — the seeker's signal) ---- */
+  --cyan-50:  #E7FBFF;
+  --cyan-200: #A5EEFB;
+  --cyan-300: #67E0F4;
+  --cyan-400: #22D3EE;   /* accent */
+  --cyan-500: #0EA5C4;
+  --cyan-600: #0B7E97;
+
+  /* ---- Neutral (cool, navy-tinted greys) ---- */
+  --n-0:   #FFFFFF;
+  --n-25:  #FAFCFF;
+  --n-50:  #F4F7FC;
+  --n-100: #ECF1F9;
+  --n-200: #DCE4F0;
+  --n-300: #C3CFE1;
+  --n-400: #94A3BE;
+  --n-500: #64748B;
+  --n-600: #475569;
+  --n-700: #334155;
+  --n-800: #1E293B;
+  --n-900: #0F1B30;
+
+  /* ============================================================
+     STATUS VOCABULARY — the system's most reused colors
+     ============================================================ */
+
+  /* Agent / stage states */
+  --st-pending:      #64748B;   /* slate — dormant */
+  --st-pending-bg:   #EEF1F6;
+  --st-progress:     #2563EB;   /* blue — working */
+  --st-progress-bg:  #E7EEFF;
+  --st-done:         #15A06B;   /* green — complete */
+  --st-done-bg:      #E2F6EE;
+  --st-human:        #E8870E;   /* AMBER/GOLD — needs you (loudest) */
+  --st-human-tint:   #F6A938;
+  --st-human-bg:     #FFF3E0;
+  --st-human-glow:   rgba(232,135,14,0.45);
+  --st-failed:       #DC2626;   /* red — failed */
+  --st-failed-bg:    #FCE8E8;
+
+  /* Bid recommendation */
+  --rec-bid:     #15A06B;   /* go — green */
+  --rec-bid-bg:  #E2F6EE;
+  --rec-nobid:   #C2354A;   /* don't — rose-red */
+  --rec-nobid-bg:#FBE9EC;
+  --rec-review:  #E8870E;   /* human judgment — amber (same family as Needs Human) */
+  --rec-review-bg:#FFF3E0;
+
+  /* Fit-score bands */
+  --fit-strong: #15A06B;   /* 80-100 */
+  --fit-good:   #0EA5C4;   /* 60-79  */
+  --fit-fair:   #E8870E;   /* 40-59  */
+  --fit-weak:   #C2354A;   /* 0-39   */
+  --fit-track:  #E4EAF3;   /* unfilled ring */
+
+  /* Urgency / deadline escalation */
+  --urg-calm:    #64748B;   /* >30d */
+  --urg-soon:    #2563EB;   /* 14-30d */
+  --urg-near:    #E8870E;   /* 7-14d */
+  --urg-crit:    #DC2626;   /* <7d / <72h — pulses */
+  --urg-crit-bg: #FCE8E8;
+
+  /* ============================================================
+     SEMANTIC SURFACES — light TRIAGE
+     ============================================================ */
+  --bg:          var(--n-50);
+  --bg-sunken:   #EDF2F9;
+  --surface:     var(--n-0);
+  --surface-2:   var(--n-25);
+  --surface-3:   var(--n-100);
+  --ink:         var(--blue-900);
+  --ink-2:       var(--n-600);
+  --ink-3:       var(--n-500);
+  --ink-4:       var(--n-400);
+  --border:      var(--n-200);
+  --border-2:    var(--n-100);
+  --primary:     var(--blue-500);
+  --primary-ink: #FFFFFF;
+  --accent:      var(--cyan-500);
+  --ring-focus:  rgba(37,99,235,0.35);
+
+  /* ---- Typography ---- */
+  --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  --t-display: 700 48px/1.04 var(--font-sans);
+  --t-h1:      700 33px/1.1  var(--font-sans);
+  --t-h2:      650 25px/1.18 var(--font-sans);
+  --t-h3:      650 19px/1.28 var(--font-sans);
+  --t-body-l:  420 17px/1.55 var(--font-sans);
+  --t-body:    420 15px/1.55 var(--font-sans);
+  --t-small:   430 13px/1.45 var(--font-sans);
+  --t-label:   600 11px/1   var(--font-sans);     /* uppercase tracked */
+
+  /* ---- Spacing (4px base) ---- */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-7: 32px; --s-8: 40px; --s-9: 48px; --s-10: 64px; --s-12: 80px;
+
+  /* ---- Radius ---- */
+  --r-xs: 5px; --r-sm: 8px; --r-md: 11px; --r-lg: 16px; --r-xl: 22px; --r-pill: 999px;
+
+  /* ---- Elevation (light) ---- */
+  --e-1: 0 1px 2px rgba(15,27,48,0.06), 0 1px 1px rgba(15,27,48,0.04);
+  --e-2: 0 2px 4px rgba(15,27,48,0.06), 0 4px 12px rgba(15,27,48,0.07);
+  --e-3: 0 6px 16px rgba(15,27,48,0.10), 0 12px 32px rgba(15,27,48,0.10);
+  --e-4: 0 18px 48px rgba(10,27,61,0.18), 0 8px 20px rgba(10,27,61,0.10);
+
+  /* ---- Motion ---- */
+  --m-fast: 120ms;
+  --m-base: 220ms;
+  --m-slow: 360ms;
+  --ease:        cubic-bezier(0.22, 0.8, 0.28, 1);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ============================================================
+   DARK — FOCUS MODE
+   ============================================================ */
+[data-theme="focus"] {
+  --bg:        #070E22;
+  --bg-sunken: #050A1A;
+  --surface:   #0E1A36;
+  --surface-2: #122146;
+  --surface-3: #16284C;
+  --ink:       #EAF1FF;
+  --ink-2:     #A8B8DA;
+  --ink-3:     #7587AE;
+  --ink-4:     #5A6B92;
+  --border:    rgba(150,180,230,0.14);
+  --border-2:  rgba(150,180,230,0.08);
+  --primary:   #3B82F6;
+  --primary-ink:#FFFFFF;
+  --accent:    var(--cyan-400);
+  --ring-focus: rgba(34,211,238,0.45);
+
+  /* status backgrounds get dark, glassy fills */
+  --st-pending-bg:  rgba(100,116,139,0.16);
+  --st-progress:    #5B9BFF;
+  --st-progress-bg: rgba(59,130,246,0.18);
+  --st-done:        #2BD49A;
+  --st-done-bg:     rgba(21,160,107,0.18);
+  --st-human:       #FFB24D;
+  --st-human-tint:  #FFC56E;
+  --st-human-bg:    rgba(232,135,14,0.18);
+  --st-human-glow:  rgba(255,178,77,0.55);
+  --st-failed:      #FF6B6B;
+  --st-failed-bg:   rgba(220,38,38,0.18);
+
+  --rec-bid:#2BD49A; --rec-bid-bg:rgba(21,160,107,0.18);
+  --rec-nobid:#FF7A8A; --rec-nobid-bg:rgba(194,53,74,0.18);
+  --rec-review:#FFB24D; --rec-review-bg:rgba(232,135,14,0.18);
+
+  --fit-strong:#2BD49A; --fit-good:#3DD6F0; --fit-fair:#FFB24D; --fit-weak:#FF7A8A;
+  --fit-track: rgba(150,180,230,0.16);
+
+  --urg-calm:#7587AE; --urg-soon:#5B9BFF; --urg-near:#FFB24D; --urg-crit:#FF6B6B;
+  --urg-crit-bg: rgba(220,38,38,0.18);
+
+  --e-1: 0 1px 2px rgba(0,0,0,0.4);
+  --e-2: 0 4px 14px rgba(0,0,0,0.45);
+  --e-3: 0 10px 30px rgba(0,0,0,0.5);
+  --e-4: 0 24px 60px rgba(0,0,0,0.6);
+}
+
+/* ---- base reset ---- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font: var(--t-body);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1,h2,h3,h4,p { margin: 0; }
+button { font-family: inherit; }
+::selection { background: var(--cyan-200); color: var(--blue-900); }
+[data-theme="focus"] ::selection { background: rgba(34,211,238,0.3); color: #EAF1FF; }
+
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+.label {
+  font: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

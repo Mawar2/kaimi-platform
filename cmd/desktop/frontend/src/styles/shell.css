@@ -1,0 +1,7 @@
+/* Shell base — the small extras the prototype kept in its <head>. */
+html, body, #root { height: 100%; }
+body { margin: 0; }
+#root { height: 100vh; }
+
+.route-fade { animation: routeIn .28s var(--ease) both; height: 100%; }
+@keyframes routeIn { from { transform: translateY(6px); } to { transform: none; } }

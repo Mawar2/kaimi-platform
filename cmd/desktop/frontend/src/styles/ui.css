@@ -1,0 +1,170 @@
+/* ============================================================
+   KAIMI — Shared UI components (works in both themes)
+   Status vocabulary + core components. Single source of truth.
+   ============================================================ */
+
+/* ---------- STATUS BADGE (agent / stage state) ---------- */
+.kbadge {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px 0 8px;
+  border-radius: var(--r-pill);
+  font: 600 12px/1 var(--font-sans);
+  letter-spacing: 0.01em; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.kbadge .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  flex: none;
+}
+.kbadge--pending  { color: var(--st-pending);  background: var(--st-pending-bg);  border-color: color-mix(in oklab, var(--st-pending) 22%, transparent); }
+.kbadge--progress { color: var(--st-progress); background: var(--st-progress-bg); border-color: color-mix(in oklab, var(--st-progress) 28%, transparent); }
+.kbadge--done     { color: var(--st-done);     background: var(--st-done-bg);     border-color: color-mix(in oklab, var(--st-done) 28%, transparent); }
+.kbadge--failed   { color: var(--st-failed);   background: var(--st-failed-bg);   border-color: color-mix(in oklab, var(--st-failed) 28%, transparent); }
+
+/* Needs Human — the loudest. Solid amber, glow halo, gentle pulse. */
+.kbadge--human {
+  color: #fff;
+  background: linear-gradient(180deg, var(--st-human-tint), var(--st-human));
+  border-color: color-mix(in oklab, var(--st-human) 50%, transparent);
+  box-shadow: 0 0 0 0 var(--st-human-glow);
+  animation: kHumanPulse 2.2s var(--ease) infinite;
+}
+.kbadge--human .dot { background: #fff; box-shadow: 0 0 6px rgba(255,255,255,0.9); }
+@keyframes kHumanPulse {
+  0%   { box-shadow: 0 0 0 0 var(--st-human-glow); }
+  60%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* In-progress dot animates */
+.kbadge--progress .dot { animation: kBlink 1.3s ease-in-out infinite; }
+@keyframes kBlink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+/* ---------- RECOMMENDATION PILL ---------- */
+.krec {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 12px;
+  border-radius: var(--r-sm);
+  font: 700 12px/1 var(--font-sans);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.krec svg { width: 13px; height: 13px; }
+.krec--bid    { color: var(--rec-bid);    background: var(--rec-bid-bg);    border-color: color-mix(in oklab, var(--rec-bid) 32%, transparent); }
+.krec--nobid  { color: var(--rec-nobid);  background: var(--rec-nobid-bg);  border-color: color-mix(in oklab, var(--rec-nobid) 32%, transparent); }
+.krec--review { color: var(--rec-review); background: var(--rec-review-bg); border-color: color-mix(in oklab, var(--rec-review) 36%, transparent); }
+
+/* ---------- FIT-SCORE RING ---------- */
+.kfit { position: relative; display: inline-grid; place-items: center; flex: none; }
+.kfit svg { transform: rotate(-90deg); display: block; }
+.kfit .kfit-track { stroke: var(--fit-track); }
+.kfit .kfit-val { stroke-linecap: round; transition: stroke-dashoffset var(--m-slow) var(--ease); }
+.kfit-num {
+  position: absolute; display: grid; place-items: center; inset: 0;
+  font-family: var(--font-mono); font-weight: 600; font-feature-settings: "tnum" 1;
+  line-height: 1; color: var(--ink);
+}
+.kfit-num small { font-size: 0.5em; color: var(--ink-3); font-weight: 500; margin-top: 1px; }
+.kfit[data-band="strong"] .kfit-val { stroke: var(--fit-strong); }
+.kfit[data-band="good"]   .kfit-val { stroke: var(--fit-good); }
+.kfit[data-band="fair"]   .kfit-val { stroke: var(--fit-fair); }
+.kfit[data-band="weak"]   .kfit-val { stroke: var(--fit-weak); }
+
+/* ---------- DEADLINE / URGENCY PILL ---------- */
+.kdead {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  font: 600 12px/1 var(--font-sans); white-space: nowrap;
+  color: var(--urg-calm);
+  background: color-mix(in oklab, var(--urg-calm) 12%, transparent);
+}
+.kdead svg { width: 13px; height: 13px; }
+.kdead--soon { color: var(--urg-soon); background: color-mix(in oklab, var(--urg-soon) 12%, transparent); }
+.kdead--near { color: var(--urg-near); background: color-mix(in oklab, var(--urg-near) 14%, transparent); }
+.kdead--crit {
+  color: #fff;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--urg-crit) 86%, white), var(--urg-crit));
+  animation: kCritPulse 1.6s var(--ease) infinite;
+}
+@keyframes kCritPulse {
+  0%,100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--urg-crit) 50%, transparent); }
+  50%     { box-shadow: 0 0 0 5px transparent; }
+}
+
+/* ---------- BUTTONS ---------- */
+.kbtn {
+  --bh: 40px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: var(--bh); padding: 0 18px;
+  border-radius: var(--r-md); border: 1px solid transparent;
+  font: 600 14px/1 var(--font-sans); cursor: pointer;
+  transition: transform var(--m-fast) var(--ease), background var(--m-fast), box-shadow var(--m-fast), border-color var(--m-fast);
+  white-space: nowrap; user-select: none;
+}
+.kbtn svg { width: 16px; height: 16px; }
+.kbtn:active { transform: translateY(1px) scale(0.99); }
+.kbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring-focus); }
+
+.kbtn--ghost     { background: transparent; color: var(--ink-2); border-color: var(--border); }
+.kbtn--ghost:hover { background: var(--surface-3); color: var(--ink); }
+.kbtn--secondary { background: var(--surface); color: var(--ink); border-color: var(--border); box-shadow: var(--e-1); }
+.kbtn--secondary:hover { border-color: var(--n-300); box-shadow: var(--e-2); }
+.kbtn--primary   { background: var(--primary); color: var(--primary-ink); box-shadow: var(--e-2), inset 0 1px 0 rgba(255,255,255,0.18); }
+.kbtn--primary:hover { background: color-mix(in oklab, var(--primary) 88%, black); box-shadow: var(--e-3); }
+
+/* Select — the threshold-crossing action (cyan, confident) */
+.kbtn--select {
+  background: linear-gradient(180deg, var(--cyan-400), var(--cyan-500));
+  color: #042530; font-weight: 700;
+  box-shadow: 0 6px 18px rgba(14,165,196,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+.kbtn--select:hover { box-shadow: 0 10px 26px rgba(14,165,196,0.5); transform: translateY(-1px); }
+
+/* Approve — the gate's weighty green action */
+.kbtn--approve {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--st-done) 88%, white), var(--st-done));
+  color: #fff; font-weight: 700;
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--st-done) 45%, transparent), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+.kbtn--approve:hover { transform: translateY(-1px); box-shadow: 0 10px 26px color-mix(in oklab, var(--st-done) 55%, transparent); }
+
+/* Request changes — its weighty counterpart */
+.kbtn--changes { background: var(--surface); color: var(--st-human); border-color: color-mix(in oklab, var(--st-human) 45%, transparent); }
+.kbtn--changes:hover { background: var(--st-human-bg); }
+
+.kbtn--lg { --bh: 52px; padding: 0 26px; font-size: 16px; border-radius: var(--r-lg); }
+.kbtn--sm { --bh: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--r-sm); }
+.kbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- AVATAR (agent teammate) ---------- */
+.kava {
+  display: inline-grid; place-items: center; flex: none;
+  width: 36px; height: 36px; border-radius: 11px;
+  font: 700 13px/1 var(--font-sans); color: #fff;
+  background: var(--blue-500); position: relative;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.kava--sm { width: 28px; height: 28px; border-radius: 9px; font-size: 11px; }
+.kava--lg { width: 48px; height: 48px; border-radius: 14px; font-size: 17px; }
+
+/* ---------- CHIP (filter / sort / meta) ---------- */
+.kchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px; border-radius: var(--r-pill);
+  font: 500 13px/1 var(--font-sans); color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--border);
+  cursor: pointer; transition: all var(--m-fast) var(--ease);
+}
+.kchip:hover { border-color: var(--n-300); color: var(--ink); }
+.kchip--on { background: var(--blue-50); color: var(--blue-600); border-color: color-mix(in oklab, var(--primary) 35%, transparent); }
+[data-theme="focus"] .kchip--on { background: var(--st-progress-bg); color: #9CC2FF; }
+.kchip svg { width: 14px; height: 14px; }
+
+/* meta-row tag (NAICS etc) */
+.ktag {
+  display:inline-flex; align-items:center; gap:5px;
+  font: 500 12px/1 var(--font-mono); color: var(--ink-3);
+  padding: 3px 7px; border-radius: var(--r-xs);
+  background: var(--surface-3); border: 1px solid var(--border-2);
+}

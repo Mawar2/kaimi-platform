@@ -15,15 +15,18 @@ and cloud sync are later tickets.
 | `internal/desktop/` | UI-agnostic backend (store read + list view-model). **No GUI dependency** — fully unit-tested, compiles everywhere (including Linux CI). |
 | `cmd/desktop/main.go` | Wails entrypoint. Build-constrained to `windows || darwin`. |
 | `cmd/desktop/main_unsupported.go` | Stub for other platforms so `go build/test ./...` stays green on the Linux CI runner without a Wails/CGO toolchain. |
-| `cmd/desktop/frontend/dist/` | Minimal embedded webview UI (HTML/JS). Bundled into the binary → offline, no network fetch. |
-| `cmd/desktop/wails.json` | Wails project config (Windows + `darwin/universal` targets). |
-| `cmd/desktop/build/` | **Generated** by `wails build` (icon, manifest, binary). Git-ignored; regenerated on demand. Branded assets land in #139. |
+| `cmd/desktop/frontend/` | **Vite + React** frontend implementing the handed-off design (`design-handoff/Kaimi-handoff`). Ported from the design prototypes into ES modules; the design's `tokens.css`/`ui.css`/`app.css`/`desktop.css` are copied **verbatim** under `src/styles/`. Figtree + IBM Plex Mono are bundled locally (`@fontsource`) → fully offline. |
+| `cmd/desktop/frontend/src/` | `App.jsx` (shell: title bar, onboarding gate, offline bar, routing), `shared.jsx` (design-system components), `screens.jsx` (Sidebar, Opportunities + drawer), `proposals.jsx`, `workspace.jsx` (review gate), `onboarding.jsx` (6 steps), `editor.jsx` (draft editor), `data.js` (mock/fallback queue + proposals), `api.js` (maps the Go backend's opportunities into the design shape, falls back to the demo queue). |
+| `cmd/desktop/wails.json` | Wails project config (Windows + `darwin/universal` targets; `frontend:install`/`build` run npm + Vite). |
+| `cmd/desktop/frontend/dist/`, `node_modules/`, `build/` | **Generated** by `wails build` (Vite output, deps, icon/manifest/binary). Git-ignored; regenerated on demand. Branded app icon lands later. |
+
+Data wiring: the **Opportunities** queue is read from the local store via the Go backend (`internal/desktop` → `internal/dashboard`); when the store is empty (or running in a plain browser), it falls back to the bundled demo queue so the UI is always populated. **Proposals** and **Workspace** run on mock data until Zone 2 agent events are wired (per INTENT.md).
 
 ## Prerequisites
 
 - **Go 1.25+**
-- **Node.js + npm** (Wails uses them for frontend tooling; this scaffold ships a
-  prebuilt `frontend/dist`, so no `npm install` is needed yet)
+- **Node.js + npm** (the React frontend is built with Vite; `wails build`/`wails dev`
+  run `npm install` and `npm run build` automatically via `wails.json`)
 - **Wails v2 CLI:** `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
   (the module is pinned to `v2.12.0` in `go.mod`)
 - **Windows:** the **WebView2 runtime** (ships with Windows 11; evergreen on
