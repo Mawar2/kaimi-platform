@@ -116,7 +116,7 @@ const shellTmpl = `
   {{faviconLink}}
   {{styleTag}}
   <style>
-    a.nav-item, a.orow, a.artifact2 { text-decoration: none; color: inherit; }
+    a.nav-item, a.orow, a.pcard, a.artifact2 { text-decoration: none; color: inherit; }
     a.orow { display: flex; }
     .seg form { display: contents; }
   </style>

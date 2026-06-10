@@ -180,6 +180,30 @@ func TestRequestChangesOverHTTP(t *testing.T) {
 	}
 }
 
+// TestProposalCardsResetLinkStyling proves the whole-card <a class="pcard">
+// link gets the same text-decoration/color reset the other card and nav links
+// get (issue #207). Without it the proposal cards render as default underlined
+// link-blue text instead of the designed navy, non-underlined cards — a clear
+// drift from 03-proposals-command.png. The reset lives once in the shared shell.
+func TestProposalCardsResetLinkStyling(t *testing.T) {
+	h, svc, _ := newProposalHandler(t)
+	if rr := postForm(t, h, "/opportunity/zta-1/select", url.Values{}); rr.Code != http.StatusSeeOther {
+		t.Fatalf("select: status %d, want 303", rr.Code)
+	}
+	svc.Wait()
+
+	body := get(t, h, "/proposals")
+	// The card link must render so there is something to reset.
+	if !contains(body, `class="pcard`) {
+		t.Fatalf("/proposals did not render a pcard link")
+	}
+	// The shared link reset must list a.pcard so card text inherits --ink and
+	// drops the underline (the rule also covers a.orow / a.nav-item).
+	if !contains(body, "a.pcard") {
+		t.Errorf("proposal card link a.pcard must be in the text-decoration/color reset")
+	}
+}
+
 // TestProposalGuards covers method/id/state validation.
 func TestProposalGuards(t *testing.T) {
 	h, svc, _ := newProposalHandler(t)
