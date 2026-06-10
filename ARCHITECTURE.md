@@ -44,6 +44,7 @@ demo. Optimize for a system that will be operated for years, not a one-off.
 | **Data Layer (Phase 1+)** | Firestore | Native GCP integration; document model fits Opportunity enrichment pattern; serverless scaling. |
 | **CI/CD** | GitHub Actions | Already in use (see .github/ directory); free for private repos; sufficient for current team size. |
 | **Linting** | golangci-lint | Go ecosystem standard; catches common issues; configured in .golangci.yml. |
+| **Desktop client** | Wails v2 (Go) | See ADR-001 (`docs/desktop/adr-001-stack.md`). Go backend imports `internal/store` / `internal/dashboard` / `internal/opportunity` directly — zero logic duplication; single Go binary per OS; offline-first client. Chosen over Tauri (Rust backend can't reuse Go) and Electron (second runtime + bundled Chromium). |
 
 **Code style constraint:** Favor clear, conventional, well-commented Go over clever
 concurrency. Two people will review and learn from this code, one of them newer to
@@ -81,6 +82,36 @@ The Hunter does **not** report to the Manager. The two zones are connected by a
 single event: a human (or a rule) **selects** an opportunity from the queue, which
 spins up a Manager for that one proposal. At scale, many Managers run concurrently —
 one per active proposal.
+
+---
+
+## Client surfaces (web dashboard + desktop)
+
+The two zones are the backend. Humans interact with them through **client surfaces**
+that read the shared `Store` and present the pipeline. Clients are *not* a third zone:
+they observe Zone 1's queue and Zone 2's proposal state, and the only write they
+originate is the human's decisions (selection, approve/request-changes).
+
+- **Web dashboard** — server-rendered Go HTML (`internal/dashboard`, `cmd/dashboard`).
+  Reads the `Store` and derives pipeline stage (`DeriveStage`). The Kaimi design
+  system (tokens + components, issues #126/#132) exists in Go (`StyleTag()`,
+  `components.go`, `brand.go`) but is **not yet wired into the live render path**
+  (placeholder templates remain — the #125 follow-up); adopting it is pending Go work.
+- **Desktop dashboard** (Windows + macOS) — a **Wails v2 (Go)** app that reuses the
+  *same* `internal/store`, `internal/opportunity`, and `internal/dashboard` data/view
+  logic inside an OS-webview window, and shares the Go design system once it is wired
+  in (the same work the web dashboard owes). Its reason to exist is
+  **offline-first proposal work**: the human can read the already-synced queue, open
+  proposals, edit the working draft, and make the one review-gate decision while
+  temporarily offline; those actions are queued locally and replayed on reconnect.
+  See ADR-001 (`docs/desktop/adr-001-stack.md`) for the stack decision and
+  DESKTOP.md (design handoff) for the product intent.
+
+**Offline-first is a client property, not a pipeline property.** The nightly hunt and
+the live agent runs are server-side and remain online-only; "Select to pursue" needs
+the agent runtime and is disabled offline. Provision lazily, design eagerly: the
+device's local `Store` is the offline source of truth now; the local↔cloud **sync
+layer is design-only** (backlog #140) — define the interface, don't build it yet.
 
 ---
 
@@ -135,7 +166,7 @@ Zone 2 specialists for proposal generation. **Built** (`internal/outline`, `inte
 
 - **Opportunity** — The shared data object enriched by every agent. Hunter creates it; downstream agents add fields. Designed in Phase 0 to hold all downstream fields even though Phase 0 only populates Hunter's portion. Fields include: SAM.gov ID, title, NAICS codes, eligibility filters, posting/response dates, solicitation text, agency info, score (Phase 1+), outline (Phase 3+), draft reference (Phase 3+). Schema lives in `internal/opportunity/`. Changing this later is highest integration risk — design eagerly.
 
-- **Store interface** — Abstraction for persistence (`Save(opp)`, `Load(id)`, `List()`). JSON file implementation in Phase 0 (`internal/store/json.go`), swaps to Firestore in Phase 1+ without touching Hunter code. This is the "provision lazily, design eagerly" pattern in action.
+- **Store interface** — Abstraction for persistence. Actual signature (`internal/store/store.go`): `Save(ctx, *Opportunity)`, `Get(ctx, id)`, `List(ctx, *Filter)`, `Delete(ctx, id)`. JSON file implementation (`internal/store/json.go`, `NewJSONStore(basePath)`), designed to swap to Firestore later without touching the agents. This is the "provision lazily, design eagerly" pattern in action.
 
 - **CapabilityProfile** — Structured representation of BlueMeta Technologies' capabilities, certifications, and past performance for federal contracting. Loaded from YAML config file (`config/bluemeta_profile.yaml`). Used by Hunter agent for hard eligibility gates and Scorer agent for fit reasoning. Schema lives in `internal/capability/profile.go`. Contains:
   - Company identifiers (UEI: XVUEA59LY579, CAGE: 9RY40)
@@ -234,7 +265,8 @@ ahead of an approved ticket.
 
 Significant architectural decisions made AFTER initial genesis are recorded as ADRs in `docs/adr/`. Each ADR uses the [Michael Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): Context, Decision, Status, Consequences. ADRs are append-only — superseded decisions stay in the record with status updated to "Superseded by ADR-XXX."
 
-**Current ADRs:** None yet (genesis phase). First ADR will document the "two zones" architecture split if it's ever questioned.
+**Current ADRs:**
+- **ADR-001 — Desktop dashboard stack: Wails v2 (Go)** (`docs/desktop/adr-001-stack.md`, accepted 2026-06-09, issue #137 / PR #144). Desktop ADRs are co-located with the desktop docs under `docs/desktop/` rather than `docs/adr/`, cross-referenced from here.
 
 ---
 
@@ -248,7 +280,7 @@ The following are NOT supported by this architecture and would require fundament
 
 - **Real-time streaming of SAM.gov updates** — Designed for daily batch runs. SAM.gov API doesn't support webhooks; polling every minute would burn rate limits. Real-time would require SAM.gov to change their API model.
 
-- **Offline/air-gapped operation** — Requires live SAM.gov API and Gemini API access. Cannot operate in classified/air-gapped environments without fundamental rearchitecture.
+- **Offline/air-gapped operation of the *pipeline*** — The backend pipeline (Hunter, Scorer, and the Zone 2 agent runs) requires live SAM.gov API and Gemini API access and cannot operate in classified/air-gapped environments without fundamental rearchitecture. **This does not forbid the offline-first desktop *client*:** the desktop app (ADR-001) lets a human read the already-synced queue and edit/review drafts offline against the local `Store`, queuing decisions for replay on reconnect. The pipeline still runs online; the client degrades gracefully offline. These are different things — do not read this bullet as prohibiting the desktop client.
 
 - **Retroactive learning from past proposals across opportunities** — Phase 4+ feature. v1 architecture treats each proposal independently. Cross-proposal memory requires Memory Bank infrastructure not in current design.
 
