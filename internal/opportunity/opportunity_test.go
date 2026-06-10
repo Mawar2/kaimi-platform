@@ -69,6 +69,86 @@ func TestOpportunity_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSolicitationDoc_JSONRoundTrip verifies that a SolicitationDoc — the
+// post-ingestion record of a solicitation attachment stored in GCS — survives a
+// JSON marshal/unmarshal without losing any field. The ingest stage (Ticket C)
+// populates these; the Store persists them as part of the Opportunity.
+func TestSolicitationDoc_JSONRoundTrip(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+
+	original := SolicitationDoc{
+		Filename:    "RFP_Section_L.pdf",
+		SourceURL:   "https://sam.gov/test/123/RFP_Section_L.pdf",
+		ContentType: "application/pdf",
+		RawObject:   "gs://kaimi-solicitations/TEST-123/raw/RFP_Section_L.pdf",
+		TextObject:  "gs://kaimi-solicitations/TEST-123/text/RFP_Section_L.pdf.txt",
+		SHA256:      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		Bytes:       204_800,
+		IngestedAt:  now,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Failed to marshal SolicitationDoc: %v", err)
+	}
+
+	var decoded SolicitationDoc
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal SolicitationDoc: %v", err)
+	}
+
+	if decoded != original {
+		t.Errorf("SolicitationDoc round-trip mismatch:\n got  %+v\n want %+v", decoded, original)
+	}
+}
+
+// TestOpportunity_DocumentsJSONRoundTrip verifies that the Documents slice on an
+// Opportunity round-trips through JSON. This is the forward-compatible schema
+// hook the ingest stage and Manager (Tickets C/D) populate; Attachments (the raw
+// SAM.gov URL list) is retained alongside it, unchanged.
+func TestOpportunity_DocumentsJSONRoundTrip(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+
+	original := Opportunity{
+		ID:          "TEST-123",
+		Title:       "Test Opportunity",
+		Attachments: []string{"https://sam.gov/test/123/rfp.pdf"},
+		Documents: []SolicitationDoc{
+			{
+				Filename:   "rfp.pdf",
+				SourceURL:  "https://sam.gov/test/123/rfp.pdf",
+				RawObject:  "gs://kaimi-solicitations/TEST-123/raw/rfp.pdf",
+				TextObject: "gs://kaimi-solicitations/TEST-123/text/rfp.pdf.txt",
+				SHA256:     "abc123",
+				IngestedAt: now,
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Failed to marshal Opportunity: %v", err)
+	}
+
+	var decoded Opportunity
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal Opportunity: %v", err)
+	}
+
+	if len(decoded.Documents) != 1 {
+		t.Fatalf("Documents length mismatch: got %d, want 1", len(decoded.Documents))
+	}
+	if decoded.Documents[0] != original.Documents[0] {
+		t.Errorf("Documents[0] mismatch:\n got  %+v\n want %+v", decoded.Documents[0], original.Documents[0])
+	}
+	// Attachments must be retained unchanged alongside Documents.
+	if len(decoded.Attachments) != 1 || decoded.Attachments[0] != original.Attachments[0] {
+		t.Errorf("Attachments not preserved: got %v, want %v", decoded.Attachments, original.Attachments)
+	}
+}
+
 // TestOpportunity_EmptyInitialization verifies that an Opportunity can be
 // created with zero values and that optional fields handle nil properly.
 func TestOpportunity_EmptyInitialization(t *testing.T) {

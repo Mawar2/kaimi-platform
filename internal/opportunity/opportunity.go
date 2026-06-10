@@ -57,6 +57,16 @@ type Opportunity struct {
 	SelectedAt     *time.Time `json:"selected_at,omitempty"` // When selected
 	ProposalStatus string     `json:"proposal_status"`       // Current status in Zone 2 (e.g., "outline", "draft", "review")
 
+	// Solicitation documents (populated by the Manager's ingest stage in Zone 2)
+	//
+	// Attachments (above) holds the original SAM.gov attachment URLs the Hunter
+	// found. Documents is the post-ingestion, enriched set: each entry records where
+	// the raw file and the extracted text live in GCS, so users can re-download the
+	// originals and downstream agents (Outline, Writer, Final Review) can ground on
+	// the real document text rather than the SAM.gov summary alone. Empty until the
+	// ingest stage runs.
+	Documents []SolicitationDoc `json:"documents,omitempty"`
+
 	// Proposal sections (populated by Zone 2 agents in Phase 3)
 	// TODO(phase-3): Add outline, technical approach, past performance, etc.
 	// Outline         *ProposalOutline `json:"outline,omitempty"`
@@ -66,6 +76,26 @@ type Opportunity struct {
 	// Metadata
 	CreatedAt time.Time `json:"created_at"` // When opportunity was first saved
 	UpdatedAt time.Time `json:"updated_at"` // Last update timestamp
+}
+
+// SolicitationDoc records one solicitation attachment after it has been ingested:
+// fetched from its source URL, stored in GCS, and had its text extracted. The
+// Manager's ingest stage (Ticket C) populates these and attaches them to the
+// Opportunity; the Store persists them.
+//
+// The struct holds GCS object references, not the bytes or extracted text
+// themselves — keeping the Opportunity small enough to persist in a document store
+// (e.g. Firestore's 1 MB per-document limit). Consumers read the raw file from
+// RawObject and the extracted text from TextObject.
+type SolicitationDoc struct {
+	Filename    string    `json:"filename"`     // Original attachment filename (e.g., "RFP_Section_L.pdf")
+	SourceURL   string    `json:"source_url"`   // SAM.gov URL the document was fetched from
+	ContentType string    `json:"content_type"` // MIME type as served (e.g., "application/pdf")
+	RawObject   string    `json:"raw_object"`   // gs:// path to the raw downloaded file (user re-download)
+	TextObject  string    `json:"text_object"`  // gs:// path to the extracted plain text (agent grounding)
+	SHA256      string    `json:"sha256"`       // Hex SHA-256 of the raw bytes (dedup + change detection)
+	Bytes       int64     `json:"bytes"`        // Size of the raw file in bytes
+	IngestedAt  time.Time `json:"ingested_at"`  // When the document was fetched and stored
 }
 
 // TODO(phase-3): Define ProposalOutline struct when Outline agent is built.
