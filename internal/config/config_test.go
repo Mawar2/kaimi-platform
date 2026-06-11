@@ -1,0 +1,284 @@
+package config
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// setEnv sets an env var for the duration of a test and restores it afterward.
+// t.Setenv would also work, but we keep an explicit helper so the precedence
+// tests can clear a variable (set it to "") and assert the file/default wins.
+func setEnv(t *testing.T, key, val string) {
+	t.Helper()
+	t.Setenv(key, val)
+}
+
+func TestLoad_Defaults(t *testing.T) {
+	// With no flags, no env, and no file, Load must produce exactly the historic
+	// defaults the two binaries shipped with.
+	clearKaimiEnv(t)
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	checks := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"Mode", cfg.Mode, "cached"},
+		{"Store.Path", cfg.Store.Path, "./queue"},
+		{"Profile.ScoringPath", cfg.Profile.ScoringPath, "./test/fixtures/capability_profile.json"},
+		{"Profile.EligibilityPath", cfg.Profile.EligibilityPath, "config/profile.json"},
+		{"Profile.WriterPath", cfg.Profile.WriterPath, "config/bluemeta_scorer_profile.json"},
+		{"GCP.Region", cfg.GCP.Region, "us-east4"},
+		{"GCP.AgentRegion", cfg.GCP.AgentRegion, "global"},
+		{"GCP.ScorerModel", cfg.GCP.ScorerModel, "gemini-2.5-pro"},
+		{"GCP.WriterModel", cfg.GCP.WriterModel, "gemini-3.1-pro-preview"},
+		{"GCP.OutlineModel", cfg.GCP.OutlineModel, "gemini-3.5-flash"},
+		{"GCP.FinalReviewModel", cfg.GCP.FinalReviewModel, "gemini-2.5-pro"},
+		{"Ingest.DocumentAILocation", cfg.Ingest.DocumentAILocation, "us"},
+		{"Server.Host", cfg.Server.Host, "127.0.0.1"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("default %s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+	if cfg.Server.Port != 8900 {
+		t.Errorf("default Server.Port = %d, want 8900", cfg.Server.Port)
+	}
+}
+
+func TestLoad_EnvOverridesDefault(t *testing.T) {
+	clearKaimiEnv(t)
+	setEnv(t, "MODE", "live")
+	setEnv(t, "STORE_PATH", "/tmp/env-store")
+	setEnv(t, "GCP_PROJECT_ID", "env-project")
+	setEnv(t, "GCP_REGION", "europe-west1")
+	setEnv(t, "GEMINI_MODEL", "env-writer-model")
+	setEnv(t, "SAM_API_KEY", "env-sam-key")
+	setEnv(t, "PORT", "9999")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.Mode != "live" {
+		t.Errorf("Mode = %q, want live", cfg.Mode)
+	}
+	if cfg.Store.Path != "/tmp/env-store" {
+		t.Errorf("Store.Path = %q, want /tmp/env-store", cfg.Store.Path)
+	}
+	if cfg.GCP.ProjectID != "env-project" {
+		t.Errorf("GCP.ProjectID = %q, want env-project", cfg.GCP.ProjectID)
+	}
+	// GCP_REGION must drive BOTH region values (the agent region default of
+	// "global" is only used when GCP_REGION is unset).
+	if cfg.GCP.Region != "europe-west1" {
+		t.Errorf("GCP.Region = %q, want europe-west1", cfg.GCP.Region)
+	}
+	if cfg.GCP.AgentRegion != "europe-west1" {
+		t.Errorf("GCP.AgentRegion = %q, want europe-west1", cfg.GCP.AgentRegion)
+	}
+	if cfg.GCP.WriterModel != "env-writer-model" {
+		t.Errorf("GCP.WriterModel = %q, want env-writer-model", cfg.GCP.WriterModel)
+	}
+	if cfg.SAM.APIKey != "env-sam-key" {
+		t.Errorf("SAM.APIKey = %q, want env-sam-key", cfg.SAM.APIKey)
+	}
+	if cfg.Server.Port != 9999 {
+		t.Errorf("Server.Port = %d, want 9999", cfg.Server.Port)
+	}
+}
+
+func TestLoad_FlagOverridesEnv(t *testing.T) {
+	clearKaimiEnv(t)
+	setEnv(t, "MODE", "live")
+	setEnv(t, "STORE_PATH", "/tmp/env-store")
+	setEnv(t, "GCP_REGION", "europe-west1")
+
+	flags := &Flags{
+		Mode:      strptr("cached"),
+		StorePath: strptr("/tmp/flag-store"),
+		Region:    strptr("asia-south1"),
+	}
+
+	cfg, err := Load(flags)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.Mode != "cached" {
+		t.Errorf("Mode = %q, want cached (flag beats env)", cfg.Mode)
+	}
+	if cfg.Store.Path != "/tmp/flag-store" {
+		t.Errorf("Store.Path = %q, want /tmp/flag-store (flag beats env)", cfg.Store.Path)
+	}
+	if cfg.GCP.Region != "asia-south1" {
+		t.Errorf("GCP.Region = %q, want asia-south1 (flag beats env)", cfg.GCP.Region)
+	}
+}
+
+func TestLoad_FileBetweenEnvAndDefault(t *testing.T) {
+	clearKaimiEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tenant.yaml")
+	contents := `tenant:
+  id: bluemeta
+  display_name: BlueMeta Technologies
+gcp:
+  project_id: file-project
+  region: file-region
+  writer_model: file-writer
+store:
+  path: /file/store
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	// Env beats file: GCP_PROJECT_ID is set, so it must win over the file value.
+	setEnv(t, "GCP_PROJECT_ID", "env-project")
+
+	flags := &Flags{ConfigPath: strptr(path)}
+	cfg, err := Load(flags)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.Tenant.ID != "bluemeta" {
+		t.Errorf("Tenant.ID = %q, want bluemeta (from file)", cfg.Tenant.ID)
+	}
+	if cfg.Tenant.DisplayName != "BlueMeta Technologies" {
+		t.Errorf("Tenant.DisplayName = %q, want BlueMeta Technologies (from file)", cfg.Tenant.DisplayName)
+	}
+	// File beats default.
+	if cfg.GCP.Region != "file-region" {
+		t.Errorf("GCP.Region = %q, want file-region (file beats default)", cfg.GCP.Region)
+	}
+	if cfg.GCP.WriterModel != "file-writer" {
+		t.Errorf("GCP.WriterModel = %q, want file-writer (file beats default)", cfg.GCP.WriterModel)
+	}
+	if cfg.Store.Path != "/file/store" {
+		t.Errorf("Store.Path = %q, want /file/store (file beats default)", cfg.Store.Path)
+	}
+	// Env beats file.
+	if cfg.GCP.ProjectID != "env-project" {
+		t.Errorf("GCP.ProjectID = %q, want env-project (env beats file)", cfg.GCP.ProjectID)
+	}
+}
+
+func TestLoad_RoundTripFile(t *testing.T) {
+	clearKaimiEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "round.yaml")
+	contents := `tenant:
+  id: acme
+  display_name: Acme Corp
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	cfg, err := Load(&Flags{ConfigPath: strptr(path)})
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Tenant.ID != "acme" || cfg.Tenant.DisplayName != "Acme Corp" {
+		t.Errorf("round-trip tenant = %+v, want {acme Acme Corp}", cfg.Tenant)
+	}
+}
+
+func TestLoad_MissingConfigFileErrorsWrapped(t *testing.T) {
+	clearKaimiEnv(t)
+	_, err := Load(&Flags{ConfigPath: strptr("/no/such/file.yaml")})
+	if err == nil {
+		t.Fatal("expected error for missing config file, got nil")
+	}
+	if !strings.Contains(err.Error(), "/no/such/file.yaml") {
+		t.Errorf("error should name the missing path, got: %v", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error should wrap os.ErrNotExist (%%w), got: %v", err)
+	}
+}
+
+func TestValidateLive_MissingRequired(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantVar string
+	}{
+		{
+			name:    "missing SAM key",
+			cfg:     Config{Mode: "live", GCP: GCP{ProjectID: "p"}},
+			wantVar: "SAM_API_KEY",
+		},
+		{
+			name:    "missing project id",
+			cfg:     Config{Mode: "live", SAM: SAM{APIKey: "k"}},
+			wantVar: "GCP_PROJECT_ID",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.ValidateLive()
+			if err == nil {
+				t.Fatalf("ValidateLive() = nil, want error naming %s", tt.wantVar)
+			}
+			if !strings.Contains(err.Error(), tt.wantVar) {
+				t.Errorf("error %q should name missing var %q", err.Error(), tt.wantVar)
+			}
+			if !errors.Is(err, ErrMissingRequired) {
+				t.Errorf("error should wrap ErrMissingRequired (%%w), got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateLive_CachedModeOK(t *testing.T) {
+	cfg := Config{Mode: "cached"}
+	if err := cfg.ValidateLive(); err != nil {
+		t.Errorf("ValidateLive() in cached mode = %v, want nil", err)
+	}
+}
+
+func TestValidateMode(t *testing.T) {
+	bogus := Config{Mode: "bogus"}
+	if err := bogus.ValidateMode(); err == nil {
+		t.Error("ValidateMode() for bogus mode = nil, want error")
+	}
+	for _, m := range []string{"cached", "live"} {
+		cfg := Config{Mode: m}
+		if err := cfg.ValidateMode(); err != nil {
+			t.Errorf("ValidateMode() for %q = %v, want nil", m, err)
+		}
+	}
+}
+
+func strptr(s string) *string { return &s }
+
+// clearKaimiEnv unsets every env var the config reads so a test starts from a
+// known-empty environment regardless of the host shell.
+func clearKaimiEnv(t *testing.T) {
+	t.Helper()
+	vars := []string{
+		"MODE", "STORE_PATH", "PROFILE_PATH", "ELIGIBILITY_PROFILE_PATH",
+		"NAICS_CODES", "SAM_API_KEY", "GCP_PROJECT_ID", "GCP_REGION",
+		"GEMINI_MODEL", "OUTLINE_MODEL", "FINALREVIEW_MODEL", "PORT", "HOST",
+		"GCS_SOLICITATIONS_BUCKET", "DOCUMENTAI_PROCESSOR_ID", "DOCUMENTAI_LOCATION",
+	}
+	for _, v := range vars {
+		t.Setenv(v, "")
+		if err := os.Unsetenv(v); err != nil {
+			t.Fatalf("unset %s: %v", v, err)
+		}
+	}
+}
