@@ -335,7 +335,7 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 	if err := s.setStatus(ctx, oppID, StatusWriterRunning); err != nil {
 		return
 	}
-	s.draftSections(ctx, oppID, opp, out, documents, "Draft from the technical writer")
+	s.draftSections(ctx, oppID, opp, out, documents, "Draft from the technical writer", "")
 }
 
 // ingestDocuments runs the optional ingest stage for opp, attaches the resulting
@@ -390,14 +390,31 @@ func (s *Service) runRevision(ctx context.Context, oppID string) {
 		return
 	}
 	// Reuse the document text cached at draft time (revisions never re-ingest).
-	s.draftSections(ctx, oppID, opp, outlineFromDocument(doc), s.cachedDocText(oppID), "Revised draft after change request")
+	// Thread the human's change request into the Writer so the revision actually
+	// addresses it, instead of redrafting blind.
+	s.draftSections(ctx, oppID, opp, outlineFromDocument(doc), s.cachedDocText(oppID),
+		"Revised draft after change request", latestChangeRequest(doc))
+}
+
+// latestChangeRequest returns the most recent human "Request changes:" note on
+// the document (stripped of its prefix), or "" if there is none. RequestChanges
+// records the note via Documents.AppendRevisionNote with this exact prefix.
+func latestChangeRequest(doc *document.Document) string {
+	const prefix = "Request changes: "
+	for i := len(doc.Revisions) - 1; i >= 0; i-- {
+		r := doc.Revisions[i]
+		if r.Actor == "human" && strings.HasPrefix(r.Note, prefix) {
+			return strings.TrimPrefix(r.Note, prefix)
+		}
+	}
+	return ""
 }
 
 // draftSections runs the Writer agent ONE SECTION AT A TIME (issue #158),
 // applying each drafted section to the document as it completes so the
 // human can review the outline — and watch the draft grow — while the
 // writer works. It pauses at the gate when every section is drafted.
-func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportunity.Opportunity, out *outline.Outline, documents map[string]string, note string) {
+func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportunity.Opportunity, out *outline.Outline, documents map[string]string, note, revisionNote string) {
 	for _, section := range out.Sections {
 		// A one-section outline keeps the Writer's per-section prompting
 		// identical while letting the document update incrementally.
@@ -409,10 +426,11 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 			GeneratedAt:     out.GeneratedAt,
 		}
 		draft, res, err := s.deps.Writer.Run(ctx, writer.Input{
-			Opportunity: opp,
-			Outline:     single,
-			Profile:     s.deps.Profile,
-			Documents:   documents,
+			Opportunity:  opp,
+			Outline:      single,
+			Profile:      s.deps.Profile,
+			Documents:    documents,
+			RevisionNote: revisionNote,
 		})
 		if err != nil || res == nil || res.IsFailed() {
 			// Keep whatever sections already landed; surface the failure.

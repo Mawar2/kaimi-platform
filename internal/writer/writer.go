@@ -84,6 +84,10 @@ type Input struct {
 	// (populated by the Manager's ingest stage). When present it is additional
 	// grounded source material the model may use; it is never required.
 	Documents map[string]string
+	// RevisionNote carries the human reviewer's change request when this run is a
+	// revision (Request changes at the gate). When present the writer must
+	// address it in the new draft; empty on a fresh draft.
+	RevisionNote string
 }
 
 // Agent transforms an outline into a proposal draft. A nil generator selects
@@ -150,7 +154,7 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 			return "", failed(in.Opportunity.ID, "draft generation cancelled", err.Error()), err
 		}
 
-		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules, in.Documents)
+		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules, in.Documents, in.RevisionNote)
 		text, err := a.gen.GenerateSection(ctx, systemInstruction, prompt)
 		if err != nil {
 			return "", failed(
@@ -183,8 +187,15 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 // only the facts present in the Opportunity, the Capability Profile, and the
 // ingested solicitation documents; the anti-fabrication rules are delivered
 // separately via systemInstruction.
-func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules, documents map[string]string) string {
+func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules, documents map[string]string, revisionNote string) string {
 	var sb strings.Builder
+
+	// A human reviewer's change request takes priority: it is the reason this
+	// section is being redrafted, so it leads the prompt.
+	if note := strings.TrimSpace(revisionNote); note != "" {
+		sb.WriteString("## Reviewer change request (address this in your draft)\n")
+		fmt.Fprintf(&sb, "%s\n\n", note)
+	}
 
 	sb.WriteString("## Section to draft\n")
 	fmt.Fprintf(&sb, "Title: %s\n", section.Title)

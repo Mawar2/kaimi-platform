@@ -242,6 +242,7 @@ type writerCall struct {
 	sectionCount int
 	title        string
 	documents    map[string]string
+	revisionNote string
 }
 
 func (r *recordingWriter) Run(_ context.Context, in writer.Input) (string, *agent.Result, error) {
@@ -251,7 +252,7 @@ func (r *recordingWriter) Run(_ context.Context, in writer.Input) (string, *agen
 	if len(in.Outline.Sections) > 0 {
 		title = in.Outline.Sections[0].Title
 	}
-	r.calls = append(r.calls, writerCall{sectionCount: len(in.Outline.Sections), title: title, documents: in.Documents})
+	r.calls = append(r.calls, writerCall{sectionCount: len(in.Outline.Sections), title: title, documents: in.Documents, revisionNote: in.RevisionNote})
 	draft := "\n## " + title + "\nDrafted body for " + title + "\n"
 	return draft, &agent.Result{AgentName: "writer", Status: agent.StatusSuccess, CompletedAt: time.Now()}, nil
 }
@@ -347,6 +348,59 @@ func TestIngestion_ThreadsDocumentTextToWriterAndReview(t *testing.T) {
 	}
 	if got := rev.gotDocs["rfp.pdf"]; got != "Offerors shall provide a FedRAMP High authorization." {
 		t.Errorf("final review did not receive ingested document text: %q", got)
+	}
+}
+
+// TestRequestChangesThreadsNoteToWriter proves the human's change request reaches
+// the Writer on a revision (tester-reported: request-changes appeared to do
+// nothing because the note was recorded in history but never passed to the
+// Writer, so it redrafted blind).
+func TestRequestChangesThreadsNoteToWriter(t *testing.T) {
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("docs client: %v", err)
+	}
+	rec := &recordingWriter{}
+	svc := NewService(&Deps{
+		Opportunities: opps, Documents: docs,
+		Outline: outline.New(docsClient), Writer: rec, Review: &recordingReviewer{},
+		Profile: &scorer.CapabilityProfile{},
+	})
+	seedOpp(t, opps)
+
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+	initial := len(rec.calls)
+	if initial == 0 {
+		t.Fatal("writer not called for the initial draft")
+	}
+	if rec.calls[0].revisionNote != "" {
+		t.Errorf("initial draft should carry no revision note, got %q", rec.calls[0].revisionNote)
+	}
+
+	const note = "Add a teaming partner for past performance at this scale."
+	if err := svc.RequestChanges(context.Background(), "zta-1", note); err != nil {
+		t.Fatalf("RequestChanges: %v", err)
+	}
+	svc.Wait()
+
+	if len(rec.calls) <= initial {
+		t.Fatal("writer was not re-run on request-changes")
+	}
+	last := rec.calls[len(rec.calls)-1]
+	if last.revisionNote != note {
+		t.Errorf("revision writer call revisionNote = %q, want %q", last.revisionNote, note)
 	}
 }
 
