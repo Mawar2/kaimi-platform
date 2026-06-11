@@ -139,8 +139,8 @@ func (a *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	verifier := oauth2.GenerateVerifier()
 
-	a.setTempCookie(w, stateCookieName, state)
-	a.setTempCookie(w, pkceCookieName, verifier)
+	setTempCookie(w, stateCookieName, state)
+	setTempCookie(w, pkceCookieName, verifier)
 
 	// hd constrains the chooser to the Workspace domain; it is a HINT, not a
 	// security control — the callback re-checks hd from the verified ID token.
@@ -160,8 +160,8 @@ func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// runs; clear them on EVERY exit path so a half-finished or rejected login never
 	// leaves them lingering. We emit the deletions up front (before any validation or
 	// error response is written) so they ride out with whatever status we return.
-	a.clearTempCookie(w, stateCookieName)
-	a.clearTempCookie(w, pkceCookieName)
+	clearTempCookie(w, stateCookieName)
+	clearTempCookie(w, pkceCookieName)
 
 	// Step 1: CSRF — the state param must match the state cookie (constant-time).
 	stateCookie, err := r.Cookie(stateCookieName)
@@ -246,11 +246,13 @@ func (a *AuthHandler) handleLogout(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setTempCookie writes a short-lived, hardened cookie used only between login and
-// callback. HttpOnly+Secure+SameSite=Lax mirror the session cookie's flags. Path
-// MUST be "/" (not "/auth"): the __Host- prefix the cookie names carry is only
-// honored by browsers when Path=/ and no Domain is set.
-func (a *AuthHandler) setTempCookie(w http.ResponseWriter, name, value string) {
+// setTempCookie writes a short-lived, hardened cookie used only between the start
+// of an OAuth flow and its callback. HttpOnly+Secure+SameSite=Lax mirror the
+// session cookie's flags. Path MUST be "/" (not a sub-path): the __Host- prefix the
+// cookie names carry is only honored by browsers when Path=/ and no Domain is set.
+// It is a package function (not a method) so both the WS-B4 sign-in flow and the
+// WS-C2 Drive-connect flow share one hardened implementation.
+func setTempCookie(w http.ResponseWriter, name, value string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
@@ -262,9 +264,9 @@ func (a *AuthHandler) setTempCookie(w http.ResponseWriter, name, value string) {
 	})
 }
 
-// clearTempCookie expires a temp login cookie. Path MUST match the Path used when
-// the cookie was set ("/") so the deletion targets the same __Host- cookie.
-func (a *AuthHandler) clearTempCookie(w http.ResponseWriter, name string) {
+// clearTempCookie expires a temp OAuth-flow cookie. Path MUST match the Path used
+// when the cookie was set ("/") so the deletion targets the same __Host- cookie.
+func clearTempCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
