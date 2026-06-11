@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,11 @@ func TestSafeReturnPath(t *testing.T) {
 		{"javascript:alert(1)", "/"},       // non-path scheme
 		{"relative/no/leading/slash", "/"}, // must be rooted
 		{"/ok?x=1#frag", "/ok?x=1#frag"},   // query + fragment on a local path are fine
+		{"/dashboard?filter=active", "/dashboard?filter=active"}, // query preserved on local path
+		{"/\\evil", "/"},        // backslash trick collapses
+		{"https://evil", "/"},   // absolute URL collapses
+		{"//evil.com?x=1", "/"}, // scheme-relative + query still collapses
+		{"?x=1", "/"},           // query-only (empty path) is not a route
 	}
 	for _, tc := range cases {
 		if got := safeReturnPath(tc.in); got != tc.want {
@@ -220,5 +226,30 @@ func TestDashboardHTMLReturnPathSanitized(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "return=%2Fproposals") {
 		t.Errorf("Location = %q, want return=%%2Fproposals", loc)
+	}
+}
+
+// TestDashboardHTMLReturnPreservesQuery proves RequireSessionHTML preserves the raw
+// query string of the original request in the return param, so a deep link like
+// /proposals?filter=active survives the bounce to login (Gemini must-fix). The return
+// param must decode to the full local path WITH its query.
+func TestDashboardHTMLReturnPreservesQuery(t *testing.T) {
+	srv := New(Deps{Auth: newTestAuth(t, nil, nil), DashboardHTML: newTestDashboard(t)})
+	h := srv.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/proposals?filter=active", http.NoBody)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unauthenticated HTML status = %d, want 302", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location %q: %v", loc, err)
+	}
+	if got := u.Query().Get("return"); got != "/proposals?filter=active" {
+		t.Errorf("return param = %q, want %q (query must be preserved)", got, "/proposals?filter=active")
 	}
 }

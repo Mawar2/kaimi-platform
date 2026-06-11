@@ -112,7 +112,15 @@ func (s *Server) RequireSessionHTML(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectToLogin := func() {
-			dest := loginPath + "?return=" + url.QueryEscape(safeReturnPath(r.URL.Path))
+			// Preserve BOTH the path and the raw query so a deep link like
+			// /dashboard?filter=active survives login intact. safeReturnPath validates
+			// the path/host portion and rejects open-redirect forms while allowing a
+			// normal "?key=val" query on an otherwise-local path.
+			target := r.URL.Path
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			dest := loginPath + "?return=" + url.QueryEscape(safeReturnPath(target))
 			http.Redirect(w, r, dest, http.StatusFound)
 		}
 
@@ -135,35 +143,59 @@ func (s *Server) RequireSessionHTML(next http.Handler) http.Handler {
 	})
 }
 
-// safeReturnPath sanitizes a post-login return path so the login redirect can never
-// be turned into an open redirect. It returns p only when p is a LOCAL, relative
-// path rooted at a single "/"; anything else (empty, scheme-relative "//host",
-// absolute "http://host", backslash tricks, non-rooted) collapses to "/".
+// safeReturnPath sanitizes a post-login return path so the login redirect (and the
+// post-login redirect at the moment of use) can never be turned into an open
+// redirect. It returns p only when p is a LOCAL, relative path rooted at a single
+// "/"; anything else (empty, scheme-relative "//host", absolute "http://host",
+// backslash tricks, non-rooted, control chars/whitespace) collapses to "/".
+//
+// A normal query string ("?key=val") on an otherwise-local path is preserved: the
+// guard validates the PATH portion (everything before the first "?") for the
+// dangerous host-escaping forms, then re-attaches the original query/fragment only
+// if the path is safe. This lets deep links like "/dashboard?filter=active" survive
+// login while "//evil.com?x=1" and "https://evil/?x=1" still collapse to "/".
 //
 // The guard is intentionally strict: it requires a leading "/", forbids a second
 // leading "/" or "\" (which browsers may treat as a scheme-relative host), and
-// rejects any value url.Parse reports as having a scheme or host. A query and
-// fragment on an otherwise-local path are preserved.
+// rejects any value url.Parse reports as having a scheme or host.
+//
+// It is unexported but lives in the httpapi package so both RequireSessionHTML
+// (setting the return param) and the OAuth callback (re-validating it at redirect
+// time, defense-in-depth) reach it.
 func safeReturnPath(p string) string {
 	const safe = "/"
 	if p == "" || p[0] != '/' {
 		// Must be rooted at "/". Empty and relative paths are unsafe.
 		return safe
 	}
+	// Validate the PATH portion only — split off any query/fragment first so a benign
+	// "?key=val" does not cause an otherwise-local path to be rejected. The dangerous
+	// open-redirect forms ("//host", "/\\host", "https://host") all live in the path
+	// portion, so checking it is sufficient.
+	pathOnly := p
+	if i := strings.IndexAny(pathOnly, "?#"); i >= 0 {
+		pathOnly = pathOnly[:i]
+	}
+	// After stripping the query/fragment the path must still be rooted (e.g. "?x=1"
+	// alone, which would leave an empty path, is not a legitimate dashboard route).
+	if pathOnly == "" || pathOnly[0] != '/' {
+		return safe
+	}
 	// Reject scheme-relative ("//host") and the "/\\" backslash variant some browsers
 	// normalize to "//"; both can escape to an external host.
-	if len(p) > 1 && (p[1] == '/' || p[1] == '\\') {
+	if len(pathOnly) > 1 && (pathOnly[1] == '/' || pathOnly[1] == '\\') {
 		return safe
 	}
 	// A well-formed local path must parse with no scheme and no host. This also rejects
 	// values like "/\t//evil" that slip past the prefix checks once normalized.
-	u, err := url.Parse(p)
+	u, err := url.Parse(pathOnly)
 	if err != nil || u.Scheme != "" || u.Host != "" {
 		return safe
 	}
-	// Defense in depth: a control character or whitespace in the path is not a
-	// legitimate dashboard route.
-	if strings.ContainsAny(u.Path, " \t\r\n") {
+	// Defense in depth: a control character or whitespace anywhere in the value is not
+	// a legitimate dashboard route. Check the full p (path + query + fragment) so an
+	// injected newline/space in the query cannot ride along.
+	if strings.ContainsAny(p, " \t\r\n") {
 		return safe
 	}
 	return p
