@@ -1,0 +1,82 @@
+# terraform.tfvars.example — copy to terraform.tfvars and fill in your values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# DO NOT put secret VALUES here. The SAM.gov key, OAuth client secret, Drive
+# OAuth client secret, and session secret are added to Secret Manager out-of-band
+# (see README.md). Only the OAuth client *id* and Workspace domain — which are
+# not secrets — belong in this file. terraform.tfvars is gitignored.
+
+# --- Required: identity & images ---------------------------------------------
+
+# Your fresh GCP project (must exist, with billing enabled).
+project_id = "acme-kaimi-prod"
+
+# Region for all resources. Default us-east4 (Kaimi's reference region).
+region = "us-east4"
+
+# Tenant identity for this deployment.
+tenant_id           = "acme"
+tenant_display_name = "Acme Corporation"
+
+# Container images you built and pushed to this project's Artifact Registry repo.
+# After the FIRST apply (which creates the repo), build/push, then re-apply, OR
+# push to the predictable path first: REGION-docker.pkg.dev/PROJECT/kaimi/<name>.
+pipeline_image = "us-east4-docker.pkg.dev/acme-kaimi-prod/kaimi/pipeline:latest"
+api_image      = "us-east4-docker.pkg.dev/acme-kaimi-prod/kaimi/api:latest"
+
+# --- Models (optional; defaults match internal/config) -----------------------
+
+# gemini_model      = "gemini-2.5-pro"
+# outline_model     = "gemini-3.5-flash"
+# finalreview_model = "gemini-2.5-pro"
+
+# --- Sign-in OAuth (recommended for production) ------------------------------
+#
+# Create a Google OAuth 2.0 Client ID (type: Web application). Put the client id
+# (non-secret) here; put the client SECRET into Secret Manager out-of-band:
+#   gcloud secrets versions add oauth-client-secret --data-file=- <<< 'THE_SECRET'
+# Also seed the session secret (any high-entropy random string):
+#   openssl rand -base64 48 | gcloud secrets versions add session-secret --data-file=-
+#
+# oauth_client_id          = "1234567890-abc.apps.googleusercontent.com"
+# allowed_workspace_domain = "acme.com"
+#
+# The redirect URL must be your API service's /auth/callback. You learn the API
+# URL only AFTER the first apply (terraform output api_service_url), so:
+#   1) First apply with oauth_redirect_url empty + api_insecure_no_auth = true.
+#   2) Read api_service_url, register https://<that-host>/auth/callback in Google.
+#   3) Set oauth_redirect_url below, flip api_insecure_no_auth back to false, re-apply.
+# oauth_redirect_url = "https://kaimi-api-xxxxx-uc.a.run.app/auth/callback"
+
+# DEV-ONLY bootstrap. Leave false (the default) for production. Setting true lets
+# the API start without sign-in — never do this with real data.
+# api_insecure_no_auth = false
+
+# If the browser front end is served from a different origin than the API, list
+# it here (full origins, comma-separated; never "*").
+# cors_allowed_origins = "https://app.acme.com"
+
+# --- Optional: connect the customer's own Google Drive ------------------------
+#
+# Lets generated proposal Docs land in the customer's Workspace. Put the client id
+# here; the client SECRET goes to Secret Manager (drive-oauth-client-secret).
+# drive_oauth_client_id    = "1234567890-xyz.apps.googleusercontent.com"
+# drive_oauth_redirect_url = "https://kaimi-api-xxxxx-uc.a.run.app/api/v1/integrations/drive/callback"
+
+# --- Optional: Document AI solicitation ingestion ----------------------------
+# documentai_processor_id = "projects/123/locations/us/processors/abc"
+
+# --- Optional knobs ----------------------------------------------------------
+
+# Override the Hunter's NAICS codes (comma-separated). Empty = use the profile's.
+# naics_codes = "541511,541512"
+
+# Pipeline schedule (default = three runs/day, 07:00/12:00/17:00 ET).
+# schedule_cron = "0 7,12,17 * * *"
+
+# Resource labels for cost attribution.
+# labels = {
+#   team = "bd"
+#   env  = "prod"
+# }
