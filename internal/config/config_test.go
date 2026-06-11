@@ -35,7 +35,7 @@ func TestLoad_Defaults(t *testing.T) {
 		{"Store.Path", cfg.Store.Path, "./queue"},
 		{"Profile.ScoringPath", cfg.Profile.ScoringPath, "./test/fixtures/capability_profile.json"},
 		{"Profile.EligibilityPath", cfg.Profile.EligibilityPath, "config/profile.json"},
-		{"Profile.WriterPath", cfg.Profile.WriterPath, "config/bluemeta_scorer_profile.json"},
+		{"Profile.WriterPath", cfg.Profile.WriterPath, "config/profile.json"},
 		{"GCP.Region", cfg.GCP.Region, "us-east4"},
 		{"GCP.AgentRegion", cfg.GCP.AgentRegion, "global"},
 		{"GCP.ScorerModel", cfg.GCP.ScorerModel, "gemini-2.5-pro"},

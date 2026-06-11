@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -21,6 +20,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/ingest"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposal"
 	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/store"
@@ -68,15 +68,18 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 		return nil, fmt.Errorf("docs client: %w", err)
 	}
 
-	profile := &scorer.CapabilityProfile{}
+	// One company profile feeds both the Hunter/Scorer and the Writer's grounding
+	// (WS-A3). The Writer consumes the flattened scorer view, derived from the
+	// single profile via ToScorerProfile rather than a separate hand-maintained
+	// scorer JSON.
+	scorerProfile := &scorer.CapabilityProfile{}
 	if cfg.Profile.WriterPath != "" {
-		data, err := os.ReadFile(cfg.Profile.WriterPath)
+		companyProfile, err := profile.LoadProfile(cfg.Profile.WriterPath)
 		if err != nil {
-			return nil, fmt.Errorf("read profile: %w", err)
+			return nil, fmt.Errorf("load profile: %w", err)
 		}
-		if err := json.Unmarshal(data, profile); err != nil {
-			return nil, fmt.Errorf("parse profile: %w", err)
-		}
+		derived := companyProfile.ToScorerProfile()
+		scorerProfile = &derived
 	}
 
 	// The live agents share one Vertex AI region. The Gemini 3.x family —
@@ -170,7 +173,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 		Outline:       ol,
 		Writer:        w,
 		Review:        review,
-		Profile:       profile,
+		Profile:       scorerProfile,
 		Ingest:        ingestor,
 	}), nil
 }
@@ -193,7 +196,7 @@ func run() error {
 	liveReview := flag.Bool("live-review", true, "Run the live Gemini compliance pass in Final Review (default true; -offline disables; Vertex AI ADC; needs GCP_PROJECT_ID)")
 	liveIngest := flag.Bool("live-ingest", false, "Ingest solicitation documents (GCS + Document AI; needs GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, DOCUMENTAI_PROCESSOR_ID)")
 	offline := flag.Bool("offline", false, "Force all agents to stub/deterministic mode for credential-less UI development (no GCP calls)")
-	profilePath := flag.String("profile", "config/bluemeta_scorer_profile.json", "Capability profile JSON for grounding the writer (BlueMeta's real profile by default)")
+	profilePath := flag.String("profile", "config/profile.json", "Company profile JSON/YAML for grounding the writer (the Scorer view is derived from it)")
 	flag.Parse()
 
 	// Resolve the tenant configuration (GCP project/region, model names, ingest

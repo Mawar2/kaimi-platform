@@ -78,6 +78,13 @@ type CapabilityProfile struct {
 	Clearance       string            `json:"clearance"        yaml:"clearance"`
 	Competencies    []string          `json:"competencies"     yaml:"competencies"`
 	PastPerformance []PastPerformance `json:"past_performance" yaml:"past_performance"`
+
+	// Scoring carries the curated, weighted signals the Scorer consumes that are
+	// not mechanically derivable from the eligibility facts above. Folding them in
+	// here lets one profile file feed both the Hunter gate and the Scorer; the
+	// Scorer view is derived via ToScorerProfile. Optional: an empty Scoring block
+	// yields an empty scorer profile (safe for eligibility-only deployments).
+	Scoring ScoringHints `json:"scoring" yaml:"scoring"`
 }
 
 // LoadProfile reads a CapabilityProfile from path. The file format is determined

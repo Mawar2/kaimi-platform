@@ -66,7 +66,7 @@ type GCP struct {
 type Profile struct {
 	ScoringPath     string   `yaml:"scoring_path"`     // PROFILE_PATH (pipeline scorer.CapabilityProfile)
 	EligibilityPath string   `yaml:"eligibility_path"` // ELIGIBILITY_PROFILE_PATH (profile.CapabilityProfile)
-	WriterPath      string   `yaml:"writer_path"`      // dashboard -profile flag (writer grounding)
+	WriterPath      string   `yaml:"writer_path"`      // dashboard -profile flag (company profile; writer grounding derived via ToScorerProfile)
 	NAICSCodes      []string `yaml:"naics_codes"`      // NAICS_CODES override (empty → eligibility profile's codes)
 }
 
@@ -131,7 +131,7 @@ const (
 	defaultStorePath        = "./queue"
 	defaultScoringProfile   = "./test/fixtures/capability_profile.json"
 	defaultEligibility      = "config/profile.json"
-	defaultWriterProfile    = "config/bluemeta_scorer_profile.json"
+	defaultWriterProfile    = "config/profile.json"
 	defaultRegion           = "us-east4"
 	defaultAgentRegion      = "global"
 	defaultScorerModel      = "gemini-2.5-pro"
