@@ -1,4 +1,12 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED (WS-E2): superseded by deploy/terraform (the WS-E1 module).
+# Use the Terraform module for per-tenant provisioning: see deploy/terraform/
+# (copy envs/example, fill terraform.tfvars, then `terraform init/plan/apply`).
+# This script is retained only as a reference for the manual setup it replaced;
+# its logic is unchanged but it is no longer the supported provisioning path.
+# ============================================================================
+#
 # GCP Environment Setup for Kaimi
 # This script sets up the GCP project for Phase 0 development
 # Run this script with: bash scripts/setup-gcp.sh
