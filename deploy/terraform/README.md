@@ -171,6 +171,60 @@ the secret-sourced `SAM_API_KEY`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`,
 `DRIVE_OAUTH_CLIENT_SECRET`. `$PORT` is injected by Cloud Run and honored by the
 API binary automatically.
 
+## Deploying into a shared project (`name_prefix`)
+
+By default this module deploys with **fixed resource names** (`kaimi-pipeline`,
+`kaimi-api`, `kaimi-pipeline-schedule`, the `kaimi` Artifact Registry repo,
+`${project}-queue` / `${project}-solicitations` buckets, the `kaimi-runtime`
+service account, and the `samgov-api-key` / `oauth-client-secret` /
+`drive-oauth-client-secret` / `session-secret` secrets). That is ideal for a
+**dedicated project** — leave `name_prefix` unset and nothing changes.
+
+Set **`name_prefix`** only when you must deploy **a second, fully-separate Kaimi
+stack into a project that already runs one** — for example `kaimi-seeker`, which
+already runs the fixed-name hackathon pipeline. The prefix is prepended to every
+collision-prone resource name so the two stacks coexist without clobbering each
+other and **each remains cleanly destroyable on its own**:
+
+| Resource | Default name | With `name_prefix = "bm"` |
+|---|---|---|
+| Cloud Run Job | `kaimi-pipeline` | `bm-kaimi-pipeline` |
+| Cloud Run Service | `kaimi-api` | `bm-kaimi-api` |
+| Cloud Scheduler job | `kaimi-pipeline-schedule` | `bm-kaimi-pipeline-schedule` |
+| Artifact Registry repo | `kaimi` | `bm-kaimi` |
+| Queue bucket | `${project}-queue` | `${project}-bm-queue` |
+| Solicitations bucket | `${project}-solicitations` | `${project}-bm-solicitations` |
+| Runtime service account | `kaimi-runtime` | `bm-kaimi-runtime` |
+| Secret Manager ids | `samgov-api-key`, … | `bm-samgov-api-key`, … |
+
+```hcl
+# terraform.tfvars
+name_prefix = "bm"
+```
+
+**Constraints (enforced by `variable "name_prefix"` validation):** the prefix must
+be **lowercase / DNS-safe** — start with a letter, contain only lowercase letters,
+digits, and hyphens, end with a letter or digit (no trailing hyphen), and be
+**≤16 characters**. Two reasons: it flows into **GCS bucket names** (globally
+unique, DNS-safe, ≤63 chars) and into the **service-account `account_id`** (max 30
+chars; `<prefix>-kaimi-runtime` must fit). An empty prefix (the default) yields
+byte-identical names to a greenfield deploy, so existing deployments are
+unaffected.
+
+> The buckets keep the project id as their first segment and insert the prefix as
+> an infix (`${project}-bm-queue`), because bucket names are globally unique and
+> already namespaced by the project. Every other resource takes the prefix as a
+> leading segment.
+
+When you set `name_prefix`, the **scheduler job name changes too**, so the
+operator pause/resume scripts need the prefixed name (they default to the
+un-prefixed `kaimi-pipeline-schedule`):
+
+```sh
+deploy/scripts/pause.sh  --project shared-proj --region us-east4 --job bm-kaimi-pipeline-schedule
+deploy\scripts\pause.ps1 -Project shared-proj -Region us-east4 -Job bm-kaimi-pipeline-schedule
+```
+
 ## Cost control / spin up & down
 
 A deployed Kaimi is cheap to idle. The Cloud Run **Service** and **Job** both
@@ -210,7 +264,9 @@ infrastructure stay in place; resume is instant.
   deploy\scripts\resume.ps1 -Project acme-kaimi-prod -Region us-east4
   ```
   Project/region/job come from args or `PROJECT`/`REGION`/`JOB` env; the job
-  defaults to `kaimi-pipeline-schedule`. The scripts are idempotent.
+  defaults to `kaimi-pipeline-schedule`. The scripts are idempotent. If you set
+  `name_prefix`, pass the prefixed job name (e.g. `--job bm-kaimi-pipeline-schedule`
+  / `-Job bm-kaimi-pipeline-schedule`) — see "Deploying into a shared project".
 
   > If you pause with a script, the next `terraform apply` (with the default
   > `active=true`) will resume the schedule, because Terraform reconciles the

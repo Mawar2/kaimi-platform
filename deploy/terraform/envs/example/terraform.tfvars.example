@@ -19,6 +19,17 @@ region = "us-east4"
 tenant_id           = "acme"
 tenant_display_name = "Acme Corporation"
 
+# --- Shared-project coexistence (optional) -----------------------------------
+#
+# Leave UNSET (empty) for a normal greenfield deploy into a dedicated project —
+# every resource keeps its original fixed name. Set name_prefix ONLY to deploy a
+# SECOND, fully-separate Kaimi stack into a project that already runs one (e.g.
+# kaimi-seeker, which runs the fixed-name hackathon pipeline); it prefixes every
+# resource name so the two stacks don't collide and each is cleanly destroyable.
+# Must be lowercase/DNS-safe (start with a letter, lowercase letters/digits/
+# hyphens, no trailing hyphen, ≤16 chars). Example:
+# name_prefix = "bm"
+
 # Container images you built and pushed to this project's Artifact Registry repo.
 # After the FIRST apply (which creates the repo), build/push, then re-apply, OR
 # push to the predictable path first: REGION-docker.pkg.dev/PROJECT/kaimi/<name>.

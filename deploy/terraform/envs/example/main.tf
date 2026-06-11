@@ -55,6 +55,9 @@ module "kaimi" {
   pipeline_image      = var.pipeline_image
   api_image           = var.api_image
 
+  # --- Shared-project coexistence (default "" = greenfield, unchanged names) ---
+  name_prefix = var.name_prefix
+
   # --- Models (defaults match internal/config; override if desired) ---
   gemini_model      = var.gemini_model
   outline_model     = var.outline_model
@@ -92,6 +95,10 @@ variable "region" {
 }
 variable "tenant_id" { type = string }
 variable "tenant_display_name" { type = string }
+variable "name_prefix" {
+  type    = string
+  default = ""
+}
 variable "pipeline_image" { type = string }
 variable "api_image" { type = string }
 

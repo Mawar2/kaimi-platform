@@ -14,15 +14,50 @@
 #      not roles/secretmanager.admin. (setup-gcp.sh Step 5 granted admin.)
 
 locals {
-  # Derived names mirror setup-gcp.sh exactly so an existing manual deployment and
-  # a Terraform one converge on the same resource names.
-  queue_bucket         = "${var.project_id}-queue"          # setup-gcp.sh:209
-  solicitations_bucket = "${var.project_id}-solicitations"  # setup-gcp.sh:266
-  artifact_repo        = "kaimi"                            # setup-gcp.sh:212
-  pipeline_job_name    = "kaimi-pipeline"                   # setup-gcp.sh:230
-  api_service_name     = "kaimi-api"                        # NEW (cmd/api)
-  scheduler_job_name   = "kaimi-pipeline-schedule"          # setup-gcp.sh:250
-  sa_account_id        = "kaimi-runtime"                    # was kaimi-dev; runtime, ADC-only
+  # name_prefix lets the whole stack deploy into a SHARED GCP project (e.g.
+  # kaimi-seeker, which already runs the fixed-name hackathon pipeline) without
+  # colliding. When var.name_prefix is empty (the default / greenfield case) every
+  # derived name below is BYTE-IDENTICAL to the original fixed name, so an existing
+  # manual deployment and a Terraform one still converge on the same resources.
+  # When set (e.g. "bm"), it prefixes every collision-prone GCP resource NAME so a
+  # second, fully-separate, cleanly-destroyable stack can coexist in one project.
+  #
+  # `prefix` is the dash-suffixed form: "" when name_prefix is empty, else
+  # "${name_prefix}-". It is used both as a LEADING segment of most names
+  # (e.g. "${prefix}kaimi-pipeline") and as an INFIX in bucket names (which start
+  # with the project id, e.g. "${project}-${prefix}queue"). Because it already
+  # carries its own trailing dash only when non-empty, an empty name_prefix leaves
+  # every composed name byte-identical to the original fixed name.
+  prefix = var.name_prefix == "" ? "" : "${var.name_prefix}-"
+
+  # Derived names mirror setup-gcp.sh exactly when name_prefix == "" — local.prefix
+  # expands to "" so each equals the original fixed name:
+  #   artifact_repo      "" → "kaimi"                   (setup-gcp.sh:212)
+  #   pipeline_job_name  "" → "kaimi-pipeline"          (setup-gcp.sh:230)
+  #   api_service_name   "" → "kaimi-api"               (NEW, cmd/api)
+  #   scheduler_job_name "" → "kaimi-pipeline-schedule" (setup-gcp.sh:250)
+  artifact_repo      = "${local.prefix}kaimi"
+  pipeline_job_name  = "${local.prefix}kaimi-pipeline"
+  api_service_name   = "${local.prefix}kaimi-api"
+  scheduler_job_name = "${local.prefix}kaimi-pipeline-schedule"
+
+  # GCS bucket names are GLOBALLY unique and must be DNS-safe (lowercase, 3–63
+  # chars, no leading/trailing dash). They already start with the project id, so
+  # the prefix is inserted as an INFIX right after it via local.prefix:
+  # "" → "${project}-queue" (unchanged); "bm" → "${project}-bm-queue". No
+  # leading/trailing dash is introduced (the infix is always followed by
+  # "queue"/"solicitations"). The caller keeps name_prefix lowercase/DNS-safe (see
+  # README + the validation on var.name_prefix in variables.tf). With "" these are
+  # "${project}-queue" / "${project}-solicitations" (setup-gcp.sh:209,266).
+  queue_bucket         = "${var.project_id}-${local.prefix}queue"
+  solicitations_bucket = "${var.project_id}-${local.prefix}solicitations"
+
+  # Service Account account_id is limited to 6–30 chars, lowercase, must start with
+  # a letter (RFC1035 label). "kaimi-runtime" is 13 chars, so a short prefix fits;
+  # var.name_prefix carries a validation (≤16 chars) in variables.tf that keeps
+  # "${prefix}-kaimi-runtime" within the 30-char ceiling. "" → "kaimi-runtime"
+  # (unchanged, starts with a letter); "bm" → "bm-kaimi-runtime" (16 chars).
+  sa_account_id = "${local.prefix}kaimi-runtime" # was kaimi-dev; runtime, ADC-only
 
   # GCS store path the pipeline writes to, on the mounted volume (setup-gcp.sh:234).
   store_mount_path = "/mnt/store"
@@ -192,12 +227,21 @@ resource "google_storage_bucket_iam_member" "solicitations_object_admin" {
 # -----------------------------------------------------------------------------
 locals {
   # The set of secret containers, reused by both the container and version
-  # resources so the two stay DRY and in lock-step.
+  # resources so the two stay DRY and in lock-step. Each secret_id carries the
+  # ${local.prefix} so two stacks in a shared project get separate Secret Manager
+  # containers (secret_ids are project-scoped). Secret IDs allow [a-zA-Z0-9_-] up
+  # to 255 chars, so the dash-separated prefix is always valid. With name_prefix ""
+  # the prefix expands to "" and these equal the original fixed ids exactly.
+  # With name_prefix "" these equal the original fixed ids exactly:
+  #   samgov-api-key            → SAM_API_KEY (pipeline + API), setup-gcp.sh:139
+  #   oauth-client-secret       → OAUTH_CLIENT_SECRET (API sign-in)
+  #   drive-oauth-client-secret → DRIVE_OAUTH_CLIENT_SECRET (API customer-Drive)
+  #   session-secret            → SESSION_SECRET (API session signing)
   secret_ids = toset([
-    "samgov-api-key",            # SAM_API_KEY (pipeline + API) — setup-gcp.sh:139
-    "oauth-client-secret",       # OAUTH_CLIENT_SECRET (API sign-in)
-    "drive-oauth-client-secret", # DRIVE_OAUTH_CLIENT_SECRET (API customer-Drive)
-    "session-secret",            # SESSION_SECRET (API session signing)
+    "${local.prefix}samgov-api-key",
+    "${local.prefix}oauth-client-secret",
+    "${local.prefix}drive-oauth-client-secret",
+    "${local.prefix}session-secret",
   ])
 }
 
@@ -312,11 +356,12 @@ resource "google_cloud_run_v2_job" "pipeline" {
 
         # SAM_API_KEY sourced from Secret Manager, not an inline value
         # (setup-gcp.sh:235 --set-secrets SAM_API_KEY=samgov-api-key:latest).
+        # The map key carries local.prefix to match the prefixed secret_ids above.
         env {
           name = "SAM_API_KEY"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.secrets["samgov-api-key"].secret_id
+              secret  = google_secret_manager_secret.secrets["${local.prefix}samgov-api-key"].secret_id
               version = "latest"
             }
           }
@@ -504,11 +549,12 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       # --- Secrets from Secret Manager (values added out-of-band) ---
+      # Map keys carry local.prefix to match the prefixed secret_ids above.
       env {
         name = "SAM_API_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["samgov-api-key"].secret_id
+            secret  = google_secret_manager_secret.secrets["${local.prefix}samgov-api-key"].secret_id
             version = "latest"
           }
         }
@@ -517,7 +563,7 @@ resource "google_cloud_run_v2_service" "api" {
         name = "OAUTH_CLIENT_SECRET"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["oauth-client-secret"].secret_id
+            secret  = google_secret_manager_secret.secrets["${local.prefix}oauth-client-secret"].secret_id
             version = "latest"
           }
         }
@@ -526,7 +572,7 @@ resource "google_cloud_run_v2_service" "api" {
         name = "SESSION_SECRET"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["session-secret"].secret_id
+            secret  = google_secret_manager_secret.secrets["${local.prefix}session-secret"].secret_id
             version = "latest"
           }
         }
@@ -535,7 +581,7 @@ resource "google_cloud_run_v2_service" "api" {
         name = "DRIVE_OAUTH_CLIENT_SECRET"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["drive-oauth-client-secret"].secret_id
+            secret  = google_secret_manager_secret.secrets["${local.prefix}drive-oauth-client-secret"].secret_id
             version = "latest"
           }
         }
