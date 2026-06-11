@@ -99,11 +99,11 @@ func TestLoadOAuthConfigEnabledFull(t *testing.T) {
 	}
 }
 
-// TestLoadOAuthConfigPartialMissingRequired verifies that setting SOME OAUTH_* vars
-// (signaling intent to enable) but omitting a required one errors, naming the
-// missing var and wrapping ErrMissingRequired.
-func TestLoadOAuthConfigPartialMissingRequired(t *testing.T) {
-	t.Setenv(envOAuthClientID, "cid")
+// TestLoadOAuthConfigClientIDSetMissingRequired verifies that once the client id is
+// set (the enable signal), omitting another required value errors, naming the missing
+// var and wrapping ErrMissingRequired.
+func TestLoadOAuthConfigClientIDSetMissingRequired(t *testing.T) {
+	t.Setenv(envOAuthClientID, "cid") // enable signal
 	t.Setenv(envOAuthClientSecret, "csecret")
 	t.Setenv(envOAuthRedirectURL, "https://app/auth/callback")
 	t.Setenv(envOAuthAllowedDomain, "") // required, missing
@@ -111,13 +111,52 @@ func TestLoadOAuthConfigPartialMissingRequired(t *testing.T) {
 
 	_, _, err := LoadOAuthConfig()
 	if err == nil {
-		t.Fatal("LoadOAuthConfig (partial): want error, got nil")
+		t.Fatal("LoadOAuthConfig (client id set, domain missing): want error, got nil")
 	}
 	if !errors.Is(err, ErrMissingRequired) {
 		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
 	}
 	if got := err.Error(); !strings.Contains(got, envOAuthAllowedDomain) {
 		t.Errorf("error %q should name the missing var %q", got, envOAuthAllowedDomain)
+	}
+}
+
+// TestLoadOAuthConfigPlaceholderSecretOnlyDisabled is the deploy-scenario regression:
+// the Cloud Run substrate always mounts a non-empty placeholder for the session/client
+// secret even when sign-in is unconfigured. Enablement keys on the operator-set,
+// non-secret client id — so a placeholder secret with NO client id must report DISABLED
+// (enabled=false, nil error), not demand the (empty) client id and crash cmd/api.
+func TestLoadOAuthConfigPlaceholderSecretOnlyDisabled(t *testing.T) {
+	t.Setenv(envOAuthClientID, "") // not configured by the operator
+	t.Setenv(envOAuthClientSecret, "REPLACE_ME_VIA_GCLOUD")
+	t.Setenv(envOAuthRedirectURL, "")
+	t.Setenv(envOAuthAllowedDomain, "")
+	t.Setenv(envOAuthSessionSecret, "REPLACE_ME_VIA_GCLOUD")
+
+	cfg, enabled, err := LoadOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadOAuthConfig (placeholder secret only): want nil error, got %v", err)
+	}
+	if enabled {
+		t.Errorf("OAuth enabled = true with only a placeholder secret set; want disabled. cfg=%+v", cfg)
+	}
+}
+
+// TestLoadOAuthConfigAllowedDomainOnlyDisabled verifies that AllowedDomain alone (no
+// client id) does NOT enable auth: the domain is not the enable signal.
+func TestLoadOAuthConfigAllowedDomainOnlyDisabled(t *testing.T) {
+	t.Setenv(envOAuthClientID, "")
+	t.Setenv(envOAuthClientSecret, "")
+	t.Setenv(envOAuthRedirectURL, "")
+	t.Setenv(envOAuthAllowedDomain, "example.com")
+	t.Setenv(envOAuthSessionSecret, "")
+
+	cfg, enabled, err := LoadOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadOAuthConfig (allowed domain only): want nil error, got %v", err)
+	}
+	if enabled {
+		t.Errorf("OAuth enabled = true with only AllowedDomain set; want disabled. cfg=%+v", cfg)
 	}
 }
 
@@ -155,23 +194,42 @@ func TestLoadDriveOAuthConfigEnabledFull(t *testing.T) {
 	}
 }
 
-// TestLoadDriveOAuthConfigPartialMissingRequired verifies that setting some but not
-// all required DRIVE_OAUTH_* vars errors, naming the missing one and wrapping
-// ErrMissingRequired.
-func TestLoadDriveOAuthConfigPartialMissingRequired(t *testing.T) {
-	t.Setenv(envDriveClientID, "dcid")
+// TestLoadDriveOAuthConfigClientIDSetMissingRequired verifies that once the client id
+// is set (the enable signal), omitting another required value errors, naming the
+// missing one and wrapping ErrMissingRequired.
+func TestLoadDriveOAuthConfigClientIDSetMissingRequired(t *testing.T) {
+	t.Setenv(envDriveClientID, "dcid") // enable signal
 	t.Setenv(envDriveClientSecret, "") // required, missing
 	t.Setenv(envDriveRedirectURL, "https://app/cb")
 
 	_, _, err := LoadDriveOAuthConfig()
 	if err == nil {
-		t.Fatal("LoadDriveOAuthConfig (partial): want error, got nil")
+		t.Fatal("LoadDriveOAuthConfig (client id set, secret missing): want error, got nil")
 	}
 	if !errors.Is(err, ErrMissingRequired) {
 		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
 	}
 	if got := err.Error(); !strings.Contains(got, envDriveClientSecret) {
 		t.Errorf("error %q should name the missing var %q", got, envDriveClientSecret)
+	}
+}
+
+// TestLoadDriveOAuthConfigPlaceholderSecretOnlyDisabled is the deploy-scenario
+// regression for customer-Drive connect: the substrate mounts a non-empty placeholder
+// client secret even when the feature is unconfigured. Enablement keys on the
+// operator-set, non-secret client id, so a placeholder secret with NO client id must
+// report DISABLED (enabled=false, nil error), not error on the empty client id.
+func TestLoadDriveOAuthConfigPlaceholderSecretOnlyDisabled(t *testing.T) {
+	t.Setenv(envDriveClientID, "") // not configured by the operator
+	t.Setenv(envDriveClientSecret, "REPLACE_ME_VIA_GCLOUD")
+	t.Setenv(envDriveRedirectURL, "")
+
+	cfg, enabled, err := LoadDriveOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadDriveOAuthConfig (placeholder secret only): want nil error, got %v", err)
+	}
+	if enabled {
+		t.Errorf("Drive connect enabled = true with only a placeholder secret set; want disabled. cfg=%+v", cfg)
 	}
 }
 

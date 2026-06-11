@@ -86,13 +86,21 @@ const (
 
 // LoadOAuthConfig resolves the Workspace OAuth settings from the environment.
 //
-// Auth is OPTIONAL: if NONE of the OAUTH_* / SESSION_SECRET variables are set, it
-// returns (zero, false, nil) so the offline cmd/api dev mode still builds and runs
-// with auth disabled. If ANY of them is set — signaling intent to enable auth —
-// then EVERY required value (client id, client secret, redirect URL, allowed
-// domain, session secret) must be present; a missing one returns an error naming
-// the variable and wrapping ErrMissingRequired. The returned bool reports whether
-// auth is enabled.
+// Auth is OPTIONAL, and enablement is keyed on the operator-set, NON-secret signal:
+// the client id (OAUTH_CLIENT_ID). It is deliberately NOT keyed on "any value
+// present", because a deploy substrate (Terraform/Cloud Run) mounts secret
+// placeholders for ClientSecret/SessionSecret unconditionally — a non-empty
+// placeholder secret would otherwise falsely signal "enabled" and demand the (empty)
+// client id, crashing the container on start. So the secret cannot be the enable
+// signal; only the operator setting the client id enables auth.
+//
+// If the client id is empty, auth is disabled: this returns (zero, false, nil),
+// IGNORING any mounted placeholder ClientSecret/SessionSecret/AllowedDomain, so the
+// offline / sign-in-only / insecure-bootstrap deployment still builds and starts
+// cleanly. If the client id is set — signaling intent to enable auth — then EVERY
+// other required value (client secret, redirect URL, allowed domain, session secret)
+// must be present; a missing one returns an error naming the variable and wrapping
+// ErrMissingRequired. The returned bool reports whether auth is enabled.
 func LoadOAuthConfig() (OAuthConfig, bool, error) {
 	cfg := OAuthConfig{
 		ClientID:      os.Getenv(envOAuthClientID),
@@ -103,29 +111,24 @@ func LoadOAuthConfig() (OAuthConfig, bool, error) {
 		PostLoginPath: os.Getenv(envOAuthPostLoginPath),
 	}
 
-	// Required values keyed by their env var, so an error can name the missing one.
+	// Enablement keys on the client id alone — the operator-set, non-secret signal.
+	enabled := cfg.ClientID != ""
+	if !enabled {
+		// Auth not configured: disabled. Any mounted placeholder secret/domain is
+		// ignored so the offline/dev/bootstrap path starts cleanly.
+		return OAuthConfig{}, false, nil
+	}
+
+	// The client id is set, so the operator intends auth. Demand every other required
+	// value, keyed by its env var so the error can name the missing one.
 	required := []struct {
 		env, val string
 	}{
-		{envOAuthClientID, cfg.ClientID},
 		{envOAuthClientSecret, cfg.ClientSecret},
 		{envOAuthRedirectURL, cfg.RedirectURL},
 		{envOAuthAllowedDomain, cfg.AllowedDomain},
 		{envOAuthSessionSecret, cfg.SessionSecret},
 	}
-
-	anySet := false
-	for _, r := range required {
-		if r.val != "" {
-			anySet = true
-		}
-	}
-	if !anySet {
-		// Nothing configured: auth disabled. Offline/dev mode path.
-		return OAuthConfig{}, false, nil
-	}
-
-	// At least one OAuth var is set, so the operator intends auth. Demand all of them.
 	for _, r := range required {
 		if r.val == "" {
 			return OAuthConfig{}, false, fmt.Errorf("%s must be set when OAuth is enabled: %w", r.env, ErrMissingRequired)
@@ -144,12 +147,22 @@ const (
 
 // LoadDriveOAuthConfig resolves the WS-C2 customer-Drive OAuth settings from the
 // environment. It is OPTIONAL and INDEPENDENT of sign-in OAuth (a deployment may
-// enable one without the other): if NONE of the DRIVE_OAUTH_* variables are set it
-// returns (zero, false, nil) so the connect endpoints are simply not wired (they
-// then answer 503). If ANY is set — signaling intent to enable customer-Drive
-// connect — then EVERY required value (client id, client secret, redirect URL) must
-// be present; a missing one returns an error naming the variable and wrapping
-// ErrMissingRequired. The returned bool reports whether the feature is enabled.
+// enable one without the other).
+//
+// Enablement is keyed on the operator-set, NON-secret signal: the client id
+// (DRIVE_OAUTH_CLIENT_ID). It is deliberately NOT keyed on "any value present",
+// because a deploy substrate (Terraform/Cloud Run) mounts a secret placeholder for
+// the client secret unconditionally — a non-empty placeholder would otherwise falsely
+// signal "enabled" and demand the (empty) client id, crashing the container. So the
+// secret cannot be the enable signal; only the operator setting the client id enables
+// the feature.
+//
+// If the client id is empty, the feature is disabled: this returns (zero, false, nil),
+// ignoring any mounted placeholder client secret, so the connect endpoints are simply
+// not wired (they then answer 503). If the client id is set — signaling intent — then
+// EVERY other required value (client secret, redirect URL) must be present; a missing
+// one returns an error naming the variable and wrapping ErrMissingRequired. The
+// returned bool reports whether the feature is enabled.
 //
 // SECURITY: ClientSecret is a credential; this function reads it but never logs it.
 func LoadDriveOAuthConfig() (DriveOAuthConfig, bool, error) {
@@ -160,20 +173,17 @@ func LoadDriveOAuthConfig() (DriveOAuthConfig, bool, error) {
 		PostConnectPath: os.Getenv(envDrivePostConnectPath),
 	}
 
-	required := []struct{ env, val string }{
-		{envDriveClientID, cfg.ClientID},
-		{envDriveClientSecret, cfg.ClientSecret},
-		{envDriveRedirectURL, cfg.RedirectURL},
+	// Enablement keys on the client id alone — the operator-set, non-secret signal.
+	enabled := cfg.ClientID != ""
+	if !enabled {
+		// Not configured: disabled. Any mounted placeholder secret is ignored.
+		return DriveOAuthConfig{}, false, nil
 	}
 
-	anySet := false
-	for _, r := range required {
-		if r.val != "" {
-			anySet = true
-		}
-	}
-	if !anySet {
-		return DriveOAuthConfig{}, false, nil
+	// The client id is set, so the operator intends the feature. Demand the rest.
+	required := []struct{ env, val string }{
+		{envDriveClientSecret, cfg.ClientSecret},
+		{envDriveRedirectURL, cfg.RedirectURL},
 	}
 	for _, r := range required {
 		if r.val == "" {
