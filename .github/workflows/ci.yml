@@ -68,6 +68,38 @@ jobs:
         version: v2.12.2  # Pinned for reproducible lint (was 'latest' — nondeterministic staticcheck)
         args: --timeout=5m
 
+  terraform-lint:
+    name: Terraform Lint
+    runs-on: ubuntu-latest
+    # Pure static validation of the deploy/terraform module (WS-E1). It needs NO
+    # GCP credentials: `terraform fmt`/`init -backend=false`/`validate` only parse
+    # and type-check HCL — they never touch the cloud. This is the real check on
+    # the Terraform module, since terraform was not installable in the build env
+    # where the module was authored.
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.9.8
+        terraform_wrapper: false
+
+    - name: Terraform fmt (check)
+      run: terraform fmt -check -recursive deploy/terraform
+
+    - name: Validate kaimi module
+      run: |
+        terraform -chdir=deploy/terraform/modules/kaimi init -backend=false -input=false
+        terraform -chdir=deploy/terraform/modules/kaimi validate
+
+    - name: Validate example env
+      run: |
+        terraform -chdir=deploy/terraform/envs/example init -backend=false -input=false
+        terraform -chdir=deploy/terraform/envs/example validate
+
   verify-gcp:
     name: Verify GCP Integration
     runs-on: ubuntu-latest
@@ -493,13 +525,13 @@ jobs:
   all-checks-pass:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [test, lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
+    needs: [test, lint, terraform-lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
     if: always()
 
     steps:
     - name: Check all required jobs succeeded
       run: |
-        # Test and lint are always required
+        # Test, lint, and terraform-lint are always required
         if [[ "${{ needs.test.result }}" != "success" ]]; then
           echo "::error::Tests failed"
           exit 1
@@ -507,6 +539,12 @@ jobs:
 
         if [[ "${{ needs.lint.result }}" != "success" ]]; then
           echo "::error::Linting failed"
+          exit 1
+        fi
+
+        # terraform-lint runs on every PR/push with no secrets, so it must succeed.
+        if [[ "${{ needs.terraform-lint.result }}" != "success" ]]; then
+          echo "::error::Terraform validation failed"
           exit 1
         fi
 
@@ -569,35 +607,53 @@ jobs:
       with:
         project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-    - name: Configure Docker for GCR
+    - name: Configure Docker for Artifact Registry
       run: |
-        gcloud auth configure-docker us-east4-docker.pkg.dev
+        gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
 
     # One-time infrastructure (Artifact Registry repo "kaimi", the queue GCS
-    # bucket, the kaimi-pipeline Cloud Run Job with its GCS volume
-    # mount + Secret Manager wiring, and the Cloud Scheduler trigger) is
-    # provisioned by scripts/setup-gcp.ps1 / setup-gcp.sh (issue #122).
-    # This job only builds the new image and points the existing job at it.
-    - name: Build pipeline image
+    # bucket, the kaimi-pipeline Cloud Run Job + kaimi-api Cloud Run Service with
+    # their GCS volume mounts + Secret Manager wiring, and the Cloud Scheduler
+    # trigger) is provisioned per-tenant by deploy/terraform (WS-E1).
+    # This job only builds the new images and points the existing Cloud Run
+    # resources at them. All registry/region/project references are tenant-neutral
+    # via secrets (GCP_PROJECT_ID, GCP_REGION) — no hardcoded project or region.
+    - name: Build and push pipeline image
       run: |
+        PIPELINE_IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline"
         docker build \
           -f cmd/pipeline/Dockerfile \
-          -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }} \
-          -t us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:latest \
+          -t "${PIPELINE_IMAGE}:${{ github.sha }}" \
+          -t "${PIPELINE_IMAGE}:latest" \
           .
+        docker push "${PIPELINE_IMAGE}:${{ github.sha }}"
+        docker push "${PIPELINE_IMAGE}:latest"
 
-    - name: Push pipeline image
+    - name: Build and push api image
       run: |
-        docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }}
-        docker push us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:latest
+        API_IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/api"
+        docker build \
+          -f cmd/api/Dockerfile \
+          -t "${API_IMAGE}:${{ github.sha }}" \
+          -t "${API_IMAGE}:latest" \
+          .
+        docker push "${API_IMAGE}:${{ github.sha }}"
+        docker push "${API_IMAGE}:latest"
 
-    - name: Update Cloud Run Job image
+    - name: Update Cloud Run Job (kaimi-pipeline)
       run: |
         gcloud run jobs update kaimi-pipeline \
-          --image us-east4-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }} \
+          --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/pipeline:${{ github.sha }} \
+          --region ${{ secrets.GCP_REGION }}
+
+    - name: Update Cloud Run Service (kaimi-api)
+      run: |
+        gcloud run services update kaimi-api \
+          --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/kaimi/api:${{ github.sha }} \
           --region ${{ secrets.GCP_REGION }}
 
     - name: Deployment summary
       run: |
-        echo "Deployed kaimi-pipeline image ${{ github.sha }} to Cloud Run Jobs."
+        echo "Deployed kaimi-pipeline (Cloud Run Job) image ${{ github.sha }}."
+        echo "Deployed kaimi-api (Cloud Run Service) image ${{ github.sha }}."
         echo "Scheduled runs: 07:00 / 12:00 / 17:00 America/New_York (Cloud Scheduler job: kaimi-pipeline-schedule)."
