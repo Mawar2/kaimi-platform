@@ -7,6 +7,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/document"
+	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/ingest"
@@ -42,6 +43,16 @@ type Options struct {
 	// (HTTP fetch -> GCS store -> Document AI / stdlib DOCX extraction). Requires
 	// cfg.GCP.ProjectID, cfg.Ingest.GCSBucket, and cfg.Ingest.DocumentAIProcessor.
 	LiveIngest bool
+
+	// CustomerDriveOAuth carries the OAuth client credentials used to refresh a
+	// connected customer's Drive token (WS-C2). When set AND the customer has
+	// connected their Drive (a token is stored at BasePath) AND a target Drive id
+	// has been chosen, the Outline agent writes Docs into the CUSTOMER's own Drive
+	// via that token source instead of the cached/service-account client. When unset
+	// or not connected, the Docs client is unchanged (cached today). The ClientID/
+	// ClientSecret must match the ones the connect flow used so the refresh token
+	// stays valid; RedirectURL is required by oauth2.Config but unused for refresh.
+	CustomerDriveOAuth *drivetoken.OAuthClient
 }
 
 // New wires the REAL Zone 2 agents behind the shared gated lifecycle (epic
@@ -66,7 +77,14 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	if err != nil {
 		return nil, fmt.Errorf("document store: %w", err)
 	}
-	docsClient, err := googledocs.NewClient(ctx, googledocs.Config{UseCached: true})
+	// Build the Google Docs client. WS-C2: when the deployment has connected the
+	// CUSTOMER's own Drive (a token is stored at BasePath and a target Drive id is
+	// set) and OAuth client credentials are supplied to refresh it, the Outline
+	// agent writes Docs into the customer's Drive via that token source. Otherwise
+	// the Docs client is unchanged (cached today). resolveDocsClient logs which path
+	// it took and falls back to cached on any not-connected / config-missing case so
+	// a partial setup never breaks the proposal pipeline.
+	docsClient, err := resolveDocsClient(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("docs client: %w", err)
 	}
@@ -193,4 +211,60 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		Profile:       scorerProfile,
 		Ingest:        ingestor,
 	}), nil
+}
+
+// resolveDocsClient builds the Google Docs client (WS-C2). It returns a client that
+// writes into the CUSTOMER's own Drive when ALL of the following hold:
+//   - OAuth client credentials were supplied (opts.CustomerDriveOAuth), so a stored
+//     refresh token can be refreshed;
+//   - the customer has connected their Drive (a token is stored at opts.BasePath);
+//   - a target Drive/folder id has been set (where created Docs land).
+//
+// Otherwise it returns the unchanged cached client. It NEVER returns an error for a
+// "not connected / not configured" condition — those fall back to cached so a
+// partial setup cannot break the proposal pipeline; only a malformed store
+// directory surfaces an error. It never logs the token; only which path it took.
+func resolveDocsClient(ctx context.Context, opts Options) (googledocs.Client, error) {
+	cached := func() (googledocs.Client, error) {
+		return googledocs.NewClient(ctx, googledocs.Config{UseCached: true})
+	}
+
+	// No credentials to refresh with → cannot use the customer token; stay cached.
+	if opts.CustomerDriveOAuth == nil || opts.BasePath == "" {
+		return cached()
+	}
+
+	tokenStore, err := drivetoken.NewJSONTokenStore(opts.BasePath)
+	if err != nil {
+		return nil, fmt.Errorf("drive token store: %w", err)
+	}
+	oc := drivetoken.NewOAuthConfig(
+		opts.CustomerDriveOAuth.ClientID,
+		opts.CustomerDriveOAuth.ClientSecret,
+		opts.CustomerDriveOAuth.RedirectURL,
+	)
+	ts, err := drivetoken.TokenSourceFromStore(ctx, tokenStore, oc)
+	if err != nil {
+		// Not connected (or token unreadable): fall back to the cached client.
+		log.Printf("Customer Drive: not connected; using cached Docs client (%v)", err)
+		return cached()
+	}
+
+	// A token exists; a target Drive id must also be set for created Docs to have a
+	// parent. Without one, fall back rather than guess a destination.
+	targetStore, err := drivetoken.NewJSONTargetStore(opts.BasePath)
+	if err != nil {
+		return nil, fmt.Errorf("drive target store: %w", err)
+	}
+	target, err := targetStore.Load()
+	if err != nil || target.DriveID == "" {
+		log.Printf("Customer Drive: connected but no target Drive id set; using cached Docs client")
+		return cached()
+	}
+
+	log.Printf("Customer Drive: LIVE — proposal Docs will be created in the customer's Drive (target %s)", target.DriveID)
+	return googledocs.NewClient(ctx, googledocs.Config{
+		TokenSource:   ts,
+		SharedDriveID: target.DriveID,
+	})
 }

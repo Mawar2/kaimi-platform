@@ -136,6 +136,54 @@ func LoadOAuthConfig() (OAuthConfig, bool, error) {
 }
 
 const (
+	envDriveClientID        = "DRIVE_OAUTH_CLIENT_ID"
+	envDriveClientSecret    = "DRIVE_OAUTH_CLIENT_SECRET"
+	envDriveRedirectURL     = "DRIVE_OAUTH_REDIRECT_URL"
+	envDrivePostConnectPath = "DRIVE_OAUTH_POST_CONNECT_PATH"
+)
+
+// LoadDriveOAuthConfig resolves the WS-C2 customer-Drive OAuth settings from the
+// environment. It is OPTIONAL and INDEPENDENT of sign-in OAuth (a deployment may
+// enable one without the other): if NONE of the DRIVE_OAUTH_* variables are set it
+// returns (zero, false, nil) so the connect endpoints are simply not wired (they
+// then answer 503). If ANY is set — signaling intent to enable customer-Drive
+// connect — then EVERY required value (client id, client secret, redirect URL) must
+// be present; a missing one returns an error naming the variable and wrapping
+// ErrMissingRequired. The returned bool reports whether the feature is enabled.
+//
+// SECURITY: ClientSecret is a credential; this function reads it but never logs it.
+func LoadDriveOAuthConfig() (DriveOAuthConfig, bool, error) {
+	cfg := DriveOAuthConfig{
+		ClientID:        os.Getenv(envDriveClientID),
+		ClientSecret:    os.Getenv(envDriveClientSecret),
+		RedirectURL:     os.Getenv(envDriveRedirectURL),
+		PostConnectPath: os.Getenv(envDrivePostConnectPath),
+	}
+
+	required := []struct{ env, val string }{
+		{envDriveClientID, cfg.ClientID},
+		{envDriveClientSecret, cfg.ClientSecret},
+		{envDriveRedirectURL, cfg.RedirectURL},
+	}
+
+	anySet := false
+	for _, r := range required {
+		if r.val != "" {
+			anySet = true
+		}
+	}
+	if !anySet {
+		return DriveOAuthConfig{}, false, nil
+	}
+	for _, r := range required {
+		if r.val == "" {
+			return DriveOAuthConfig{}, false, fmt.Errorf("%s must be set when customer-Drive connect is enabled: %w", r.env, ErrMissingRequired)
+		}
+	}
+	return cfg, true, nil
+}
+
+const (
 	defaultAPIHost = "127.0.0.1"
 	defaultAPIPort = 8901
 

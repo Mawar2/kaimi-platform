@@ -121,6 +121,60 @@ func TestLoadOAuthConfigPartialMissingRequired(t *testing.T) {
 	}
 }
 
+// TestLoadDriveOAuthConfigDisabledWhenUnset verifies that with no DRIVE_OAUTH_* env
+// set, customer-Drive connect is reported disabled with no error.
+func TestLoadDriveOAuthConfigDisabledWhenUnset(t *testing.T) {
+	for _, e := range []string{envDriveClientID, envDriveClientSecret, envDriveRedirectURL} {
+		t.Setenv(e, "")
+	}
+	cfg, enabled, err := LoadDriveOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadDriveOAuthConfig (all unset): %v", err)
+	}
+	if enabled {
+		t.Errorf("Drive connect enabled = true with nothing set; want disabled. cfg=%+v", cfg)
+	}
+}
+
+// TestLoadDriveOAuthConfigEnabledFull verifies a full DRIVE_OAUTH_* env enables the
+// feature and reads the values through.
+func TestLoadDriveOAuthConfigEnabledFull(t *testing.T) {
+	t.Setenv(envDriveClientID, "dcid")
+	t.Setenv(envDriveClientSecret, "dsecret")
+	t.Setenv(envDriveRedirectURL, "https://app/api/v1/integrations/drive/callback")
+
+	cfg, enabled, err := LoadDriveOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadDriveOAuthConfig (full): %v", err)
+	}
+	if !enabled {
+		t.Fatal("Drive connect enabled = false with full config; want enabled")
+	}
+	if cfg.ClientID != "dcid" || cfg.ClientSecret != "dsecret" || cfg.RedirectURL != "https://app/api/v1/integrations/drive/callback" {
+		t.Errorf("cfg read-through wrong: %+v", cfg)
+	}
+}
+
+// TestLoadDriveOAuthConfigPartialMissingRequired verifies that setting some but not
+// all required DRIVE_OAUTH_* vars errors, naming the missing one and wrapping
+// ErrMissingRequired.
+func TestLoadDriveOAuthConfigPartialMissingRequired(t *testing.T) {
+	t.Setenv(envDriveClientID, "dcid")
+	t.Setenv(envDriveClientSecret, "") // required, missing
+	t.Setenv(envDriveRedirectURL, "https://app/cb")
+
+	_, _, err := LoadDriveOAuthConfig()
+	if err == nil {
+		t.Fatal("LoadDriveOAuthConfig (partial): want error, got nil")
+	}
+	if !errors.Is(err, ErrMissingRequired) {
+		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
+	}
+	if got := err.Error(); !strings.Contains(got, envDriveClientSecret) {
+		t.Errorf("error %q should name the missing var %q", got, envDriveClientSecret)
+	}
+}
+
 // TestLoadConfigPortParseError verifies a non-integer port is reported as an error
 // that names the offending variable and wraps ErrInvalidConfig (the value is
 // present but malformed) — NOT ErrMissingRequired, which is reserved for absent

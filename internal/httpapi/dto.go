@@ -158,6 +158,24 @@ type MeResponse struct {
 	Subject string `json:"sub"`
 }
 
+// driveStatusResponse is the body returned by GET .../integrations/drive/status
+// (WS-C2). It tells the UI whether the customer's Drive is connected and, if a
+// target has been chosen, which Drive/folder Docs will land in. It deliberately
+// carries NO token material — only the connection state and the target id.
+type driveStatusResponse struct {
+	// Connected reports whether a customer-Drive OAuth token has been stored.
+	Connected bool `json:"connected"`
+	// Target is the Drive/folder id new Docs are created in, omitted when unset.
+	Target string `json:"target,omitempty"`
+}
+
+// driveTargetRequest is the body accepted by PUT .../integrations/drive/target. It
+// carries the Drive/folder id where generated Docs should be created. The full
+// interactive Drive picker is WS-C3; here a provided id is simply persisted.
+type driveTargetRequest struct {
+	DriveID string `json:"drive_id"`
+}
+
 // ErrorResponse is the envelope returned for non-2xx responses so clients can
 // rely on a single error shape across every endpoint.
 type ErrorResponse struct {

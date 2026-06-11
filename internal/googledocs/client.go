@@ -1,6 +1,10 @@
 // Package googledocs creates and populates Google Docs inside a Shared Drive.
 //
-// The client supports three modes:
+// The client supports four modes:
+//   - Live mode (OAuth TokenSource): authenticates as a specific user via an
+//     oauth2.TokenSource. Docs land in THAT user's Drive — this is the WS-C2 seam
+//     for writing into a customer's own Google Workspace. Takes precedence over
+//     the service-account and ADC modes when set.
 //   - Live mode (service account): authenticates with a JSON key; use for
 //     production and CI where explicit key management is required.
 //   - Live mode (ADC): authenticates via Application Default Credentials; use
@@ -18,6 +22,7 @@ import (
 	"fmt"
 	"os"
 
+	"golang.org/x/oauth2"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
@@ -61,8 +66,20 @@ type CreatedDoc struct {
 // Config holds configuration for the Google Docs client.
 type Config struct {
 	// CredentialsJSON is the raw service-account JSON key content.
-	// Required for live mode unless UseADC is true.
+	// Required for live mode unless UseADC is true or TokenSource is set.
 	CredentialsJSON []byte
+
+	// TokenSource authenticates as a SPECIFIC USER (OAuth2) rather than as a
+	// service account. When set, it takes precedence over CredentialsJSON and
+	// UseADC, and Docs created by this client land in THAT user's Drive — this is
+	// the WS-C2 seam that lets a deployment write proposal Docs into the customer's
+	// own Google Workspace instead of a BlueMeta service account.
+	//
+	// The oauth2.TokenSource is responsible for refreshing the access token; the
+	// per-tenant Drive token store (internal/drivetoken) builds one from a stored
+	// refresh token via oauth2.Config.TokenSource so it auto-refreshes. The token
+	// itself is a secret and is NEVER logged anywhere in this package.
+	TokenSource oauth2.TokenSource
 
 	// SharedDriveID is the ID of the Shared Drive (or folder) that Docs are
 	// created in. Required for live mode.
@@ -186,15 +203,24 @@ func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
 		return nil, fmt.Errorf("shared drive ID is required for live mode")
 	}
 
+	// Authentication precedence: a per-user OAuth TokenSource wins over a
+	// service-account key, which wins over ADC. The TokenSource path is the WS-C2
+	// customer-Drive seam: when set, the services authenticate as the customer's
+	// own Workspace user, so Docs are created in their Drive. option.WithTokenSource
+	// uses the source's token and lets it auto-refresh.
 	var opts []option.ClientOption
-	if !cfg.UseADC {
+	switch {
+	case cfg.TokenSource != nil:
+		opts = append(opts, option.WithTokenSource(cfg.TokenSource))
+	case cfg.UseADC:
+		// No credential option is added — the Google client libraries resolve ADC
+		// automatically (env var → gcloud → metadata server).
+	default:
 		if len(cfg.CredentialsJSON) == 0 {
-			return nil, fmt.Errorf("credentials are required for live mode (set CredentialsJSON or enable UseADC)")
+			return nil, fmt.Errorf("credentials are required for live mode (set TokenSource, CredentialsJSON, or enable UseADC)")
 		}
 		opts = append(opts, option.WithCredentialsJSON(cfg.CredentialsJSON)) //nolint:staticcheck // TODO(phase-1): migrate to option.WithCredentials
 	}
-	// When UseADC is true no credential option is added — the Google client
-	// libraries resolve ADC automatically (env var → gcloud → metadata server).
 
 	driveSvc, err := drive.NewService(ctx, opts...)
 	if err != nil {

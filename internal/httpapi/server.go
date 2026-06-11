@@ -51,6 +51,16 @@ type Deps struct {
 	// Unavailable (mirroring how the action endpoints degrade when Proposals is nil).
 	ProfileStore profile.ProfileStore
 
+	// Drive serves the WS-C2 customer-Drive connect endpoints
+	// (/api/v1/integrations/drive/*). It lets a deployment connect the CUSTOMER's
+	// own Google Workspace so generated Docs land in their Drive. It may be nil when
+	// customer-Drive connect is not configured, in which case those routes answer
+	// 503 Service Unavailable (mirroring how Proposals/ProfileStore degrade when
+	// absent). It is registered INSIDE the protected /api/v1 group — connecting a
+	// Drive is an authenticated action — even though the consent handshake itself
+	// bounces through Google.
+	Drive *DriveHandler
+
 	// AllowedOrigins is the CORS allow-list (WS-B6). It is EMPTY by default, in which
 	// case CORS is a no-op and the API is same-origin only (the preferred
 	// deployment). Populate it (from Config.AllowedOrigins / CORS_ALLOWED_ORIGINS)
@@ -120,6 +130,15 @@ func (s *Server) Routes() http.Handler {
 	// authenticated action) and degrade to 503 when no ProfileStore is wired.
 	apiMux.HandleFunc("GET /api/v1/profile", s.handleGetProfile)
 	apiMux.HandleFunc("PUT /api/v1/profile", s.handlePutProfile)
+
+	// WS-C2 customer-Drive connect. All four endpoints are protected (connecting a
+	// Drive is an authenticated action) and degrade to 503 when no DriveHandler is
+	// wired. The connect/callback handshake itself bounces through Google's consent
+	// screen, but the endpoints are only reachable by an authenticated operator.
+	apiMux.HandleFunc("GET /api/v1/integrations/drive/connect", s.handleDriveConnect)
+	apiMux.HandleFunc("GET /api/v1/integrations/drive/callback", s.handleDriveCallback)
+	apiMux.HandleFunc("GET /api/v1/integrations/drive/status", s.handleDriveStatus)
+	apiMux.HandleFunc("PUT /api/v1/integrations/drive/target", s.handleDriveSetTarget)
 
 	// WS-B5 auth seam: wrap ONLY this group with RequireSession so /api/v1/* demands
 	// a valid session, while rootMux's own routes (/healthz, /auth/*) stay public.

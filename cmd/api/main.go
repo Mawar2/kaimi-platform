@@ -21,6 +21,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
+	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
@@ -100,14 +101,52 @@ func run() error {
 		return fmt.Errorf("failed to initialize profile store: %w", err)
 	}
 
+	// Resolve customer-Drive connect (WS-C2). It is OPTIONAL and independent of
+	// sign-in OAuth: with no DRIVE_OAUTH_* env set the connect endpoints are omitted
+	// (they answer 503) and proposal Docs use the default service-account/cached
+	// path. When configured, a deployment can connect the CUSTOMER's own Drive so
+	// generated Docs land in their Workspace. The token/target are persisted under
+	// the SAME store base path as the profile/opportunity stores.
+	driveOAuthCfg, driveEnabled, err := httpapi.LoadDriveOAuthConfig()
+	if err != nil {
+		return fmt.Errorf("load Drive OAuth config: %w", err)
+	}
+	var driveHandler *httpapi.DriveHandler
+	var customerDriveOAuth *drivetoken.OAuthClient
+	if driveEnabled {
+		driveTokenStore, err := drivetoken.NewJSONTokenStore(*storePath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize drive token store: %w", err)
+		}
+		driveTargetStore, err := drivetoken.NewJSONTargetStore(*storePath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize drive target store: %w", err)
+		}
+		driveHandler, err = httpapi.NewDriveHandler(driveOAuthCfg, driveTokenStore, driveTargetStore)
+		if err != nil {
+			return fmt.Errorf("build drive handler: %w", err)
+		}
+		// Same client credentials let the proposal pipeline refresh the stored token
+		// so Docs land in the customer's Drive once connected.
+		customerDriveOAuth = &drivetoken.OAuthClient{
+			ClientID:     driveOAuthCfg.ClientID,
+			ClientSecret: driveOAuthCfg.ClientSecret,
+			RedirectURL:  driveOAuthCfg.RedirectURL,
+		}
+		log.Printf("Customer-Drive connect enabled (/api/v1/integrations/drive/*)")
+	} else {
+		log.Printf("Customer-Drive connect disabled (no DRIVE_OAUTH_* config); proposal Docs use the default Drive client")
+	}
+
 	// Assemble the Zone-2 proposal service through the shared wiring so the API
 	// builds it exactly the way cmd/dashboard does.
 	proposals, err := proposalwiring.New(context.Background(), &cfg, proposalwiring.Options{
-		Store:      s,
-		BasePath:   *storePath,
-		LiveWriter: lw,
-		LiveReview: lr,
-		LiveIngest: *liveIngest,
+		Store:              s,
+		BasePath:           *storePath,
+		LiveWriter:         lw,
+		LiveReview:         lr,
+		LiveIngest:         *liveIngest,
+		CustomerDriveOAuth: customerDriveOAuth,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to wire proposal service: %w", err)
@@ -151,6 +190,7 @@ func run() error {
 		Proposals:           proposals,
 		ProfileStore:        profileStore,
 		Auth:                auth,
+		Drive:               driveHandler,
 		AllowInsecureNoAuth: allowInsecure,
 		// CORS allow-list from CORS_ALLOWED_ORIGINS (empty by default → same-origin,
 		// no-op). Set only when a browser SPA is served from a different origin.
