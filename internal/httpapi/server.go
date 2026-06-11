@@ -42,6 +42,14 @@ type Deps struct {
 	// -insecure-no-auth / KAIMI_INSECURE_NO_AUTH) to run open for local UI dev. It
 	// has no effect when Auth is non-nil; OAuth always takes precedence.
 	AllowInsecureNoAuth bool
+
+	// AllowedOrigins is the CORS allow-list (WS-B6). It is EMPTY by default, in which
+	// case CORS is a no-op and the API is same-origin only (the preferred
+	// deployment). Populate it (from Config.AllowedOrigins / CORS_ALLOWED_ORIGINS)
+	// only when a browser SPA is served from a different origin than the API. Each
+	// entry is a full origin (e.g. "https://app.example.com"); the middleware echoes
+	// the matching origin and never "*", because the API uses credentialed cookies.
+	AllowedOrigins []string
 }
 
 // Server is the JSON API's HTTP application. It holds its dependencies and builds
@@ -149,7 +157,15 @@ func (s *Server) Routes() http.Handler {
 	// to "/" and 404 instead of 405). The response shim preserves the mux's own
 	// status codes and only rewrites the body/content type when nothing was
 	// written yet.
-	return jsonErrorResponder(rootMux)
+	handler := jsonErrorResponder(rootMux)
+
+	// CORS is applied at the ROOT level — OUTSIDE jsonErrorResponder's routing — so
+	// it also covers the public /auth and /healthz routes and so an allowed-origin
+	// OPTIONS preflight is answered (204) BEFORE the mux's per-path method dispatch
+	// would 405 it. With no origins configured (the same-origin default) CORS is a
+	// no-op pass-through, so it never interferes with RequireSession: the auth wrap
+	// on /api/v1 still runs untouched for every real (non-preflight) request.
+	return CORS(s.deps.AllowedOrigins)(handler)
 }
 
 // handleHealth serves the unauthenticated liveness probe. It reports 200 with a

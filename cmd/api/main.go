@@ -142,6 +142,9 @@ func run() error {
 		Proposals:           proposals,
 		Auth:                auth,
 		AllowInsecureNoAuth: allowInsecure,
+		// CORS allow-list from CORS_ALLOWED_ORIGINS (empty by default → same-origin,
+		// no-op). Set only when a browser SPA is served from a different origin.
+		AllowedOrigins: apiCfg.AllowedOrigins,
 	})
 
 	addr := net.JoinHostPort(apiCfg.Host, fmt.Sprintf("%d", apiCfg.Port))
