@@ -158,6 +158,78 @@ func TestCORSNoOriginsConfiguredIsNoOp(t *testing.T) {
 	}
 }
 
+// TestCORSVaryOriginUnconditionalWhenEnabled verifies that whenever CORS is enabled
+// (allow-list non-empty) the middleware adds Vary: Origin to EVERY handled request —
+// including a request with NO Origin header and one with a DISALLOWED origin — so a
+// shared cache/CDN never serves a CORS-less cached response back to the SPA. Those
+// non-grant cases still get NO Allow-Origin header and still reach the inner handler.
+func TestCORSVaryOriginUnconditionalWhenEnabled(t *testing.T) {
+	cases := []struct {
+		name   string
+		origin string // "" means no Origin header set
+	}{
+		{name: "no origin header", origin: ""},
+		{name: "disallowed origin", origin: "https://evil.example.org"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := CORS([]string{"https://app.example.com"})(corsReachHandler())
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/opportunities", http.NoBody)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if got := rec.Header().Get("Vary"); got != "Origin" {
+				t.Errorf("Vary = %q, want %q (must be set even without a grant when CORS is enabled)", got, "Origin")
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+				t.Errorf("Allow-Origin = %q, want empty for a non-allowed request", got)
+			}
+			if rec.Code != http.StatusOK || rec.Body.String() != "reached" {
+				t.Errorf("request should still reach inner handler: code=%d body=%q", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestCORSNoVaryWhenDisabled verifies the no-op fast path adds NOTHING — not even
+// Vary: Origin — when no origins are configured, because there is no CORS at all then.
+func TestCORSNoVaryWhenDisabled(t *testing.T) {
+	h := CORS(nil)(corsReachHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/opportunities", http.NoBody)
+	req.Header.Set("Origin", "https://app.example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Vary"); got != "" {
+		t.Errorf("Vary = %q, want empty when CORS is disabled (no-op fast path)", got)
+	}
+}
+
+// TestCORSConfiguredOriginIsNormalized verifies the CONFIG side is normalized so an
+// operator typo — mixed case and a trailing slash — still matches the canonical Origin
+// a browser sends. Config "https://App.Example.com/" must grant "https://app.example.com".
+func TestCORSConfiguredOriginIsNormalized(t *testing.T) {
+	const incoming = "https://app.example.com"
+	h := CORS([]string{"https://App.Example.com/"})(corsReachHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/opportunities", http.NoBody)
+	req.Header.Set("Origin", incoming)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != incoming {
+		t.Errorf("Allow-Origin = %q, want the exact incoming origin %q (config typo should normalize-match)", got, incoming)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("Allow-Credentials = %q, want \"true\"", got)
+	}
+}
+
 // TestParseCORSOrigins verifies the comma-separated env parsing trims spaces and
 // drops empty entries so a trailing comma or stray space does not create a "" origin
 // that could be matched against.

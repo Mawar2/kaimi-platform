@@ -40,21 +40,27 @@ const corsMaxAge = "600"
 //   - No origins configured (nil/empty, or only blank entries) → the returned
 //     middleware is a no-op pass-through. This is the same-origin default.
 //   - Request Origin matches an allowed origin → echo that SPECIFIC origin in
-//     Access-Control-Allow-Origin (never "*"), set Allow-Credentials:true, and add
-//     Vary: Origin so shared caches key the response per origin.
+//     Access-Control-Allow-Origin (never "*") and set Allow-Credentials:true.
 //   - An allowed-origin OPTIONS preflight → answered here with 204 and the
 //     methods/headers/max-age advertised; the inner handler is not invoked.
-//   - Request Origin absent or not allowed → no CORS headers are added and the
-//     request is passed through unchanged (the inner handler/mux serves it). This
-//     never blocks a request; it simply withholds the cross-origin grant.
+//   - Request Origin absent or not allowed → no Allow-Origin/credentials headers are
+//     added and the request is passed through unchanged (the inner handler/mux serves
+//     it). This never blocks a request; it simply withholds the cross-origin grant.
+//   - Whenever CORS is enabled (allow-list non-empty), EVERY handled request gets
+//     Vary: Origin — set before (and regardless of) the origin check — so a shared
+//     cache/CDN never serves a CORS-less cached response (one keyed for no Origin, or
+//     for a different origin) back to the credentialed SPA. Only the no-op fast path
+//     (no origins configured) adds nothing, because there is no CORS at all then.
 //
 // It does NOT authenticate; RequireSession remains the auth control. CORS only tells
 // a browser whether a cross-origin response may be read by page JavaScript.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
-	// Build a set of the non-empty configured origins once, at wrap time.
+	// Build a set of the configured origins once, at wrap time, normalizing each so
+	// operator typos in config (trailing slash, mixed case, stray space) still match
+	// the canonical Origin a browser sends. See normalizeOrigin.
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	for _, o := range allowedOrigins {
-		if o = strings.TrimSpace(o); o != "" {
+		if o = normalizeOrigin(o); o != "" {
 			allowed[o] = struct{}{}
 		}
 	}
@@ -62,21 +68,25 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		// No-op fast path: with nothing configured, return next untouched so the
 		// same-origin deployment carries zero CORS behavior (no headers, no preflight
-		// short-circuit).
+		// short-circuit, no Vary).
 		if len(allowed) == 0 {
 			return next
 		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// CORS is enabled, so the response depends on the request's Origin even
+			// when we add no grant (absent/disallowed origins still differ from the
+			// allowed one). Advertise that to caches unconditionally, BEFORE the
+			// origin check, using Add so we don't clobber any Vary set elsewhere.
+			w.Header().Add("Vary", "Origin")
+
 			origin := r.Header.Get("Origin")
 			_, ok := allowed[origin]
 
 			// Only a recognized origin earns a CORS grant. An absent or unlisted
-			// origin gets no headers; the request still flows to next.
+			// origin gets no Allow-Origin/credentials headers; the request still
+			// flows to next (with Vary already added above).
 			if origin != "" && ok {
-				// Vary: Origin even on the actual request so caches do not serve one
-				// origin's allow header to another.
-				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 
@@ -96,6 +106,18 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// normalizeOrigin canonicalizes a CONFIGURED origin so it matches the canonical
+// Origin browsers actually send (lowercase scheme+host, no trailing slash). It trims
+// surrounding space, strips a trailing slash, and lowercases. Normalizing the config
+// side (not the incoming Origin) is what prevents operator-typo mismatches like
+// "https://App.Example.com/" failing to match "https://app.example.com". A blank or
+// all-space input normalizes to "" so callers can drop it from the allow-list.
+func normalizeOrigin(o string) string {
+	o = strings.TrimSpace(o)
+	o = strings.TrimRight(o, "/")
+	return strings.ToLower(o)
 }
 
 // parseCORSOrigins splits a comma-separated origins string (the CORS_ALLOWED_ORIGINS
