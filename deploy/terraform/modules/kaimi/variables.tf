@@ -24,6 +24,44 @@ variable "region" {
   default     = "us-east4"
 }
 
+# --- Shared-project name prefix ----------------------------------------------
+#
+# By default (empty) every GCP resource uses its original fixed name, so a
+# greenfield deploy into a dedicated project is unchanged. Set name_prefix to
+# deploy this whole stack into a SHARED project (e.g. kaimi-seeker, which already
+# runs the fixed-name hackathon pipeline) WITHOUT colliding: it is prepended to
+# every collision-prone resource NAME (Cloud Run Job/Service, Scheduler job,
+# Artifact Registry repo, GCS buckets, runtime SA, Secret Manager ids) so the two
+# stacks are fully separate and each cleanly destroyable.
+#
+# Charset/length: the prefix must be a DNS-safe label fragment because it flows
+# into GCS bucket names (lowercase letters, digits, hyphens; no leading/trailing
+# hyphen) AND into the 30-char service-account account_id ("kaimi-runtime" is 13
+# chars, so the prefix + a hyphen must leave room — capped at 16 chars below).
+
+variable "name_prefix" {
+  description = "Optional name prefix so the stack can coexist in a SHARED GCP project without name collisions (e.g. \"bm\"). Empty (default) = greenfield: every resource keeps its original fixed name. When set it is prepended to every collision-prone resource name (Cloud Run Job/Service, Scheduler, Artifact Registry repo, GCS buckets, runtime SA, Secret Manager ids). Must be lowercase/DNS-safe: start with a letter, then lowercase letters/digits/hyphens, no trailing hyphen, <=16 chars (keeps the runtime SA account_id within GCP's 30-char limit and bucket names DNS-safe)."
+  type        = string
+  default     = ""
+
+  validation {
+    # Empty is allowed (greenfield). Otherwise enforce a DNS-safe label fragment:
+    # start with a lowercase letter, then lowercase letters/digits/hyphens, end
+    # with a letter or digit (no trailing hyphen). This keeps GCS bucket names and
+    # the SA account_id valid once the prefix is composed with the fixed suffixes.
+    condition     = var.name_prefix == "" || can(regex("^[a-z]([a-z0-9-]*[a-z0-9])?$", var.name_prefix))
+    error_message = "name_prefix must be empty or a DNS-safe fragment: lowercase, start with a letter, contain only lowercase letters/digits/hyphens, and not end with a hyphen."
+  }
+
+  validation {
+    # account_id (runtime SA) max is 30 chars. The longest composed name is
+    # "${name_prefix}-kaimi-runtime" = len(name_prefix) + 14. Cap name_prefix at 16
+    # so the SA id stays <= 30 chars.
+    condition     = length(var.name_prefix) <= 16
+    error_message = "name_prefix must be 16 characters or fewer so the runtime service account account_id (\"${var.name_prefix}-kaimi-runtime\") stays within GCP's 30-char limit."
+  }
+}
+
 # --- Tenant identity ---------------------------------------------------------
 
 variable "tenant_id" {

@@ -11,7 +11,12 @@
 #   $env:PROJECT='acme-kaimi-prod'; .\resume.ps1
 #
 # Defaults: Region=us-east4, Job=kaimi-pipeline-schedule (matches the module's
-# scheduler_job_name). Project is required (param or $env:PROJECT).
+# scheduler_job_name with an EMPTY name_prefix). Project is required (param or
+# $env:PROJECT).
+#
+# Shared-project deploys: if you set Terraform's name_prefix (to coexist in a
+# shared project, e.g. "bm"), the scheduler job is "<prefix>-kaimi-pipeline-schedule"
+# — pass it explicitly, e.g. -Job bm-kaimi-pipeline-schedule.
 #
 # Idempotent: resuming an already-enabled job is a no-op that still succeeds.
 

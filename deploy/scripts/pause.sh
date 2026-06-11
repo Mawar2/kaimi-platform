@@ -14,7 +14,12 @@
 #   ./pause.sh --project acme-kaimi-prod --region us-east4 [--job kaimi-pipeline-schedule]
 #
 # Args override env. Defaults: REGION=us-east4, JOB=kaimi-pipeline-schedule
-# (matches the module's scheduler_job_name). PROJECT is required.
+# (matches the module's scheduler_job_name with an EMPTY name_prefix). PROJECT is
+# required.
+#
+# Shared-project deploys: if you set Terraform's name_prefix (to coexist in a
+# shared project, e.g. "bm"), the scheduler job is "<prefix>-kaimi-pipeline-schedule"
+# — pass it explicitly, e.g. --job bm-kaimi-pipeline-schedule.
 #
 # Idempotent: pausing an already-paused job is a no-op that still exits 0.
 
