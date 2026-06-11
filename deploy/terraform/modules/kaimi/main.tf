@@ -116,8 +116,27 @@ resource "google_artifact_registry_repository" "kaimi" {
 #    on the solicitations bucket; we harden both — strictly safer). The runtime
 #    SA gets objectAdmin scoped to each bucket (setup-gcp.sh:222,274), not the
 #    project-wide grant.
+#
+#    DESTROY PROTECTION (cost control): these buckets hold the historical
+#    opportunity queue and downloaded solicitations — the data a customer would
+#    NOT want a `terraform destroy` to silently delete. Terraform's
+#    `lifecycle.prevent_destroy` only accepts a literal (it cannot read a
+#    variable), so the protection is expressed as two mutually-exclusive copies
+#    of each bucket gated by `count` on var.protect_buckets:
+#      - protect_buckets=true  (default) → the *_protected resource exists with
+#        prevent_destroy=true; `terraform destroy` REFUSES to run, guarding data.
+#      - protect_buckets=false           → the *_unprotected resource exists and
+#        can be destroyed for a genuine, intentional teardown.
+#    Downstream references go through locals.queue_bucket_name /
+#    locals.solicitations_bucket_name so the rest of the module is unaffected by
+#    which copy is active. Flipping the flag moves the resource between the two
+#    addresses; because the bucket *name* is identical, switching the default-on
+#    protection on an EXISTING deployment is a no-op for the live bucket (see
+#    README "Cost control"). New deployments are protected out of the box.
 # -----------------------------------------------------------------------------
-resource "google_storage_bucket" "queue" {
+resource "google_storage_bucket" "queue_protected" {
+  count = var.protect_buckets ? 1 : 0
+
   project                     = var.project_id
   name                        = local.queue_bucket
   location                    = var.region
@@ -125,28 +144,79 @@ resource "google_storage_bucket" "queue" {
   public_access_prevention    = "enforced"
   labels                      = var.labels
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   depends_on = [google_project_service.required]
 }
 
-resource "google_storage_bucket" "solicitations" {
+resource "google_storage_bucket" "queue_unprotected" {
+  count = var.protect_buckets ? 0 : 1
+
   project                     = var.project_id
-  name                        = local.solicitations_bucket
+  name                        = local.queue_bucket
   location                    = var.region
-  uniform_bucket_level_access = true # setup-gcp.sh:271
-  public_access_prevention    = "enforced" # setup-gcp.sh:271 --public-access-prevention
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   labels                      = var.labels
 
   depends_on = [google_project_service.required]
 }
 
+resource "google_storage_bucket" "solicitations_protected" {
+  count = var.protect_buckets ? 1 : 0
+
+  project                     = var.project_id
+  name                        = local.solicitations_bucket
+  location                    = var.region
+  uniform_bucket_level_access = true        # setup-gcp.sh:271
+  public_access_prevention    = "enforced"  # setup-gcp.sh:271 --public-access-prevention
+  labels                      = var.labels
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_storage_bucket" "solicitations_unprotected" {
+  count = var.protect_buckets ? 0 : 1
+
+  project                     = var.project_id
+  name                        = local.solicitations_bucket
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  labels                      = var.labels
+
+  depends_on = [google_project_service.required]
+}
+
+# Resolve the active bucket (protected or unprotected copy) once so the rest of
+# the module references a single name regardless of the protect_buckets flag.
+locals {
+  queue_bucket_name = (
+    var.protect_buckets
+    ? google_storage_bucket.queue_protected[0].name
+    : google_storage_bucket.queue_unprotected[0].name
+  )
+  solicitations_bucket_name = (
+    var.protect_buckets
+    ? google_storage_bucket.solicitations_protected[0].name
+    : google_storage_bucket.solicitations_unprotected[0].name
+  )
+}
+
 resource "google_storage_bucket_iam_member" "queue_object_admin" {
-  bucket = google_storage_bucket.queue.name
+  bucket = local.queue_bucket_name
   role   = "roles/storage.objectAdmin" # setup-gcp.sh:224
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
 
 resource "google_storage_bucket_iam_member" "solicitations_object_admin" {
-  bucket = google_storage_bucket.solicitations.name
+  bucket = local.solicitations_bucket_name
   role   = "roles/storage.objectAdmin" # setup-gcp.sh:276
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
@@ -286,7 +356,7 @@ resource "google_cloud_run_v2_job" "pipeline" {
         }
         env {
           name  = "GCS_SOLICITATIONS_BUCKET"
-          value = google_storage_bucket.solicitations.name
+          value = local.solicitations_bucket_name
         }
 
         # SAM_API_KEY sourced from Secret Manager, not an inline value
@@ -312,7 +382,7 @@ resource "google_cloud_run_v2_job" "pipeline" {
       volumes {
         name = "store"
         gcs {
-          bucket    = google_storage_bucket.queue.name
+          bucket    = local.queue_bucket_name
           read_only = false
         }
       }
@@ -359,12 +429,21 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account = google_service_account.runtime.email
 
+    # Cost control: scale to zero between requests so there is no always-on
+    # instance billing when the API is idle. min_instance_count=0 means Cloud
+    # Run keeps zero warm instances (accepting a cold start) rather than paying
+    # for a pinned instance. max keeps a small ceiling for a single-tenant API.
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 4
+    }
+
     # Mount the same queue bucket so the API and the pipeline Job share one JSON
     # store (the API reads the opportunity queue the pipeline writes).
     volumes {
       name = "store"
       gcs {
-        bucket    = google_storage_bucket.queue.name
+        bucket    = local.queue_bucket_name
         read_only = false
       }
     }
@@ -557,6 +636,11 @@ resource "google_cloud_scheduler_job" "pipeline_schedule" {
   name      = local.scheduler_job_name
   schedule  = var.schedule_cron      # setup-gcp.sh:252 "0 7,12,17 * * *"
   time_zone = var.schedule_time_zone # setup-gcp.sh:252 America/New_York
+
+  # Cost control: when active=false the scheduler is PAUSED, so the 3x/day
+  # pipeline never fires and the recurring Gemini/Vertex + SAM.gov spend stops.
+  # All data and infra stay in place; flip active=true to resume in seconds.
+  paused = !var.active
 
   http_target {
     http_method = "POST" # setup-gcp.sh:254

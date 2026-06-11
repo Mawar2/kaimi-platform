@@ -72,6 +72,35 @@ variable "finalreview_model" {
   default     = "gemini-2.5-pro"
 }
 
+# --- Cost control: active / paused -------------------------------------------
+#
+# Kaimi's recurring spend is the Cloud Scheduler firing the pipeline (Gemini /
+# Vertex + SAM.gov calls) on schedule_cron; the Cloud Run Job and Service both
+# scale to zero between runs. Setting active=false PAUSES the scheduler so no
+# pipeline runs fire — stopping the recurring Gemini/SAM cost — while leaving all
+# data and infrastructure in place. Flip it back to true to resume in seconds.
+# This is the cheap-to-idle, trivially-pausable knob (no data loss, no destroy).
+
+variable "active" {
+  description = "When true (default), the pipeline runs on schedule_cron. Set false to PAUSE the Cloud Scheduler job (no pipeline runs → no recurring Gemini/SAM spend); the Cloud Run Service/Job stay scaled to zero. Resume instantly with active=true. No data is lost; this is not a destroy."
+  type        = bool
+  default     = true
+}
+
+# --- Cost control: bucket destroy protection ---------------------------------
+#
+# `terraform destroy` deletes the GCS buckets, which hold the historical
+# opportunity queue and downloaded solicitations. By default this module guards
+# the buckets so a destroy does NOT silently nuke that data (Terraform refuses
+# the plan). Operators who genuinely want a full teardown set this false first,
+# then destroy. See README "Cost control / spin up & down".
+
+variable "protect_buckets" {
+  description = "When true (default), the queue and solicitations GCS buckets are protected from `terraform destroy` (lifecycle prevent_destroy) so historical opportunity data is never deleted by accident. Set false ONLY when you intend a full teardown, then run terraform destroy."
+  type        = bool
+  default     = true
+}
+
 # --- Scheduling --------------------------------------------------------------
 
 variable "schedule_cron" {

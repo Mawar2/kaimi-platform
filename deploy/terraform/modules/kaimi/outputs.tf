@@ -36,12 +36,12 @@ output "artifact_registry_repository" {
 
 output "queue_bucket" {
   description = "Name of the GCS bucket holding the JSON opportunity/proposal store (mounted by the pipeline Job and API service)."
-  value       = google_storage_bucket.queue.name
+  value       = local.queue_bucket_name
 }
 
 output "solicitations_bucket" {
   description = "Name of the GCS bucket holding raw + extracted solicitation documents (Zone-2 ingestion)."
-  value       = google_storage_bucket.solicitations.name
+  value       = local.solicitations_bucket_name
 }
 
 output "secret_ids" {

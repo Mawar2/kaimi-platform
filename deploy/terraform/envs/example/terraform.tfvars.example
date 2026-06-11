@@ -75,6 +75,19 @@ api_image      = "us-east4-docker.pkg.dev/acme-kaimi-prod/kaimi/api:latest"
 # Pipeline schedule (default = three runs/day, 07:00/12:00/17:00 ET).
 # schedule_cron = "0 7,12,17 * * *"
 
+# --- Cost control: spin up & down --------------------------------------------
+#
+# active=false PAUSES the scheduler so no pipeline runs fire (stops the recurring
+# Gemini/Vertex + SAM.gov spend). The Cloud Run Service/Job stay scaled to zero,
+# so a paused deployment costs only tiny GCS/registry storage. Resume in seconds
+# with active=true. No data is lost. See README "Cost control / spin up & down".
+# active = true
+
+# protect_buckets=true (default) guards the queue + solicitations buckets from
+# `terraform destroy` so historical opportunity data is never deleted by accident.
+# Set false ONLY when you intend a genuine full teardown, then run destroy.
+# protect_buckets = true
+
 # Resource labels for cost attribution.
 # labels = {
 #   team = "bd"
