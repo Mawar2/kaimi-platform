@@ -117,10 +117,10 @@ resource "google_service_account" "runtime" {
 # -----------------------------------------------------------------------------
 resource "google_project_iam_member" "runtime_roles" {
   for_each = toset([
-    "roles/aiplatform.user",               # setup-gcp.sh:86 (Vertex AI / Gemini)
-    "roles/secretmanager.secretAccessor",  # least-privilege; was admin (setup-gcp.sh:87)
-    "roles/logging.logWriter",             # setup-gcp.sh:88
-    "roles/monitoring.metricWriter",       # setup-gcp.sh:89
+    "roles/aiplatform.user",              # setup-gcp.sh:86 (Vertex AI / Gemini)
+    "roles/secretmanager.secretAccessor", # least-privilege; was admin (setup-gcp.sh:87)
+    "roles/logging.logWriter",            # setup-gcp.sh:88
+    "roles/monitoring.metricWriter",      # setup-gcp.sh:89
   ])
 
   project = var.project_id
@@ -183,8 +183,8 @@ resource "google_storage_bucket" "solicitations" {
   project                     = var.project_id
   name                        = local.solicitations_bucket
   location                    = var.region
-  uniform_bucket_level_access = true        # setup-gcp.sh:271
-  public_access_prevention    = "enforced"  # setup-gcp.sh:271 --public-access-prevention
+  uniform_bucket_level_access = true       # setup-gcp.sh:271
+  public_access_prevention    = "enforced" # setup-gcp.sh:271 --public-access-prevention
   labels                      = var.labels
 
   # Default false: a non-empty bucket cannot be deleted (409 Bucket not empty),
@@ -298,7 +298,7 @@ resource "google_cloud_run_v2_job" "pipeline" {
   template {
     template {
       service_account = google_service_account.runtime.email
-      max_retries     = 1     # setup-gcp.sh:238 --max-retries 1
+      max_retries     = 1 # setup-gcp.sh:238 --max-retries 1
       timeout         = var.pipeline_task_timeout
 
       containers {
