@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/oauth2"
+
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/profile"
@@ -437,6 +439,295 @@ func TestFirstRunLinkAppearsWhenNoProfile(t *testing.T) {
 	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 	if strings.Contains(rec2.Body.String(), "Complete onboarding") {
 		t.Errorf("first-run link should be hidden once a profile is configured")
+	}
+}
+
+// driveStatusOpt wires a fixed DriveStatus for the destination-UI tests.
+func driveStatusOpt(st dashboard.DriveStatus) dashboard.Option {
+	return dashboard.WithDriveStatus(func() dashboard.DriveStatus { return st })
+}
+
+// TestOnboardingDriveDestinationDisplay proves the connected Drive step renders the
+// CURRENT destination three ways (WS-C5b): a folder id with an Open-in-Drive link, the
+// "My Drive (root)" label for the "root" sentinel, and the not-set treatment when no
+// target is set.
+func TestOnboardingDriveDestinationDisplay(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		contains []string
+		excludes []string
+	}{
+		{
+			name:   "folder id shows open-in-drive link",
+			target: "folder-abc123",
+			contains: []string{
+				"folder-abc123",
+				"https://drive.google.com/drive/folders/folder-abc123",
+				"Open in Drive",
+			},
+		},
+		{
+			name:     "root shows my drive label",
+			target:   "root",
+			contains: []string{"My Drive (root)"},
+			excludes: []string{"https://drive.google.com/drive/folders/"},
+		},
+		{
+			name:     "unset shows not-set treatment",
+			target:   "",
+			contains: []string{"Not set yet"},
+			excludes: []string{"https://drive.google.com/drive/folders/"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newOnboardingHandler(t,
+				dashboard.WithProfileStore(&memProfileStore{}),
+				driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: true, Target: tt.target}))
+
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+			body := rec.Body.String()
+			for _, want := range tt.contains {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q; got %q", want, body)
+				}
+			}
+			for _, no := range tt.excludes {
+				if strings.Contains(body, no) {
+					t.Errorf("body unexpectedly contains %q", no)
+				}
+			}
+		})
+	}
+}
+
+// TestOnboardingDriveChangeControlGating proves the change-destination form appears
+// only when a target saver is wired AND the Drive is connected. Without a saver, or
+// when not connected, the control is hidden (read-only display only).
+func TestOnboardingDriveChangeControlGating(t *testing.T) {
+	const marker = `action="/onboarding/drive/target"`
+
+	// Connected + saver wired → control present.
+	h := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: true, Target: "root"}),
+		dashboard.WithDriveTargetSaver(func(string) error { return nil }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	if !strings.Contains(rec.Body.String(), marker) {
+		t.Errorf("change-destination form missing when connected + saver wired")
+	}
+
+	// Connected but NO saver → control hidden.
+	h2 := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: true, Target: "root"}))
+	rec2 := httptest.NewRecorder()
+	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	if strings.Contains(rec2.Body.String(), marker) {
+		t.Errorf("change-destination form should be hidden without a saver")
+	}
+
+	// Saver wired but NOT connected → control hidden.
+	h3 := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: false}),
+		dashboard.WithDriveTargetSaver(func(string) error { return nil }))
+	rec3 := httptest.NewRecorder()
+	h3.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	if strings.Contains(rec3.Body.String(), marker) {
+		t.Errorf("change-destination form should be hidden when not connected")
+	}
+}
+
+// driveSaverFunc captures the last id saved so tests can assert what the SSR form
+// persisted via the (single) drivetoken write path the JSON PUT also uses.
+type driveSaverFunc struct {
+	saved string
+	calls int
+}
+
+func (d *driveSaverFunc) save(id string) error {
+	d.saved = id
+	d.calls++
+	return nil
+}
+
+// postDriveTarget drives a POST /onboarding/drive/target with the given form fields
+// against a handler wired with the given options. choice/folderID populate the radio
+// and folder-id fields; csrf sets the token (omitted when "").
+func postDriveTarget(t *testing.T, choice, folderID, csrf string, opts ...dashboard.Option) *httptest.ResponseRecorder {
+	t.Helper()
+	h := newOnboardingHandler(t, opts...)
+	form := url.Values{}
+	if choice != "" {
+		form.Set("drive_choice", choice)
+	}
+	if folderID != "" {
+		form.Set("drive_id", folderID)
+	}
+	if csrf != "" {
+		form.Set("csrf_token", csrf)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/onboarding/drive/target", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestOnboardingDriveTargetSaveFolder proves posting a folder id (authenticated +
+// matching CSRF) persists the trimmed id via the saver and PRG-redirects.
+func TestOnboardingDriveTargetSaveFolder(t *testing.T) {
+	const token = "drive-csrf"
+	saver := &driveSaverFunc{}
+	rec := postDriveTarget(t, "folder", "  folder-xyz  ", token,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithDriveTargetSaver(saver.save))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 (PRG); body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "drive_saved=1") {
+		t.Errorf("Location = %q, want PRG redirect with drive_saved=1", loc)
+	}
+	if saver.saved != "folder-xyz" {
+		t.Errorf("saved id = %q, want trimmed folder-xyz", saver.saved)
+	}
+}
+
+// TestOnboardingDriveTargetSaveRoot proves choosing "My Drive root" persists the
+// literal "root" sentinel.
+func TestOnboardingDriveTargetSaveRoot(t *testing.T) {
+	const token = "drive-csrf"
+	saver := &driveSaverFunc{}
+	rec := postDriveTarget(t, "root", "", token,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithDriveTargetSaver(saver.save))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if saver.saved != "root" {
+		t.Errorf("saved id = %q, want root", saver.saved)
+	}
+}
+
+// TestOnboardingDriveTargetEmptyFolderRejected proves choosing "folder" with an empty
+// id re-renders with an error (400) and persists nothing.
+func TestOnboardingDriveTargetEmptyFolderRejected(t *testing.T) {
+	const token = "drive-csrf"
+	saver := &driveSaverFunc{}
+	rec := postDriveTarget(t, "folder", "   ", token,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithDriveTargetSaver(saver.save))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if saver.calls != 0 {
+		t.Errorf("saver called %d times on empty folder id, want 0", saver.calls)
+	}
+	if !strings.Contains(rec.Body.String(), "folder id") {
+		t.Errorf("re-render missing the empty-folder error: %q", rec.Body.String())
+	}
+}
+
+// TestOnboardingDriveTargetUnknownChoiceRejected proves a missing/unrecognized
+// drive_choice is rejected (400) and persists nothing, rather than silently
+// defaulting to a destination the operator did not pick.
+func TestOnboardingDriveTargetUnknownChoiceRejected(t *testing.T) {
+	const token = "drive-csrf"
+	for _, choice := range []string{"", "bogus"} {
+		saver := &driveSaverFunc{}
+		rec := postDriveTarget(t, choice, "", token,
+			dashboard.WithProfileStore(&memProfileStore{}),
+			identityOpt("u@example.com", token),
+			dashboard.WithDriveTargetSaver(saver.save))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("choice=%q: status = %d, want 400; body=%s", choice, rec.Code, rec.Body.String())
+		}
+		if saver.calls != 0 {
+			t.Errorf("choice=%q: saver called %d times, want 0", choice, saver.calls)
+		}
+	}
+}
+
+// TestOnboardingDriveTargetCSRFRejected proves the Drive-destination write fails
+// closed on a wrong CSRF token (403) and persists nothing — the same gate the profile
+// write uses.
+func TestOnboardingDriveTargetCSRFRejected(t *testing.T) {
+	saver := &driveSaverFunc{}
+	rec := postDriveTarget(t, "root", "", "wrong",
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", "good-token"),
+		dashboard.WithDriveTargetSaver(saver.save))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if saver.calls != 0 {
+		t.Errorf("saver called %d times on bad CSRF, want 0", saver.calls)
+	}
+}
+
+// TestOnboardingDriveTargetNoSaver503 proves the POST degrades to 503 when no saver is
+// wired (Drive connect disabled), mirroring the JSON API's degradation.
+func TestOnboardingDriveTargetNoSaver503(t *testing.T) {
+	rec := postDriveTarget(t, "root", "", "tok",
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", "tok"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+// TestOnboardingDriveTargetRoundTrip proves a saved folder id (via the real target
+// store) shows as the current destination on a follow-up GET — the live-target read
+// path C5a's auto-created folder also flows through.
+func TestOnboardingDriveTargetRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	targets, err := drivetoken.NewJSONTargetStore(dir)
+	if err != nil {
+		t.Fatalf("target store: %v", err)
+	}
+	tokens, err := drivetoken.NewJSONTokenStore(dir)
+	if err != nil {
+		t.Fatalf("token store: %v", err)
+	}
+	// A connected Drive (token present) is required for the destination block to
+	// render, mirroring a real deployment after the WS-C2 connect handshake.
+	if err := tokens.Save(&oauth2.Token{AccessToken: "a", RefreshToken: "r"}); err != nil {
+		t.Fatalf("save token: %v", err)
+	}
+	// Simulate C5a having auto-created the "Kaimi Proposals" folder.
+	if err := targets.Save(drivetoken.Target{DriveID: "kaimi-proposals-folder"}); err != nil {
+		t.Fatalf("save target: %v", err)
+	}
+
+	h := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		dashboard.WithDriveStatus(dashboard.DriveStatusFromStores(tokens, targets)),
+		dashboard.WithDriveTargetSaver(func(id string) error {
+			return targets.Save(drivetoken.Target{DriveID: id})
+		}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	body := rec.Body.String()
+	if !strings.Contains(body, "kaimi-proposals-folder") {
+		t.Errorf("follow-up GET did not show the C5a auto-created folder as the destination: %q", body)
+	}
+	if !strings.Contains(body, "https://drive.google.com/drive/folders/kaimi-proposals-folder") {
+		t.Errorf("follow-up GET missing the Open-in-Drive link for the saved folder")
 	}
 }
 

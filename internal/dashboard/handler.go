@@ -44,6 +44,14 @@ type Handler struct {
 	identity     IdentityFunc
 	driveStatus  DriveStatusFunc
 
+	// driveTargetSaver persists a new Drive destination chosen on the onboarding page
+	// (WS-C5b). It is the SAME write path the JSON PUT
+	// /api/v1/integrations/drive/target uses — cmd/api wires it to the drivetoken
+	// TargetStore.Save so the SSR form and the JSON API never diverge into two stores.
+	// nil = the change-destination control is hidden (no parallel write path is
+	// invented when Drive connect is not wired). See WithDriveTargetSaver.
+	driveTargetSaver DriveTargetSaver
+
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
 	// cmd/api uses to gate the whole API). It defaults to false so production fails
@@ -125,6 +133,10 @@ func (h *Handler) setupRoutes() {
 	// profile POST is method-guarded so a stray GET 405s instead of falling through.
 	h.mux.HandleFunc("GET /onboarding", h.handleOnboarding)
 	h.mux.HandleFunc("/onboarding/profile", postOnly(h.handleOnboardingProfile))
+	// WS-C5b: change the Drive destination from the onboarding/settings page without
+	// editing files. POST-only and CSRF-gated like the profile write; it persists via
+	// the SAME drivetoken target store the JSON PUT endpoint uses (no parallel store).
+	h.mux.HandleFunc("/onboarding/drive/target", postOnly(h.handleOnboardingDriveTarget))
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
 	h.mux.HandleFunc("/workspace/{id}/approve", postOnly(h.handleAction("approve")))
 	h.mux.HandleFunc("/workspace/{id}/changes", postOnly(h.handleAction("changes")))

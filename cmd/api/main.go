@@ -230,8 +230,19 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("failed to initialize drive target store for onboarding: %w", err)
 		}
-		dashboardOpts = append(dashboardOpts, dashboard.WithDriveStatus(
-			dashboard.DriveStatusFromStores(driveTokenStore, driveTargetStore)))
+		dashboardOpts = append(dashboardOpts,
+			dashboard.WithDriveStatus(
+				dashboard.DriveStatusFromStores(driveTokenStore, driveTargetStore)),
+			// WS-C5b: let the onboarding/settings page change the Drive destination
+			// without editing files. Back it with the SAME target store the JSON PUT
+			// /api/v1/integrations/drive/target writes to, so the two surfaces persist to
+			// one store and never diverge. driveTargetStore.Save rejects an empty id,
+			// mirroring the PUT endpoint; the SSR handler resolves the "My Drive root"
+			// choice to the "root" sentinel before saving.
+			dashboard.WithDriveTargetSaver(
+				func(driveID string) error {
+					return driveTargetStore.Save(drivetoken.Target{DriveID: driveID})
+				}))
 	}
 	dashboardHTML := dashboard.NewHandler(dashboardSvc, dashboardOpts...)
 

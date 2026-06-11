@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 
@@ -69,6 +70,28 @@ type DriveStatus struct {
 // deployment without Drive connect leaves it nil (Configured renders false).
 type DriveStatusFunc func() DriveStatus
 
+// DriveTargetSaver persists a new Drive destination chosen on the onboarding page
+// (WS-C5b). cmd/api backs it with the SAME drivetoken TargetStore.Save the JSON
+// PUT /api/v1/integrations/drive/target uses, so the SSR form and the JSON API
+// write to one store and can never diverge. The dashboard package takes this
+// function (not the drivetoken store type) to avoid importing internal/drivetoken
+// for a single Save call. An empty id is rejected by the store, mirroring the PUT
+// endpoint; the literal "root" sentinel (driveTargetRoot) is a valid value meaning
+// "My Drive root".
+type DriveTargetSaver func(driveID string) error
+
+// driveTargetRoot is the sentinel target value meaning "create Docs at the root of
+// My Drive" rather than inside a specific folder. It is stored verbatim as the
+// drivetoken Target.DriveID and flows straight through to
+// googledocs.Config.DestinationID, which already treats "root" as Drive's reserved
+// root alias. Keeping it a literal (not "") lets an operator deliberately choose the
+// root and have that choice persist, distinct from "no target set yet".
+const driveTargetRoot = "root"
+
+// driveFolderURLPrefix is the Drive web URL a folder id is appended to for the
+// "Open in Drive" link shown next to the current destination.
+const driveFolderURLPrefix = "https://drive.google.com/drive/folders/"
+
 // WithProfileStore wires the WS-C1 runtime profile store so onboarding can pre-fill
 // the company-profile form from a saved profile and persist edits. Without it the
 // onboarding routes answer 503 (mirroring how the JSON API degrades when the store
@@ -85,6 +108,15 @@ func WithIdentity(fn IdentityFunc) Option {
 // WithDriveStatus wires the WS-C2 Drive status reader (see DriveStatusFunc).
 func WithDriveStatus(fn DriveStatusFunc) Option {
 	return func(h *Handler) { h.driveStatus = fn }
+}
+
+// WithDriveTargetSaver wires the WS-C5b Drive destination write path (see
+// DriveTargetSaver). cmd/api passes an adapter over the SAME drivetoken
+// TargetStore.Save the JSON PUT endpoint uses. Without it the onboarding page shows
+// the current destination read-only (no change control) — it never invents a second
+// write path.
+func WithDriveTargetSaver(fn DriveTargetSaver) Option {
+	return func(h *Handler) { h.driveTargetSaver = fn }
 }
 
 // DriveStatusFromStores builds a DriveStatusFunc over the drivetoken stores. It is a
@@ -143,10 +175,48 @@ type OnboardingData struct {
 
 	// Drive.
 	Drive DriveStatus
+	// CanEditDrive reports whether the "change destination" control is shown — true
+	// only when a DriveTargetSaver is wired AND the Drive is connected (no point
+	// choosing a destination before connecting). When false the destination is
+	// displayed read-only.
+	CanEditDrive bool
+	// DriveDest is the human-readable view of the CURRENT destination (WS-C5b),
+	// derived from Drive.Target: a folder with an Open-in-Drive link, "My Drive
+	// (root)", or "not set yet". It is computed once in newOnboardingData so the
+	// template stays declarative.
+	DriveDest driveDestView
 
 	// State flags.
-	Saved   bool   // PRG success banner
-	FormErr string // validation error to re-render
+	Saved      bool   // PRG success banner (company profile)
+	DriveSaved bool   // PRG success banner (Drive destination)
+	FormErr    string // validation error to re-render
+}
+
+// driveDestView is the rendered form of the current Drive destination shown on the
+// onboarding page (WS-C5b). Exactly one of IsFolder / IsRoot is true, or both are
+// false meaning "not set yet". When IsFolder is true, FolderID holds the id and
+// OpenURL the Drive web link.
+type driveDestView struct {
+	IsFolder bool
+	IsRoot   bool
+	FolderID string
+	OpenURL  string
+}
+
+// driveDestination maps a stored target id to its rendered view. An empty id means
+// no destination has been set yet (both flags false); the literal "root" sentinel
+// renders as My Drive root; any other value is treated as a folder id with an
+// Open-in-Drive link. The id is used only to build a URL via url-safe concatenation
+// and is auto-escaped by html/template at render time.
+func driveDestination(target string) driveDestView {
+	switch strings.TrimSpace(target) {
+	case "":
+		return driveDestView{}
+	case driveTargetRoot:
+		return driveDestView{IsRoot: true}
+	default:
+		return driveDestView{IsFolder: true, FolderID: target, OpenURL: driveFolderURLPrefix + target}
+	}
 }
 
 // onboardingContentTmpl is the onboarding checklist page. All dynamic values render
@@ -162,6 +232,9 @@ const onboardingContentTmpl = `{{define "content"}}
 
   {{if .Saved}}
   <div class="ob-banner ob-banner--ok">` + iconCheck + `<span>Company profile saved. Kaimi will use it on the next hunt.</span></div>
+  {{end}}
+  {{if .DriveSaved}}
+  <div class="ob-banner ob-banner--ok">` + iconCheck + `<span>Drive destination updated. New proposal Docs will land there.</span></div>
   {{end}}
   {{if .FormErr}}
   <div class="ob-banner ob-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>
@@ -227,7 +300,31 @@ const onboardingContentTmpl = `{{define "content"}}
       {{if not .Drive.Configured}}
       <p class="ob-note">Customer-Drive connect is not enabled in this deployment. Generated proposal Docs use the default Drive. Ask your administrator to set the Drive OAuth configuration to land Docs in your own Workspace.</p>
       {{else if .Drive.Connected}}
-      <p class="ob-note">Connected. Proposal Docs will be created in {{if .Drive.Target}}Drive <code>{{.Drive.Target}}</code>{{else}}your connected Drive (no target folder set yet){{end}}.</p>
+      <p class="ob-note">Connected. Proposal Docs are created in this destination:</p>
+      <div class="ob-dest">
+        {{if .DriveDest.IsFolder}}
+        <span class="ob-dest-label">Folder <code>{{.DriveDest.FolderID}}</code></span>
+        <a class="ob-dest-open" href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer">` + iconLink + `Open in Drive</a>
+        {{else if .DriveDest.IsRoot}}
+        <span class="ob-dest-label">My Drive (root)</span>
+        {{else}}
+        <span class="ob-dest-label ob-dest-unset">Not set yet — Docs land in your connected Drive&#39;s default location.</span>
+        {{end}}
+      </div>
+      {{if .CanEditDrive}}
+      <form class="ob-form ob-drive-form" method="POST" action="/onboarding/drive/target">
+        {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+        <fieldset class="ob-fs">
+          <legend>Change destination</legend>
+          <label class="ob-chk"><input type="radio" name="drive_choice" value="folder"{{if not .DriveDest.IsRoot}} checked{{end}}> Specific folder</label>
+          <label>Folder id<input name="drive_id" value="{{.DriveDest.FolderID}}" placeholder="Paste a Google Drive folder id"></label>
+          <label class="ob-chk"><input type="radio" name="drive_choice" value="root"{{if .DriveDest.IsRoot}} checked{{end}}> My Drive root</label>
+        </fieldset>
+        <div class="ob-actions">
+          <button class="kbtn kbtn--select" type="submit">` + iconCheck + `Save destination</button>
+        </div>
+      </form>
+      {{end}}
       <p class="ob-note"><a href="` + driveConnectPath + `">Reconnect</a></p>
       {{else}}
       <p class="ob-note">Connect your Google Workspace so generated proposal Docs land in your own Drive.</p>
@@ -280,6 +377,13 @@ const onboardingContentTmpl = `{{define "content"}}
   .ob-fs legend { font:var(--t-small); font-weight:700; padding:0 6px; }
   .ob-chk { flex-direction:row !important; align-items:center; gap:8px; font-weight:500 !important; }
   .ob-actions { margin-top:var(--s-2); }
+  .ob-dest { display:flex; align-items:center; flex-wrap:wrap; gap:var(--s-2); margin:var(--s-2) 0; }
+  .ob-dest-label { font:var(--t-small); }
+  .ob-dest-label code { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); padding:1px 6px; }
+  .ob-dest-unset { color:var(--ink-3); }
+  .ob-dest-open { display:inline-flex; align-items:center; gap:4px; font:var(--t-small); font-weight:600; color:var(--primary,#0b5fff); text-decoration:none; }
+  .ob-dest-open svg { width:15px; height:15px; }
+  .ob-drive-form { margin-top:var(--s-2); }
 </style>
 {{end}}
 `
@@ -299,6 +403,7 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	data := h.newOnboardingData(r)
 	data.Saved = r.URL.Query().Get("saved") == "1"
+	data.DriveSaved = r.URL.Query().Get("drive_saved") == "1"
 
 	// Pre-fill from the saved profile when one exists.
 	if p, err := h.profileStore.Load(); err == nil {
@@ -359,6 +464,77 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, onboardingPath+"?saved=1", http.StatusSeeOther)
 }
 
+// handleOnboardingDriveTarget serves POST /onboarding/drive/target (WS-C5b): the
+// SSR form that lets an operator change the Drive destination — choose "My Drive
+// root" or paste a folder id — without editing files. It deliberately reuses the
+// EXISTING write path: cmd/api backs h.driveTargetSaver with the SAME drivetoken
+// TargetStore.Save the JSON PUT /api/v1/integrations/drive/target uses, so the two
+// surfaces never write to different stores.
+//
+// It is an SSR form post (not a JS fetch to the JSON PUT) so it matches the rest of
+// the onboarding page exactly: form-encoded body, the shared fail-closed auth + CSRF
+// gate (authorizeMutation), and the post/redirect/get pattern. Like the profile
+// write it FAILS CLOSED on auth and mutates NOTHING until the gate passes.
+//
+// The form sends two fields:
+//   - drive_choice = "root" → persist the literal driveTargetRoot sentinel.
+//   - drive_choice = "folder" → persist the trimmed drive_id; an empty id is rejected
+//     (re-render with an error), mirroring the PUT endpoint's "drive_id is required".
+func (h *Handler) handleOnboardingDriveTarget(w http.ResponseWriter, r *http.Request) {
+	if h.driveTargetSaver == nil {
+		// No write path wired (Drive connect disabled): the change control is not
+		// shown, so a POST here is unsupported. Mirror the JSON API's 503 degradation.
+		http.Error(w, "drive destination changes are not available in this deployment", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	// Fail-closed auth + CSRF gate (the same one the profile write uses). NOTHING is
+	// mutated until this passes.
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+
+	// Resolve the chosen destination from the radio choice. The choice must be
+	// EXACTLY "folder" or "root"; a missing/unrecognized value is rejected rather
+	// than silently defaulting to a destination the operator did not pick.
+	var target string
+	switch r.PostFormValue("drive_choice") {
+	case "root":
+		target = driveTargetRoot
+	case "folder":
+		target = strings.TrimSpace(r.PostFormValue("drive_id"))
+		if target == "" {
+			// Re-render the page with the error; persist nothing. Mirrors the profile
+			// write's invalid-input re-render (400 + form error banner).
+			data := h.newOnboardingData(r)
+			data.FormErr = "Enter a Google Drive folder id, or choose My Drive root."
+			w.WriteHeader(http.StatusBadRequest)
+			h.renderOnboarding(w, &data)
+			return
+		}
+	default:
+		// Unrecognized or missing choice: reject; persist nothing.
+		data := h.newOnboardingData(r)
+		data.FormErr = "Choose a destination: a specific folder or My Drive root."
+		w.WriteHeader(http.StatusBadRequest)
+		h.renderOnboarding(w, &data)
+		return
+	}
+
+	if err := h.driveTargetSaver(target); err != nil {
+		log.Printf("dashboard: onboarding drive target save failed: %v", err)
+		http.Error(w, "failed to save drive destination", http.StatusInternalServerError)
+		return
+	}
+
+	// PRG: redirect so a refresh does not re-POST.
+	http.Redirect(w, r, onboardingPath+"?drive_saved=1", http.StatusSeeOther)
+}
+
 // authorizeMutation is the fail-closed auth + CSRF gate every state-mutating
 // onboarding POST must pass before it touches the store. It writes the rejection
 // response itself and returns false on denial; callers must NOT mutate when it
@@ -414,6 +590,10 @@ func (h *Handler) newOnboardingData(r *http.Request) OnboardingData {
 	if h.driveStatus != nil {
 		data.Drive = h.driveStatus()
 	}
+	data.DriveDest = driveDestination(data.Drive.Target)
+	// The change-destination control needs both a write path (saver wired) and a
+	// connected Drive — there is nothing to target before connecting.
+	data.CanEditDrive = h.driveTargetSaver != nil && data.Drive.Connected
 	return data
 }
 
