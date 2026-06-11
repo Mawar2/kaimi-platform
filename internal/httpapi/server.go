@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
-	"github.com/Mawar2/Kaimi/internal/proposal"
 )
 
 // serviceName identifies this binary in health and (later) log output.
@@ -21,15 +20,12 @@ type Deps struct {
 	Dashboard *dashboard.Service
 
 	// Proposals is the Zone-2 action service the select/gate endpoints (WS-B3)
-	// drive. It may be nil for a read-only API deployment, in which case the
-	// action/status endpoints answer 503 Service Unavailable.
-	Proposals *proposal.Service
-
-	// proposalsOverride lets tests inject a fake proposal service (any value
-	// satisfying the unexported proposalService interface). It is unexported so it
-	// is never set in production wiring; when set it takes precedence over
-	// Proposals. See Server.proposals.
-	proposalsOverride proposalService
+	// drive. It is the ProposalService interface (not the concrete
+	// *proposal.Service) so production wiring injects the real service while tests
+	// inject a fake — "accept interfaces, return structs." It may be nil for a
+	// read-only API deployment, in which case the action/status endpoints answer
+	// 503 Service Unavailable.
+	Proposals ProposalService
 }
 
 // Server is the JSON API's HTTP application. It holds its dependencies and builds

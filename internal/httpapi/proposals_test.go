@@ -16,7 +16,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/store"
 )
 
-// fakeProposals is a hand-written double for the proposalService interface so the
+// fakeProposals is a hand-written double for the ProposalService interface so the
 // handler tests stay fast and deterministic (no agents, no background work). It
 // records calls and returns scripted results, letting each test drive the exact
 // Select/Document outcome the handler must translate.
@@ -60,7 +60,7 @@ func (f *fakeProposals) Document(oppID string) (*document.Document, error) {
 // seedProposalServer builds a Server with a real JSON store (so the opportunity
 // existence checks exercise store.ErrNotFound exactly as B2 does) plus an injected
 // fake proposal service. A nil fp yields a read-only API (Deps.Proposals nil path).
-func seedProposalServer(t *testing.T, fp proposalService) http.Handler {
+func seedProposalServer(t *testing.T, fp ProposalService) http.Handler {
 	t.Helper()
 	ctx := context.Background()
 	s, err := store.NewJSONStore(t.TempDir())
@@ -81,7 +81,7 @@ func seedProposalServer(t *testing.T, fp proposalService) http.Handler {
 	if f, ok := fp.(*fakeProposals); ok {
 		f.store = s
 	}
-	srv := New(Deps{Dashboard: dashboard.NewService(s), proposalsOverride: fp})
+	srv := New(Deps{Dashboard: dashboard.NewService(s), Proposals: fp})
 	return srv.Routes()
 }
 
@@ -275,7 +275,9 @@ func TestGetProposalNilProposalsReturns503(t *testing.T) {
 }
 
 // TestRealServiceSatisfiesInterface is a compile-time guard that the real
-// *proposal.Service satisfies the small interface the handlers depend on.
+// *proposal.Service satisfies the small interface the handlers depend on. The
+// package-level `var _ ProposalService = (*proposal.Service)(nil)` in proposals.go
+// asserts the same thing; this keeps the assertion visible alongside the suite.
 func TestRealServiceSatisfiesInterface(t *testing.T) {
-	var _ proposalService = (*proposal.Service)(nil)
+	var _ ProposalService = (*proposal.Service)(nil)
 }
