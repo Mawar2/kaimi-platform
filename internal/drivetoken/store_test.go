@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -52,6 +53,61 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if !got.Expiry.Equal(want.Expiry) {
 		t.Errorf("Expiry = %v, want %v", got.Expiry, want.Expiry)
+	}
+}
+
+// TestSaveSurvivesChmodEPERM verifies Save still succeeds and persists a valid,
+// reloadable token when the filesystem rejects chmod with EPERM — the exact failure
+// gcsfuse returns on Cloud Run, where POSIX permission bits are unsupported and
+// bucket IAM is the security boundary. Before the best-effort fix this aborted the
+// write with "failed to store drive connection"; the chmod must now be non-fatal.
+func TestSaveSurvivesChmodEPERM(t *testing.T) {
+	// Inject a chmod that always fails like a gcsfuse mount does, and restore it
+	// after the test so other tests see the real os.Chmod.
+	orig := chmodFile
+	t.Cleanup(func() { chmodFile = orig })
+	chmodFile = func(string, os.FileMode) error {
+		return &os.PathError{Op: "chmod", Path: "drive_token", Err: syscall.EPERM}
+	}
+
+	s, _ := newTestStore(t)
+	want := &oauth2.Token{AccessToken: "access-abc", RefreshToken: "refresh-xyz", TokenType: "Bearer"}
+	if err := s.Save(want); err != nil {
+		t.Fatalf("Save with failing chmod: got error %v, want nil (chmod must be best-effort)", err)
+	}
+
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load after Save with failing chmod: %v", err)
+	}
+	if got.AccessToken != want.AccessToken || got.RefreshToken != want.RefreshToken {
+		t.Errorf("token round-trip mismatch: got %+v, want %+v", got, want)
+	}
+}
+
+// TestTargetSaveSurvivesChmodEPERM verifies the target store, which shares the same
+// best-effort chmod seam, also persists through an EPERM chmod (gcsfuse).
+func TestTargetSaveSurvivesChmodEPERM(t *testing.T) {
+	orig := chmodFile
+	t.Cleanup(func() { chmodFile = orig })
+	chmodFile = func(string, os.FileMode) error {
+		return &os.PathError{Op: "chmod", Path: "drive_target", Err: syscall.EPERM}
+	}
+
+	dir := t.TempDir()
+	ts, err := NewJSONTargetStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONTargetStore: %v", err)
+	}
+	if err := ts.Save(Target{DriveID: "folder-123"}); err != nil {
+		t.Fatalf("target Save with failing chmod: got error %v, want nil", err)
+	}
+	got, err := ts.Load()
+	if err != nil {
+		t.Fatalf("target Load: %v", err)
+	}
+	if got.DriveID != "folder-123" {
+		t.Errorf("DriveID = %q, want %q", got.DriveID, "folder-123")
 	}
 }
 

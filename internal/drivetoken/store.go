@@ -5,12 +5,34 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"golang.org/x/oauth2"
 )
+
+// chmodFile is the seam used by the atomic Save paths to set file permissions. It
+// defaults to os.Chmod and is a package var only so tests can inject a failing
+// chmod (to prove a permission error from the underlying filesystem does NOT abort
+// the write). Production always uses os.Chmod.
+var chmodFile = os.Chmod
+
+// bestEffortChmod attempts to set perm on path and, on failure, logs a warning and
+// returns WITHOUT propagating the error. POSIX permission bits are defense-in-depth
+// here, not the security boundary: os.CreateTemp already opens the temp file at
+// 0o600, and on object-store FUSE mounts (gcsfuse) chmod returns EPERM because the
+// filesystem does not model POSIX modes — there the boundary is bucket IAM (uniform
+// bucket-level access plus a service-account-only objectAdmin binding). Treating
+// that EPERM as fatal would wrongly abort the write on exactly those deployments
+// (the Drive connect "failed to store drive connection" failure on Cloud Run +
+// gcsfuse), so we tighten perms where supported and continue where not.
+func bestEffortChmod(path string, perm fs.FileMode) {
+	if err := chmodFile(path, perm); err != nil {
+		log.Printf("drivetoken: best-effort chmod of %q to %o failed; continuing (on gcsfuse/object-store mounts POSIX modes are unsupported and bucket IAM is the security boundary): %v", path, perm, err)
+	}
+}
 
 // ErrNotConnected is returned by TokenStore.Load when the customer's Drive has not
 // been connected yet (no token persisted). Callers use errors.Is(err,
@@ -151,20 +173,18 @@ func (s *JSONTokenStore) Save(tok *oauth2.Token) error {
 		return fmt.Errorf("close temp drive token file %q: %w", tmpName, err)
 	}
 	// Defense-in-depth: re-assert 0o600 explicitly in case an unusual umask or a
-	// future os.CreateTemp default ever produced a looser mode.
-	if err := os.Chmod(tmpName, tokenFilePerm); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("set temp drive token file permissions %q: %w", tmpName, err)
-	}
+	// future os.CreateTemp default ever produced a looser mode. Best-effort: a chmod
+	// failure (e.g. EPERM on a gcsfuse mount) must NOT abort the write — see
+	// bestEffortChmod.
+	bestEffortChmod(tmpName, tokenFilePerm)
 	if err := os.Rename(tmpName, s.path); err != nil {
 		_ = os.Remove(tmpName) // Best-effort cleanup of the leftover temp file.
 		return fmt.Errorf("rename temp drive token to %q: %w", s.path, err)
 	}
 	// os.Rename preserves the source file's mode, so the destination is already
 	// 0o600. Re-assert it anyway so a token file that predated this code (or was
-	// created with a looser umask before the rename overwrote it) is tightened.
-	if err := os.Chmod(s.path, tokenFilePerm); err != nil {
-		return fmt.Errorf("set drive token file permissions %q: %w", s.path, err)
-	}
+	// created with a looser umask before the rename overwrote it) is tightened —
+	// again best-effort, so it never blocks the write on an object-store mount.
+	bestEffortChmod(s.path, tokenFilePerm)
 	return nil
 }

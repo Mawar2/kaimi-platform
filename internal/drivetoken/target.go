@@ -125,10 +125,10 @@ func (s *JSONTargetStore) Save(t Target) error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("rename temp drive target to %q: %w", s.path, err)
 	}
-	// The target is not a secret; match the profile store's 0o644 (os.CreateTemp
+	// The target is not a secret; widen to the profile store's 0o644 (os.CreateTemp
 	// defaults to 0o600, which the rename carried over to the destination).
-	if err := os.Chmod(s.path, 0o644); err != nil {
-		return fmt.Errorf("set drive target file permissions %q: %w", s.path, err)
-	}
+	// Best-effort: a chmod failure (e.g. EPERM on a gcsfuse mount) must NOT abort the
+	// write — the file is already persisted by the rename above. See bestEffortChmod.
+	bestEffortChmod(s.path, 0o644)
 	return nil
 }
