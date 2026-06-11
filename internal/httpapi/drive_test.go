@@ -110,6 +110,11 @@ func TestCallbackAutoCreatesTargetWhenUnset(t *testing.T) {
 	if got.DriveID != "folder-xyz" {
 		t.Errorf("persisted target = %q, want folder-xyz", got.DriveID)
 	}
+	// The friendly folder name is persisted too (C5d) so the UI shows "Kaimi
+	// Proposals" rather than the opaque id.
+	if got.Name != defaultDriveFolderName {
+		t.Errorf("persisted target name = %q, want %q", got.Name, defaultDriveFolderName)
+	}
 }
 
 // TestCallbackSkipsProvisionWhenTargetAlreadySet verifies idempotency: if a target

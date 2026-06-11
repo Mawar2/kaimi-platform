@@ -63,6 +63,11 @@ type DriveStatus struct {
 	Connected bool
 	// Target is the configured target Drive/folder id, or "" when none is set.
 	Target string
+	// TargetName is the human-readable destination label (e.g. the folder name
+	// "Kaimi Proposals"), or "" when unknown — in which case the UI falls back to
+	// showing the id. It is populated where the name is known (the WS-C5a
+	// auto-created folder); a manually-pasted id has no resolvable name.
+	TargetName string
 }
 
 // DriveStatusFunc reports the current customer-Drive connection state. cmd/api
@@ -132,6 +137,7 @@ func DriveStatusFromStores(tokens drivetoken.TokenStore, targets drivetoken.Targ
 		}
 		if t, err := targets.Load(); err == nil {
 			st.Target = t.DriveID
+			st.TargetName = t.Name
 		}
 		return st
 	}
@@ -193,29 +199,38 @@ type OnboardingData struct {
 }
 
 // driveDestView is the rendered form of the current Drive destination shown on the
-// onboarding page (WS-C5b). Exactly one of IsFolder / IsRoot is true, or both are
-// false meaning "not set yet". When IsFolder is true, FolderID holds the id and
-// OpenURL the Drive web link.
+// onboarding page (WS-C5b/C5d). Exactly one of IsFolder / IsRoot is true, or both
+// are false meaning "not set yet". When IsFolder is true, FolderID holds the id,
+// OpenURL the Drive web link, and Label the text to show — the folder name when
+// known, otherwise the id (so the user sees "Kaimi Proposals", not an opaque id).
 type driveDestView struct {
 	IsFolder bool
 	IsRoot   bool
 	FolderID string
 	OpenURL  string
+	Label    string
 }
 
-// driveDestination maps a stored target id to its rendered view. An empty id means
-// no destination has been set yet (both flags false); the literal "root" sentinel
-// renders as My Drive root; any other value is treated as a folder id with an
-// Open-in-Drive link. The id is used only to build a URL via url-safe concatenation
-// and is auto-escaped by html/template at render time.
-func driveDestination(target string) driveDestView {
-	switch strings.TrimSpace(target) {
+// driveDestination maps a stored target id and (optional) name to its rendered view.
+// An empty id means no destination has been set yet (both flags false); the literal
+// "root" sentinel renders as My Drive root; any other value is a folder id with an
+// Open-in-Drive link. Label is the folder name when known, else the id itself, so a
+// user-facing surface never shows a bare file id when a friendly name exists. The id
+// is used only to build a URL via url-safe concatenation and both id and name are
+// auto-escaped by html/template at render time.
+func driveDestination(target, name string) driveDestView {
+	id := strings.TrimSpace(target)
+	switch id {
 	case "":
 		return driveDestView{}
 	case driveTargetRoot:
 		return driveDestView{IsRoot: true}
 	default:
-		return driveDestView{IsFolder: true, FolderID: target, OpenURL: driveFolderURLPrefix + target}
+		label := strings.TrimSpace(name)
+		if label == "" {
+			label = id
+		}
+		return driveDestView{IsFolder: true, FolderID: id, OpenURL: driveFolderURLPrefix + id, Label: label}
 	}
 }
 
@@ -303,7 +318,7 @@ const onboardingContentTmpl = `{{define "content"}}
       <p class="ob-note">Connected. Proposal Docs are created in this destination:</p>
       <div class="ob-dest">
         {{if .DriveDest.IsFolder}}
-        <span class="ob-dest-label">Folder <code>{{.DriveDest.FolderID}}</code></span>
+        <span class="ob-dest-label">Folder <strong>{{.DriveDest.Label}}</strong></span>
         <a class="ob-dest-open" href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer">` + iconLink + `Open in Drive</a>
         {{else if .DriveDest.IsRoot}}
         <span class="ob-dest-label">My Drive (root)</span>
@@ -590,7 +605,7 @@ func (h *Handler) newOnboardingData(r *http.Request) OnboardingData {
 	if h.driveStatus != nil {
 		data.Drive = h.driveStatus()
 	}
-	data.DriveDest = driveDestination(data.Drive.Target)
+	data.DriveDest = driveDestination(data.Drive.Target, data.Drive.TargetName)
 	// The change-destination control needs both a write path (saver wired) and a
 	// connected Drive — there is nothing to target before connecting.
 	data.CanEditDrive = h.driveTargetSaver != nil && data.Drive.Connected

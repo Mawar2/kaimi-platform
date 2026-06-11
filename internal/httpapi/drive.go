@@ -244,7 +244,7 @@ func (h *DriveHandler) ensureDefaultTarget(ctx context.Context, tok *oauth2.Toke
 		return
 	}
 
-	if err := h.targets.Save(drivetoken.Target{DriveID: folderID}); err != nil {
+	if err := h.targets.Save(drivetoken.Target{DriveID: folderID, Name: defaultDriveFolderName}); err != nil {
 		// Best-effort: the folder exists but we could not persist it as the target.
 		// EnsureFolder will reuse that same folder on a later attempt, so no duplicate.
 		log.Printf("httpapi: drive folder auto-created but persisting it as the target failed; user can set a target later: %v", err)

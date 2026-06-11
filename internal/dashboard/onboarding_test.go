@@ -453,19 +453,33 @@ func driveStatusOpt(st dashboard.DriveStatus) dashboard.Option {
 // target is set.
 func TestOnboardingDriveDestinationDisplay(t *testing.T) {
 	tests := []struct {
-		name     string
-		target   string
-		contains []string
-		excludes []string
+		name       string
+		target     string
+		targetName string
+		contains   []string
+		excludes   []string
 	}{
 		{
-			name:   "folder id shows open-in-drive link",
+			name:   "folder id with no name falls back to showing the id",
 			target: "folder-abc123",
 			contains: []string{
 				"folder-abc123",
 				"https://drive.google.com/drive/folders/folder-abc123",
 				"Open in Drive",
 			},
+		},
+		{
+			name:       "named folder shows the name, not the raw id",
+			target:     "1v0O5Dh6KjKLJRKirBJoVMRC1VNwqIZvE",
+			targetName: "Kaimi Proposals",
+			contains: []string{
+				"Kaimi Proposals",
+				"https://drive.google.com/drive/folders/1v0O5Dh6KjKLJRKirBJoVMRC1VNwqIZvE",
+				"Open in Drive",
+			},
+			// The opaque id must NOT appear as prose text when a friendly name exists
+			// (it remains only inside the Open-in-Drive href, asserted above).
+			excludes: []string{">1v0O5Dh6KjKLJRKirBJoVMRC1VNwqIZvE<"},
 		},
 		{
 			name:     "root shows my drive label",
@@ -485,7 +499,7 @@ func TestOnboardingDriveDestinationDisplay(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newOnboardingHandler(t,
 				dashboard.WithProfileStore(&memProfileStore{}),
-				driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: true, Target: tt.target}))
+				driveStatusOpt(dashboard.DriveStatus{Configured: true, Connected: true, Target: tt.target, TargetName: tt.targetName}))
 
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))

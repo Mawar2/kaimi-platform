@@ -19,6 +19,14 @@ type Target struct {
 	// DriveID is the Shared Drive or folder id new Docs are created in. It maps
 	// directly to googledocs.Config.DestinationID.
 	DriveID string `json:"drive_id"`
+
+	// Name is a human-readable label for the destination (e.g. the folder name
+	// "Kaimi Proposals"), shown in the UI instead of the opaque DriveID. It is
+	// optional and additive: legacy records and manually-pasted folder ids (whose
+	// name the drive.file scope cannot resolve) load with an empty Name, in which
+	// case the UI falls back to showing the id. It is populated where the name is
+	// known — notably the WS-C5a auto-created folder.
+	Name string `json:"name,omitempty"`
 }
 
 // TargetStore persists and retrieves the connected deployment's Drive target.
