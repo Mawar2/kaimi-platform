@@ -89,7 +89,15 @@ func EvaluateWriter(ctx context.Context, d SectionDrafter, cases []WriterCase) (
 			sys = defaultGroundingInstruction
 		}
 
-		draft, err := d.GenerateSection(ctx, sys, c.SectionPrompt)
+		// The system instruction says "use ONLY the facts provided", so the
+		// facts must travel in the prompt itself — without them the model is
+		// asked to ground on nothing and the score is meaningless (issue #254).
+		prompt := c.SectionPrompt
+		if len(c.Facts) > 0 {
+			prompt += "\n\nFacts (the ONLY facts you may use):\n- " + strings.Join(c.Facts, "\n- ")
+		}
+
+		draft, err := d.GenerateSection(ctx, sys, prompt)
 		if err != nil {
 			return nil, fmt.Errorf("eval: drafter failed on case %q: %w", c.Name, err)
 		}

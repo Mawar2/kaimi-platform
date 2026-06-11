@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
@@ -37,13 +38,20 @@ func (m *mockScorer) Score(_ context.Context, opp *opportunity.Opportunity, _ *s
 }
 
 // mockDrafter returns canned section text, satisfying the eval.SectionDrafter
-// consumer interface without any LLM call.
+// consumer interface without any LLM call. It records the last system
+// instruction and prompt it received so tests can assert what the harness
+// actually sends to the model (issue #254).
 type mockDrafter struct {
 	text string
 	err  error
+
+	gotSystem string
+	gotPrompt string
 }
 
-func (m *mockDrafter) GenerateSection(_ context.Context, _, _ string) (string, error) {
+func (m *mockDrafter) GenerateSection(_ context.Context, system, prompt string) (string, error) {
+	m.gotSystem = system
+	m.gotPrompt = prompt
 	if m.err != nil {
 		return "", m.err
 	}
@@ -198,6 +206,32 @@ func TestWriterGroundedness_AllGrounded(t *testing.T) {
 	}
 	if !floatEq(rep.MeanGroundedness, 1.0) {
 		t.Errorf("MeanGroundedness = %v, want 1.0", rep.MeanGroundedness)
+	}
+}
+
+// TestWriterGroundedness_FactsReachTheDrafter: the harness must send the case's
+// Facts to the model inside the prompt — the system instruction says "use ONLY
+// the facts provided", so a prompt without the facts asks the model to ground
+// on nothing and the resulting groundedness score is meaningless (issue #254:
+// a live run had the model reply "you have not provided any facts yet").
+func TestWriterGroundedness_FactsReachTheDrafter(t *testing.T) {
+	c := WriterCase{
+		Name:          "facts-in-prompt",
+		SectionPrompt: "Draft the Technical Approach section.",
+		Facts:         []string{"BlueMeta Technologies", "cloud migration", "FedRAMP"},
+	}
+	md := &mockDrafter{text: "BlueMeta Technologies delivers cloud migration."}
+
+	if _, err := EvaluateWriter(context.Background(), md, []WriterCase{c}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(md.gotPrompt, c.SectionPrompt) {
+		t.Errorf("prompt %q does not contain the section prompt %q", md.gotPrompt, c.SectionPrompt)
+	}
+	for _, fact := range c.Facts {
+		if !strings.Contains(md.gotPrompt, fact) {
+			t.Errorf("prompt %q does not contain fact %q — the model is asked to ground on facts it never receives", md.gotPrompt, fact)
+		}
 	}
 }
 
