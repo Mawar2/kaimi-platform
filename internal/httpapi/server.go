@@ -21,6 +21,16 @@ type Deps struct {
 	// read endpoints (WS-B2) render over.
 	Dashboard *dashboard.Service
 
+	// DashboardHTML is the server-side-rendered web UI (internal/dashboard's
+	// *Handler): the list/detail/proposal HTML pages a human browses. WS-C3a mounts
+	// it on the root mux at "/" as the catch-all for HTML, behind the SAME Workspace
+	// session as the JSON API, so cmd/api is the ONE authed, same-origin web server.
+	// It may be nil for a headless, API-only deployment, in which case no HTML is
+	// served and the "/" catch-all is not registered (the API keeps its JSON-404
+	// behavior). The explicit /api/v1/*, /auth/*, and /healthz patterns always take
+	// precedence over this "/" mount (Go 1.22 ServeMux: more-specific patterns win).
+	DashboardHTML *dashboard.Handler
+
 	// Proposals is the Zone-2 action service the select/gate endpoints (WS-B3)
 	// drive. It is the ProposalService interface (not the concrete
 	// *proposal.Service) so production wiring injects the real service while tests
@@ -183,13 +193,60 @@ func (s *Server) Routes() http.Handler {
 		rootMux.HandleFunc("POST /auth/logout", s.deps.Auth.handleLogout)
 	}
 
-	// Wrap the mux so its built-in plain-text 404/405 responses come back as JSON.
-	// A catch-all "/" route is intentionally NOT used: it would shadow the mux's
-	// per-path 405 dispatch (a method mismatch on a known path would fall through
-	// to "/" and 404 instead of 405). The response shim preserves the mux's own
-	// status codes and only rewrites the body/content type when nothing was
-	// written yet.
+	// Wrap the JSON surface (rootMux) so its built-in plain-text 404/405 responses
+	// come back as JSON. A catch-all "/" route is intentionally NOT used on rootMux:
+	// it would shadow the mux's per-path 405 dispatch (a method mismatch on a known
+	// path would fall through to "/" and 404 instead of 405). The response shim
+	// preserves the mux's own status codes and only rewrites the body/content type
+	// when nothing was written yet.
 	handler := jsonErrorResponder(rootMux)
+
+	// WS-C3a: consolidate the web UI. When a DashboardHTML handler is wired, serve it
+	// at "/" as the catch-all for HTML pages, behind HTML session auth, so cmd/api is
+	// the ONE authed, same-origin web server. The dashboard is mounted on an OUTER mux
+	// that sits OUTSIDE jsonErrorResponder: the dashboard renders its own HTML error
+	// pages (e.g. its 404 for an unknown opportunity), which the JSON envelope shim
+	// must not rewrite. The explicit JSON/probe/auth patterns route to the
+	// JSON-enveloped rootMux; everything else ("/") is HTML.
+	//
+	// Go 1.22's ServeMux gives the explicit prefixes (/api/v1/, /auth/) and exact
+	// paths (/healthz, /auth/login, ...) precedence over the bare "/" pattern, so the
+	// dashboard only handles paths none of them claim. The HTML wrap uses the SAME
+	// session manager (Deps.Auth) as the API, so one cookie authorizes both surfaces.
+	//
+	// The HTML wrap mirrors the /api/v1 fail-closed switch, differing only in how a
+	// missing session is handled: HTML REDIRECTS a human to /auth/login (302) instead
+	// of answering 401 JSON. The three cases:
+	//
+	//   1. Auth configured → wrap with RequireSessionHTML (redirect-on-missing-session).
+	//   2. Auth nil AND AllowInsecureNoAuth → serve open with the same loud warning the
+	//      API path logs (credential-less local/UI dev).
+	//   3. Auth nil AND AllowInsecureNoAuth false → the /api/v1 switch above has already
+	//      panicked, so this branch never serves an unauthenticated UI.
+	if s.deps.DashboardHTML != nil {
+		var htmlHandler http.Handler = s.deps.DashboardHTML
+		switch {
+		case s.deps.Auth != nil:
+			htmlHandler = s.RequireSessionHTML(htmlHandler)
+		case s.deps.AllowInsecureNoAuth:
+			log.Printf("WARNING: Workspace OAuth not configured; the SSR dashboard is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
+			// default: unreachable — the /api/v1 switch panicked when Auth is nil and
+			// the insecure opt-in is absent, so Routes() never reaches here open.
+		}
+
+		outerMux := http.NewServeMux()
+		// JSON-enveloped surface: the explicit prefixes/paths route to the wrapped
+		// rootMux. These patterns are more specific than "/", so the dashboard never
+		// shadows them.
+		outerMux.Handle("/api/v1/", handler)
+		outerMux.Handle("/healthz", handler)
+		if s.deps.Auth != nil {
+			outerMux.Handle("/auth/", handler)
+		}
+		// HTML catch-all.
+		outerMux.Handle("/", htmlHandler)
+		handler = outerMux
+	}
 
 	// CORS is applied at the ROOT level — OUTSIDE jsonErrorResponder's routing — so
 	// it also covers the public /auth and /healthz routes and so an allowed-origin

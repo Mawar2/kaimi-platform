@@ -1,4 +1,12 @@
 // Package main implements the dashboard server for Kaimi.
+//
+// DEPRECATED (WS-C3a): this standalone, UNAUTHENTICATED dashboard binary is
+// superseded by cmd/api, which now serves the SAME internal/dashboard SSR pages
+// behind Google Workspace session auth — one authed, same-origin web server that
+// also exposes the JSON API. Prefer `go run ./cmd/api` (or bin/api) for any deploy
+// or shared environment. This binary is retained only for credential-less, local
+// offline UI development (it has NO auth); do NOT expose it on a network. It is not
+// deleted so the offline dev loop keeps working.
 package main
 
 import (

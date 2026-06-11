@@ -344,6 +344,175 @@ func TestCallbackExchangeFailureBadRequest(t *testing.T) {
 	}
 }
 
+// callbackRequestWithReturn is like callbackRequest but also attaches the return
+// cookie a prior /auth/login would have stashed, so the callback can consume it.
+func callbackRequestWithReturn(state, code, returnPath string) *http.Request {
+	req := callbackRequest(state, code)
+	req.AddCookie(&http.Cookie{Name: returnCookieName, Value: returnPath})
+	return req
+}
+
+// loginReturnCookie returns the return cookie a /auth/login call set, or nil.
+func loginReturnCookie(rec *httptest.ResponseRecorder) *http.Cookie {
+	var found *http.Cookie
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == returnCookieName && ck.MaxAge > 0 {
+			found = ck
+		}
+	}
+	return found
+}
+
+// TestLoginStashesSafeReturnCookie verifies GET /auth/login?return=/proposals stashes
+// the sanitized return path in a hardened (__Host-, HttpOnly, Secure, Lax, Path=/)
+// short-lived cookie so it survives the Google round-trip.
+func TestLoginStashesSafeReturnCookie(t *testing.T) {
+	ah := newTestAuth(t, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/login?return="+url.QueryEscape("/proposals?filter=active"), http.NoBody)
+	rec := httptest.NewRecorder()
+	ah.handleLogin(rec, req)
+
+	ck := loginReturnCookie(rec)
+	if ck == nil {
+		t.Fatal("login did not stash a return cookie for a safe deep link")
+	}
+	if ck.Value != "/proposals?filter=active" {
+		t.Errorf("return cookie value = %q, want %q", ck.Value, "/proposals?filter=active")
+	}
+	if !ck.HttpOnly || !ck.Secure || ck.SameSite != http.SameSiteLaxMode || ck.Path != "/" {
+		t.Errorf("return cookie not hardened: %+v", ck)
+	}
+	if !strings.HasPrefix(ck.Name, "__Host-") {
+		t.Errorf("return cookie name %q missing __Host- prefix", ck.Name)
+	}
+	if ck.MaxAge <= 0 || ck.MaxAge > tempCookieMaxAge {
+		t.Errorf("return cookie MaxAge = %d, want short-lived (0 < n <= %d)", ck.MaxAge, tempCookieMaxAge)
+	}
+}
+
+// TestLoginDoesNotStashUnsafeReturn verifies an open-redirect return at login ENTRY
+// (//evil.com) is NOT stashed — it collapses to "/" which is not worth a cookie.
+func TestLoginDoesNotStashUnsafeReturn(t *testing.T) {
+	for _, bad := range []string{"//evil.com", "https://evil.com", "/"} {
+		ah := newTestAuth(t, nil, nil)
+		req := httptest.NewRequest(http.MethodGet, "/auth/login?return="+url.QueryEscape(bad), http.NoBody)
+		rec := httptest.NewRecorder()
+		ah.handleLogin(rec, req)
+		if ck := loginReturnCookie(rec); ck != nil {
+			t.Errorf("return=%q stashed cookie %q, want none (unsafe/default)", bad, ck.Value)
+		}
+	}
+}
+
+// TestCallbackHonorsSafeReturnCookie verifies the happy path redirects to a safe
+// stashed deep link (query preserved) instead of PostLoginPath.
+func TestCallbackHonorsSafeReturnCookie(t *testing.T) {
+	verify := func(_ context.Context, raw, aud string) (*idtoken.Payload, error) {
+		return fakePayload("example.com", true), nil
+	}
+	ah := newTestAuth(t, okExchange, verify)
+
+	rec := httptest.NewRecorder()
+	ah.handleCallback(rec, callbackRequestWithReturn("the-state", "the-code", "/proposals?filter=active"))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/proposals?filter=active" {
+		t.Errorf("redirect = %q, want the stashed deep link with query preserved", loc)
+	}
+	if sessionCookie(rec) == nil {
+		t.Fatal("happy path with return set no session cookie")
+	}
+	// The return cookie must be cleared on the success path.
+	if clearedTempCookie(rec, returnCookieName) == nil {
+		t.Error("success path did not clear the return cookie")
+	}
+}
+
+// TestCallbackForgedReturnCookieRejected is the critical open-redirect-at-EXIT test:
+// a forged return cookie pointing off-site must be RE-VALIDATED at redirect time and
+// fall back to PostLoginPath, never sending the browser to evil.com.
+func TestCallbackForgedReturnCookieRejected(t *testing.T) {
+	// Note: a raw backslash cannot survive cookie serialization (Go drops it), so the
+	// "/\\evil" form is exercised at the path level by TestSafeReturnPath; here we use
+	// the scheme-relative and absolute forms that a forged cookie could actually carry.
+	for _, evil := range []string{"//evil.com", "https://evil.com/pwn", "//evil.com/path?x=1"} {
+		verify := func(_ context.Context, raw, aud string) (*idtoken.Payload, error) {
+			return fakePayload("example.com", true), nil
+		}
+		ah := newTestAuth(t, okExchange, verify) // PostLoginPath is "/"
+
+		rec := httptest.NewRecorder()
+		ah.handleCallback(rec, callbackRequestWithReturn("the-state", "the-code", evil))
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("callback status = %d, want 302 for return=%q", rec.Code, evil)
+		}
+		if loc := rec.Header().Get("Location"); loc != "/" {
+			t.Errorf("forged return=%q redirected to %q, want / (PostLoginPath) — open redirect!", evil, loc)
+		}
+	}
+}
+
+// TestLoginToCallbackOpenRedirectAtEntry exercises the full login→callback flow with
+// an open-redirect return supplied at the login ENTRY. Because login never stashes an
+// unsafe path, the callback has no return cookie and lands on PostLoginPath — the
+// attacker's //evil.com / https://evil never wins.
+func TestLoginToCallbackOpenRedirectAtEntry(t *testing.T) {
+	for _, evil := range []string{"//evil.com", "https://evil"} {
+		ah := newTestAuth(t, okExchange, func(_ context.Context, _, _ string) (*idtoken.Payload, error) {
+			return fakePayload("example.com", true), nil
+		})
+
+		// Login with the malicious return.
+		loginReq := httptest.NewRequest(http.MethodGet, "/auth/login?return="+url.QueryEscape(evil), http.NoBody)
+		loginRec := httptest.NewRecorder()
+		ah.handleLogin(loginRec, loginReq)
+
+		// Carry whatever cookies login set (state, pkce, and — for an unsafe return —
+		// none) into the callback, alongside the known fake state/pkce values.
+		cb := callbackRequest("the-state", "the-code")
+		for _, ck := range loginRec.Result().Cookies() {
+			if ck.Name == returnCookieName && ck.MaxAge > 0 {
+				cb.AddCookie(&http.Cookie{Name: ck.Name, Value: ck.Value})
+			}
+		}
+		cbRec := httptest.NewRecorder()
+		ah.handleCallback(cbRec, cb)
+
+		if cbRec.Code != http.StatusFound {
+			t.Fatalf("callback status = %d, want 302 for entry return=%q", cbRec.Code, evil)
+		}
+		if loc := cbRec.Header().Get("Location"); loc != "/" {
+			t.Errorf("entry open-redirect return=%q landed on %q, want / (PostLoginPath)", evil, loc)
+		}
+	}
+}
+
+// TestCallbackClearsReturnCookieOnBadState verifies the return cookie is cleared even
+// on an early-return error path (state mismatch), like state/pkce are.
+func TestCallbackClearsReturnCookieOnBadState(t *testing.T) {
+	ah := newTestAuth(t, okExchange, func(_ context.Context, _, _ string) (*idtoken.Payload, error) {
+		return fakePayload("example.com", true), nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=attacker-state&code=c", http.NoBody)
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: "real-state"})
+	req.AddCookie(&http.Cookie{Name: pkceCookieName, Value: "v"})
+	req.AddCookie(&http.Cookie{Name: returnCookieName, Value: "/proposals"})
+	rec := httptest.NewRecorder()
+	ah.handleCallback(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("state-mismatch status = %d, want 400", rec.Code)
+	}
+	if clearedTempCookie(rec, returnCookieName) == nil {
+		t.Error("bad-state path did not clear the return cookie")
+	}
+}
+
 // TestLogoutClearsSession verifies POST /auth/logout clears the session cookie.
 func TestLogoutClearsSession(t *testing.T) {
 	ah := newTestAuth(t, nil, nil)

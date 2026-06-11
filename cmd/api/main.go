@@ -185,8 +185,19 @@ func run() error {
 			"Configure OAUTH_*/SESSION_SECRET for production, or pass -insecure-no-auth (or KAIMI_INSECURE_NO_AUTH=true) for local dev only.")
 	}
 
+	// WS-C3a: build the same SSR dashboard cmd/dashboard renders, over the SAME store
+	// and proposal service, and serve it from this authed server so there is ONE
+	// authed, same-origin web server. The HTML pages render real Store data (no mock);
+	// the post-login redirect default ("/") lands here. WithProposals enables the
+	// Zone-2 surfaces (select/workspace/gate); WithTenantName sets the sidebar label.
+	dashboardSvc := dashboard.NewService(s)
+	dashboardHTML := dashboard.NewHandler(dashboardSvc,
+		dashboard.WithProposals(proposals),
+		dashboard.WithTenantName(cfg.Tenant.DisplayName))
+
 	srv := httpapi.New(httpapi.Deps{
-		Dashboard:           dashboard.NewService(s),
+		Dashboard:           dashboardSvc,
+		DashboardHTML:       dashboardHTML,
 		Proposals:           proposals,
 		ProfileStore:        profileStore,
 		Auth:                auth,

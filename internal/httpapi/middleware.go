@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // This file implements the WS-B5 RequireSession middleware that locks down the
@@ -71,6 +73,132 @@ func (s *Server) RequireSession(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, sess)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// loginPath is where RequireSessionHTML sends an unauthenticated human to sign in.
+// It is the same /auth/login route the WS-B4 OAuth flow registers on the root mux.
+const loginPath = "/auth/login"
+
+// RequireSessionHTML is the WS-C3a HTML variant of RequireSession: it guards the
+// server-side-rendered dashboard so only authenticated Workspace users reach it.
+// It uses the SAME session manager as RequireSession (Deps.Auth.session), so a
+// single signed cookie authorizes both the HTML pages and the /api/v1 API.
+//
+// The ONLY difference from RequireSession is the failure mode. The JSON API answers
+// a missing/invalid session with 401 JSON; an HTML surface instead REDIRECTS the
+// browser (302) to /auth/login so a human is taken to sign in. The redirect carries
+// a sanitized "return" query parameter (the original request path) so login can send
+// the user back where they were headed.
+//
+// SECURITY: the return path is passed through safeReturnPath, which accepts only
+// local, single-slash-rooted relative paths — defeating open-redirect attacks (a
+// crafted //evil.com or http://evil return value collapses to "/"). The redirect
+// deliberately does NOT reveal why auth failed (absent vs. forged vs. expired), and
+// never logs the cookie. On a valid session it injects the verified identity into
+// the request context (reachable via SessionFromContext) and serves the page.
+//
+// Like RequireSession, it is a method on *Server so it closes over the shared
+// session manager, and it is applied ONLY to the HTML "/" mount in Routes(); the
+// public routes (/healthz, /auth/*) and the JSON API keep their own handling.
+func (s *Server) RequireSessionHTML(next http.Handler) http.Handler {
+	// Capture the shared session manager once at wrap time (same source as the API's
+	// RequireSession). Auth is guaranteed non-nil by the Routes() guard, but verify
+	// defensively: with no manager we cannot authenticate, so fail closed by
+	// redirecting to login rather than serving the page.
+	var sm *sessionManager
+	if s.deps.Auth != nil {
+		sm = s.deps.Auth.session
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectToLogin := func() {
+			// Preserve BOTH the path and the raw query so a deep link like
+			// /dashboard?filter=active survives login intact. safeReturnPath validates
+			// the path/host portion and rejects open-redirect forms while allowing a
+			// normal "?key=val" query on an otherwise-local path.
+			target := r.URL.Path
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			dest := loginPath + "?return=" + url.QueryEscape(safeReturnPath(target))
+			http.Redirect(w, r, dest, http.StatusFound)
+		}
+
+		if sm == nil {
+			// Fail closed: no way to authenticate → send the human to sign in.
+			redirectToLogin()
+			return
+		}
+
+		sess, err := sm.ParseSession(r)
+		if err != nil {
+			// Do not leak which check failed and never log the cookie value — only
+			// bounce the browser to login.
+			redirectToLogin()
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), sessionContextKey{}, sess)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// safeReturnPath sanitizes a post-login return path so the login redirect (and the
+// post-login redirect at the moment of use) can never be turned into an open
+// redirect. It returns p only when p is a LOCAL, relative path rooted at a single
+// "/"; anything else (empty, scheme-relative "//host", absolute "http://host",
+// backslash tricks, non-rooted, control chars/whitespace) collapses to "/".
+//
+// A normal query string ("?key=val") on an otherwise-local path is preserved: the
+// guard validates the PATH portion (everything before the first "?") for the
+// dangerous host-escaping forms, then re-attaches the original query/fragment only
+// if the path is safe. This lets deep links like "/dashboard?filter=active" survive
+// login while "//evil.com?x=1" and "https://evil/?x=1" still collapse to "/".
+//
+// The guard is intentionally strict: it requires a leading "/", forbids a second
+// leading "/" or "\" (which browsers may treat as a scheme-relative host), and
+// rejects any value url.Parse reports as having a scheme or host.
+//
+// It is unexported but lives in the httpapi package so both RequireSessionHTML
+// (setting the return param) and the OAuth callback (re-validating it at redirect
+// time, defense-in-depth) reach it.
+func safeReturnPath(p string) string {
+	const safe = "/"
+	if p == "" || p[0] != '/' {
+		// Must be rooted at "/". Empty and relative paths are unsafe.
+		return safe
+	}
+	// Validate the PATH portion only — split off any query/fragment first so a benign
+	// "?key=val" does not cause an otherwise-local path to be rejected. The dangerous
+	// open-redirect forms ("//host", "/\\host", "https://host") all live in the path
+	// portion, so checking it is sufficient.
+	pathOnly := p
+	if i := strings.IndexAny(pathOnly, "?#"); i >= 0 {
+		pathOnly = pathOnly[:i]
+	}
+	// After stripping the query/fragment the path must still be rooted (e.g. "?x=1"
+	// alone, which would leave an empty path, is not a legitimate dashboard route).
+	if pathOnly == "" || pathOnly[0] != '/' {
+		return safe
+	}
+	// Reject scheme-relative ("//host") and the "/\\" backslash variant some browsers
+	// normalize to "//"; both can escape to an external host.
+	if len(pathOnly) > 1 && (pathOnly[1] == '/' || pathOnly[1] == '\\') {
+		return safe
+	}
+	// A well-formed local path must parse with no scheme and no host. This also rejects
+	// values like "/\t//evil" that slip past the prefix checks once normalized.
+	u, err := url.Parse(pathOnly)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return safe
+	}
+	// Defense in depth: a control character or whitespace anywhere in the value is not
+	// a legitimate dashboard route. Check the full p (path + query + fragment) so an
+	// injected newline/space in the query cannot ride along.
+	if strings.ContainsAny(p, " \t\r\n") {
+		return safe
+	}
+	return p
 }
 
 // handleMe serves GET /api/v1/me, returning the authenticated caller's identity

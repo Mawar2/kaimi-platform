@@ -45,6 +45,14 @@ const (
 	stateCookieName = "__Host-kaimi_oauth_state"
 	pkceCookieName  = "__Host-kaimi_oauth_pkce"
 
+	// returnCookieName carries the sanitized post-login return path across the Google
+	// round-trip. It is set at /auth/login (only for a safe, non-"/" deep link),
+	// re-validated and consumed at /auth/callback, and cleared on every callback exit.
+	// It is deliberately NOT folded into the OAuth state so the CSRF state stays a pure
+	// random nonce; the return path is a separate, independently-validated value. Same
+	// __Host- + HttpOnly + Secure + SameSite=Lax hardening as the state/pkce cookies.
+	returnCookieName = "__Host-kaimi_oauth_return"
+
 	// tempCookieMaxAge bounds how long a login may stay in flight (seconds).
 	tempCookieMaxAge = 600 // 10 minutes
 
@@ -142,6 +150,15 @@ func (a *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	setTempCookie(w, stateCookieName, state)
 	setTempCookie(w, pkceCookieName, verifier)
 
+	// Stash the post-login return path (set by RequireSessionHTML) so a deep link
+	// survives the Google round-trip. We sanitize it HERE through safeReturnPath, and
+	// we will re-validate it AGAIN at the callback before redirecting (defense in
+	// depth — the cookie is never trusted blindly). Only a safe, non-"/" path is worth
+	// stashing; "/" is the default the callback falls back to anyway.
+	if rp := safeReturnPath(r.URL.Query().Get("return")); rp != "/" {
+		setTempCookie(w, returnCookieName, rp)
+	}
+
 	// hd constrains the chooser to the Workspace domain; it is a HINT, not a
 	// security control — the callback re-checks hd from the verified ID token.
 	authURL := a.oauth.AuthCodeURL(
@@ -156,12 +173,19 @@ func (a *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleCallback completes the OAuth flow and enforces every security check before
 // minting a session. See the file header for the ordered enforcement steps.
 func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
-	// The temp state/pkce cookies have served their purpose the moment this handler
-	// runs; clear them on EVERY exit path so a half-finished or rejected login never
-	// leaves them lingering. We emit the deletions up front (before any validation or
-	// error response is written) so they ride out with whatever status we return.
+	// The temp state/pkce/return cookies have served their purpose the moment this
+	// handler runs; clear them on EVERY exit path so a half-finished or rejected login
+	// never leaves them lingering. We emit the deletions up front (before any validation
+	// or error response is written) so they ride out with whatever status we return.
+	// We read the return cookie's value BEFORE queuing its deletion so the success path
+	// below can still consume (and re-validate) it.
+	returnPath := ""
+	if rc, err := r.Cookie(returnCookieName); err == nil {
+		returnPath = rc.Value
+	}
 	clearTempCookie(w, stateCookieName)
 	clearTempCookie(w, pkceCookieName)
+	clearTempCookie(w, returnCookieName)
 
 	// Step 1: CSRF — the state param must match the state cookie (constant-time).
 	stateCookie, err := r.Cookie(stateCookieName)
@@ -234,6 +258,12 @@ func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 	dest := a.cfg.PostLoginPath
 	if dest == "" {
 		dest = "/"
+	}
+	// Honor the stashed deep link IF it still passes safeReturnPath at THIS moment
+	// (defense in depth — a forged or tampered return cookie must never redirect
+	// off-site). Only a safe, non-"/" path overrides the default post-login path.
+	if rp := safeReturnPath(returnPath); rp != "/" {
+		dest = rp
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
 }
