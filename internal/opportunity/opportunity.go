@@ -81,8 +81,9 @@ type Opportunity struct {
 	// ReviewedDraft   string           `json:"reviewed_draft,omitempty"`
 
 	// Metadata
-	CreatedAt time.Time `json:"created_at"` // When opportunity was first saved
-	UpdatedAt time.Time `json:"updated_at"` // Last update timestamp
+	TenantID  string    `json:"tenant_id,omitempty"` // owning deployment/org; empty on legacy records
+	CreatedAt time.Time `json:"created_at"`          // When opportunity was first saved
+	UpdatedAt time.Time `json:"updated_at"`          // Last update timestamp
 }
 
 // SolicitationDoc records one solicitation attachment after it has been ingested:

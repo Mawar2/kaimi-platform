@@ -44,6 +44,12 @@ type Zone1Deps struct {
 	// NAICSCodes are the codes to fetch. Defaults to the eligibility profile's
 	// full code list (AllNAICSCodes) when empty.
 	NAICSCodes []string
+
+	// TenantID is the owning deployment/org stamped onto every opportunity this
+	// run persists, making each record self-describing. Empty leaves the field
+	// unset (omitted from JSON), matching legacy records. Sourced from the
+	// pipeline's config (config.Tenant.ID).
+	TenantID string
 }
 
 // Zone1Report summarizes a single Zone-1 run.
@@ -114,6 +120,11 @@ func RunZone1(ctx context.Context, deps *Zone1Deps) (*Zone1Report, error) {
 			continue
 		}
 		report.Eligible++
+
+		// Stamp the owning tenant onto the record before it is scored and
+		// persisted, so every saved opportunity is self-describing. Empty
+		// TenantID leaves the field unset (omitempty), matching legacy records.
+		opp.TenantID = deps.TenantID
 
 		if err := scorer.ScoreAndSave(ctx, deps.Scorer, deps.Store, opp, deps.Profile); err != nil {
 			report.Failed++

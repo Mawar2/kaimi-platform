@@ -2,6 +2,7 @@ package opportunity
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -146,6 +147,67 @@ func TestOpportunity_DocumentsJSONRoundTrip(t *testing.T) {
 	// Attachments must be retained unchanged alongside Documents.
 	if len(decoded.Attachments) != 1 || decoded.Attachments[0] != original.Attachments[0] {
 		t.Errorf("Attachments not preserved: got %v, want %v", decoded.Attachments, original.Attachments)
+	}
+}
+
+// TestOpportunity_TenantIDJSONRoundTrip verifies that the TenantID field
+// survives a JSON marshal/unmarshal when set, and that an empty TenantID is
+// omitted from the encoded JSON (the omitempty tag). The omission is what keeps
+// the field migration-free: legacy records simply never carried the key.
+func TestOpportunity_TenantIDJSONRoundTrip(t *testing.T) {
+	original := Opportunity{
+		ID:       "TEST-123",
+		Title:    "Test Opportunity",
+		TenantID: "bluemeta",
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Failed to marshal Opportunity: %v", err)
+	}
+
+	var decoded Opportunity
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal Opportunity: %v", err)
+	}
+	if decoded.TenantID != original.TenantID {
+		t.Errorf("TenantID mismatch: got %q, want %q", decoded.TenantID, original.TenantID)
+	}
+
+	// An empty TenantID must be omitted from the JSON entirely (omitempty), so
+	// new records with no tenant look identical to existing ones on disk.
+	empty := Opportunity{ID: "TEST-456"}
+	emptyData, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("Failed to marshal Opportunity with empty TenantID: %v", err)
+	}
+	if strings.Contains(string(emptyData), "tenant_id") {
+		t.Errorf("empty TenantID should be omitted from JSON, but got: %s", emptyData)
+	}
+}
+
+// TestOpportunity_LegacyRecordHasNoTenantID verifies that a JSON object with no
+// "tenant_id" key — simulating an existing queue file written before WS-A2 —
+// unmarshals cleanly with TenantID defaulting to the empty string. This proves
+// the new field needs no migration of records already on disk.
+func TestOpportunity_LegacyRecordHasNoTenantID(t *testing.T) {
+	// A minimal legacy record: note the deliberate absence of any tenant_id key.
+	legacy := `{
+		"id": "LEGACY-001",
+		"title": "Pre-WS-A2 Opportunity",
+		"agency": "Department of Test",
+		"naics_code": "541512"
+	}`
+
+	var decoded Opportunity
+	if err := json.Unmarshal([]byte(legacy), &decoded); err != nil {
+		t.Fatalf("legacy record failed to unmarshal: %v", err)
+	}
+	if decoded.ID != "LEGACY-001" {
+		t.Errorf("ID mismatch: got %q, want %q", decoded.ID, "LEGACY-001")
+	}
+	if decoded.TenantID != "" {
+		t.Errorf("legacy record TenantID = %q, want empty string", decoded.TenantID)
 	}
 }
 

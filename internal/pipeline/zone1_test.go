@@ -129,6 +129,71 @@ func TestRunZone1_CachedFullRun_ProducesScoredOpportunities(t *testing.T) {
 	}
 }
 
+func TestRunZone1_StampsTenantIDOnSavedOpportunities(t *testing.T) {
+	st, err := store.NewJSONStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSONStore: %v", err)
+	}
+	const wantTenant = "bluemeta"
+	report, err := RunZone1(context.Background(), &Zone1Deps{
+		Sam:         &mockSam{opps: threeOpps()},
+		Scorer:      scorer.NewDeterministicScorer(),
+		Store:       st,
+		Profile:     testScoringProfile(),
+		Eligibility: testEligibilityProfile(),
+		TenantID:    wantTenant,
+	})
+	if err != nil {
+		t.Fatalf("RunZone1: %v", err)
+	}
+	if report.Scored != 2 {
+		t.Fatalf("Scored = %d, want 2", report.Scored)
+	}
+
+	saved, err := st.List(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(saved) != 2 {
+		t.Fatalf("store holds %d opportunities, want 2", len(saved))
+	}
+	for _, opp := range saved {
+		if opp.TenantID != wantTenant {
+			t.Errorf("opportunity %q TenantID = %q, want %q", opp.ID, opp.TenantID, wantTenant)
+		}
+	}
+}
+
+func TestRunZone1_EmptyTenantIDLeavesFieldEmpty(t *testing.T) {
+	st, err := store.NewJSONStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSONStore: %v", err)
+	}
+	report, err := RunZone1(context.Background(), &Zone1Deps{
+		Sam:         &mockSam{opps: threeOpps()},
+		Scorer:      scorer.NewDeterministicScorer(),
+		Store:       st,
+		Profile:     testScoringProfile(),
+		Eligibility: testEligibilityProfile(),
+		// TenantID intentionally unset.
+	})
+	if err != nil {
+		t.Fatalf("RunZone1: %v", err)
+	}
+	if report.Scored != 2 {
+		t.Fatalf("Scored = %d, want 2", report.Scored)
+	}
+	saved, err := st.List(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	for _, opp := range saved {
+		if opp.TenantID != "" {
+			t.Errorf("opportunity %q TenantID = %q, want empty", opp.ID, opp.TenantID)
+		}
+	}
+}
+
 func TestRunZone1_ScorerError_CountsFailedAndContinues(t *testing.T) {
 	st, err := store.NewJSONStore(t.TempDir())
 	if err != nil {

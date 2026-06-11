@@ -99,6 +99,7 @@ func run() error {
 		Profile:     scoringProfile,
 		Eligibility: eligibilityProfile,
 		NAICSCodes:  cfg.Profile.NAICSCodes,
+		TenantID:    cfg.Tenant.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("zone-1 run failed: %w", err)
