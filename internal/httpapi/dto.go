@@ -12,16 +12,27 @@ import (
 // the health response and the opportunity read shapes (WS-B2); WS-B3 will add the
 // select/action request and response shapes.
 //
-// The DTOs are deliberately distinct from the dashboard view-models
-// (dashboard.OpportunityRow) and the internal opportunity.Opportunity schema:
-// the wire contract is owned here so the HTML dashboard's view-models can change
-// without silently reshaping the JSON API, and so derived fields (percentages,
-// stage strings) are computed once at the edge rather than by every client.
+// The list and detail endpoints own their wire shapes differently, on purpose:
+//
+//   - OpportunityDTO (the LIST row) is the API's owned, flattened wire contract.
+//     It is deliberately decoupled from the dashboard view-model
+//     (dashboard.OpportunityRow) so that view-model can change freely to serve the
+//     HTML dashboard without silently reshaping the JSON list. It carries only
+//     fields actually populated from real OpportunityRow data, plus derived fields
+//     (percentages, stage strings) computed once at the edge. New fields are added
+//     here only once OpportunityRow backs them with real data — emitting zero/false
+//     placeholders for unbacked fields would send clients false signals, and adding
+//     a field later is a non-breaking additive change.
+//   - OpportunityDetailDTO (the DETAIL response) intentionally returns the
+//     canonical opportunity.Opportunity schema (see OpportunityDetailDTO below).
 
 // OpportunityDTO is the flattened list-row shape returned by
-// GET /api/v1/opportunities. It mirrors the fields a dashboard.OpportunityRow
-// carries, with the stage rendered as its string and the score pre-computed as a
-// 0–100 percentage so clients render identically without re-deriving it.
+// GET /api/v1/opportunities. It carries the subset of dashboard.OpportunityRow
+// fields backed by real data, with the stage rendered as its string and the score
+// pre-computed as a 0–100 percentage so clients render identically without
+// re-deriving it. Fields the row does not yet supply (e.g. estimated value,
+// value-vs-effort signal, posted date) are intentionally omitted rather than
+// emitted as zero/false placeholders; the detail endpoint exposes the full record.
 type OpportunityDTO struct {
 	ID               string    `json:"id"`
 	Title            string    `json:"title"`
@@ -31,25 +42,20 @@ type OpportunityDTO struct {
 	Score            float64   `json:"score"`     // raw 0.0–1.0 fit score
 	ScorePct         int       `json:"score_pct"` // score rounded to 0–100
 	Recommendation   string    `json:"recommendation,omitempty"`
-	Stage            string    `json:"stage"` // derived pipeline stage as a string
-	ResponseDeadline time.Time `json:"response_deadline,omitempty"`
-	PostedDate       time.Time `json:"posted_date,omitempty"`
-	DaysSincePosted  int       `json:"days_since_posted"` // whole days from PostedDate to now (0 when unknown)
-	DeadlineSoon     bool      `json:"deadline_soon"`     // deadline within 7 days of now
-	EstimatedValue   float64   `json:"estimated_value,omitempty"`
-	// LowValueHighEffort flags an opportunity whose estimated value does not
-	// justify the response effort — the "value vs effort" signal small BD teams
-	// asked for. It is false until the scorer/manager populates the underlying
-	// signal; the field is part of the wire contract now so clients can render it
-	// without a later breaking change.
-	LowValueHighEffort bool `json:"low_value_high_effort"`
+	Stage            string    `json:"stage"`                      // derived pipeline stage as a string
+	ResponseDeadline time.Time `json:"response_deadline,omitzero"` // omitted (not "0001-01-01...") when unset
+	DeadlineSoon     bool      `json:"deadline_soon"`              // deadline within 7 days of now
 }
 
 // OpportunityDetailDTO is the full-detail shape returned by
-// GET /api/v1/opportunities/{id}. It embeds the complete opportunity.Opportunity
-// (which already carries its own json tags) and adds the two derived fields the
-// detail view needs but the schema does not store: the derived pipeline stage as
-// a string and the score as a 0–100 percentage.
+// GET /api/v1/opportunities/{id}. Unlike the list DTO (which owns a flattened wire
+// shape decoupled from any view-model), the detail endpoint intentionally returns
+// the canonical opportunity.Opportunity schema by embedding it: that schema is the
+// system's deliberately stable, forward-compatible contract (see ARCHITECTURE.md),
+// so returning it directly — rather than re-declaring ~30 fields here — is the
+// correct, low-drift choice for the detail view. On top of the embedded schema it
+// adds the two derived fields the detail view needs but the schema does not store:
+// the derived pipeline stage as a string and the score as a 0–100 percentage.
 type OpportunityDetailDTO struct {
 	*opportunity.Opportunity
 	DerivedStage string `json:"derived_stage"`
@@ -70,11 +76,12 @@ type stageCountsResponse struct {
 }
 
 // toOpportunityDTO flattens a dashboard.OpportunityRow into the wire DTO,
-// computing the derived percentage and days-since-posted at the edge. The row
-// does not carry PostedDate or EstimatedValue, so those derive to their zero
-// values for list responses; the detail endpoint exposes the full record when a
-// client needs them.
-func toOpportunityDTO(row *dashboard.OpportunityRow, now time.Time) OpportunityDTO {
+// computing the derived score percentage at the edge. It maps only the fields the
+// row actually carries; unbacked fields (estimated value, value-vs-effort signal,
+// posted date / days-since-posted) are deliberately not on the list DTO, so the
+// API never emits zero/false placeholders for data the row does not supply. The
+// detail endpoint exposes the full record when a client needs those fields.
+func toOpportunityDTO(row *dashboard.OpportunityRow) OpportunityDTO {
 	return OpportunityDTO{
 		ID:               row.ID,
 		Title:            row.Title,
@@ -86,7 +93,6 @@ func toOpportunityDTO(row *dashboard.OpportunityRow, now time.Time) OpportunityD
 		Recommendation:   row.Recommendation,
 		Stage:            string(row.Stage),
 		ResponseDeadline: row.ResponseDeadline,
-		DaysSincePosted:  daysSince(row.CreatedAt, now),
 		DeadlineSoon:     row.DeadlineSoon,
 	}
 }
@@ -94,15 +100,6 @@ func toOpportunityDTO(row *dashboard.OpportunityRow, now time.Time) OpportunityD
 // scorePct converts a 0.0–1.0 fit score to a rounded 0–100 percentage.
 func scorePct(score float64) int {
 	return int(math.Round(score * 100))
-}
-
-// daysSince returns the whole days elapsed from t to now, or 0 when t is the zero
-// value or in the future, so the field never goes negative on the wire.
-func daysSince(t, now time.Time) int {
-	if t.IsZero() || now.Before(t) {
-		return 0
-	}
-	return int(now.Sub(t).Hours() / 24)
 }
 
 // HealthResponse is the body returned by GET /healthz. It is intentionally small

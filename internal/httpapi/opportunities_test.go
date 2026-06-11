@@ -182,7 +182,7 @@ func TestListFilterByRecommendation(t *testing.T) {
 }
 
 // TestListRowFields confirms a list row carries the flattened, derived fields the
-// DTO promises (score_pct, deadline_soon, estimated_value, stage string).
+// DTO promises (score_pct, deadline_soon, recommendation, stage string).
 func TestListRowFields(t *testing.T) {
 	h, _ := seedTestServer(t)
 
@@ -202,6 +202,45 @@ func TestListRowFields(t *testing.T) {
 	}
 	if soon.Recommendation != "BID" {
 		t.Errorf("recommendation = %q, want BID", soon.Recommendation)
+	}
+}
+
+// TestListZeroDeadlineOmitted confirms the `omitzero` tag actually drops a zero
+// ResponseDeadline from the JSON. With plain `omitempty` a zero time.Time would
+// serialize as "0001-01-01T00:00:00Z" (a struct value is never "empty"), which
+// clients would parse as a real ancient date; `omitzero` removes the key entirely.
+// The unscored "hunted-3" row has no deadline, so its row object must not carry a
+// response_deadline key at all.
+func TestListZeroDeadlineOmitted(t *testing.T) {
+	h, _ := seedTestServer(t)
+
+	rec := doGet(h, "/api/v1/opportunities")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Decode into a generic shape so we can assert on key presence, not just the
+	// zero value a typed decode would silently produce.
+	var envelope struct {
+		Rows []map[string]json.RawMessage `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list body %q: %v", rec.Body.String(), err)
+	}
+
+	var hunted map[string]json.RawMessage
+	for _, row := range envelope.Rows {
+		var id string
+		if err := json.Unmarshal(row["id"], &id); err == nil && id == "hunted-3" {
+			hunted = row
+			break
+		}
+	}
+	if hunted == nil {
+		t.Fatalf("hunted-3 row not found in list response %s", rec.Body.String())
+	}
+	if raw, ok := hunted["response_deadline"]; ok {
+		t.Errorf("response_deadline present for zero deadline (= %s), want key omitted via omitzero", raw)
 	}
 }
 

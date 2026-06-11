@@ -36,7 +36,7 @@ func (s *Server) handleListOpportunities(w http.ResponseWriter, r *http.Request)
 
 	dtos := make([]OpportunityDTO, 0, len(rows))
 	for i := range rows {
-		dtos = append(dtos, toOpportunityDTO(&rows[i], now))
+		dtos = append(dtos, toOpportunityDTO(&rows[i]))
 	}
 	writeJSON(w, http.StatusOK, listResponse{Rows: dtos, Count: len(dtos)})
 }
