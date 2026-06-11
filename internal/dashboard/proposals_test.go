@@ -212,6 +212,30 @@ func TestWorkspaceSurfacesUseDesignTokens(t *testing.T) {
 	}
 }
 
+// TestWorkspaceSidebarShowsCounts proves the workspace page populates the
+// shared sidebar counts (issue #246 B1). The bug: handleWorkspace built
+// shellData with only PageTitle/ActiveNav, so every sidebar badge rendered 0
+// even though /, /opportunity, and /proposals show the real counts. The fix
+// routes every page through one shell-count helper so the sidebar never drifts.
+//
+// Under the self-cleaning queue (#224) selecting the only opportunity moves it
+// out of the queue and to the human gate, so the proof the counts now populate
+// is the Proposals "needs" badge reading 1 (it was a hard 0 before the fix).
+func TestWorkspaceSidebarShowsCounts(t *testing.T) {
+	h, svc, _ := newProposalHandler(t)
+	if rr := postForm(t, h, "/opportunity/zta-1/select", url.Values{}); rr.Code != http.StatusSeeOther {
+		t.Fatalf("select: status %d, want 303", rr.Code)
+	}
+	svc.Wait() // the draft pipeline runs to the human gate
+
+	body := get(t, h, "/workspace/zta-1")
+	// At the gate the proposal awaits human review → the Proposals amber badge
+	// must show 1. Before the fix the workspace shell had no counts at all.
+	if !contains(body, `<span class="needs">1</span>`) {
+		t.Errorf("workspace sidebar should show the needs-review badge (1), got a zeroed nav")
+	}
+}
+
 // TestProposalCardsResetLinkStyling proves the whole-card <a class="pcard">
 // link gets the same text-decoration/color reset the other card and nav links
 // get (issue #207). Without it the proposal cards render as default underlined
@@ -233,6 +257,226 @@ func TestProposalCardsResetLinkStyling(t *testing.T) {
 	// drops the underline (the rule also covers a.orow / a.nav-item).
 	if !contains(body, "a.pcard") {
 		t.Errorf("proposal card link a.pcard must be in the text-decoration/color reset")
+	}
+}
+
+// TestListAndWorkspaceAgreeOnState proves the proposals list and the workspace
+// derive proposal state from the SAME source of truth — the raw ProposalStatus
+// — so they can't contradict each other (issue #246 B2). The bug: the list ran
+// the status through DeriveStage→rowStatus, a lossy round-trip that collapsed
+// outline-running, final-review, and ALL failures into "writer:in_progress", so
+// a proposal that had failed at Outline showed "Tomás drafting now / Agents
+// working" in the list while the workspace correctly showed "Outline hit a
+// problem".
+func TestListAndWorkspaceAgreeOnState(t *testing.T) {
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	now := time.Now()
+	opp := &opportunity.Opportunity{
+		ID: "fail-1", Title: "Failed At Outline", Agency: "GSA",
+		Selected: true, SelectedAt: &now, ProposalStatus: "outline:failed",
+		ResponseDeadline: now.Add(20 * 24 * time.Hour),
+		ScoredAt:         &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := opps.Save(context.Background(), opp); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("docs client: %v", err)
+	}
+	svc := proposal.NewService(&proposal.Deps{
+		Opportunities: opps, Documents: docs,
+		Outline: outline.New(docsClient), Writer: writer.New(), Review: finalreview.New(),
+	})
+	h := dashboard.NewHandler(dashboard.NewService(opps), dashboard.WithProposals(svc))
+	h.Now = func() time.Time { return now }
+
+	list := get(t, h, "/proposals")
+	ws := get(t, h, "/workspace/fail-1")
+
+	// The workspace tells the truth: the outline stage failed.
+	if !contains(ws, "Outline hit a problem") {
+		t.Fatalf("workspace should show the outline failure")
+	}
+	// The list must agree — it must NOT claim the writer is happily working.
+	if contains(list, "Tomás drafting now") || contains(list, "Agents working") {
+		t.Errorf("proposals list contradicts the workspace: shows the writer working for an outline:failed proposal")
+	}
+	// And it should surface the failure under the needs-attention group.
+	if !contains(list, "Needs attention") {
+		t.Errorf("proposals list should surface the outline failure under Needs attention")
+	}
+}
+
+// TestGateActionFeedback proves the gate decisions give the human visible
+// confirmation (issue #246 B4): Request changes / Approve redirect with a flash
+// marker and the workspace renders a confirmation banner, so the action never
+// reads as "nothing happened" (the stub writer's invisible redraft made it look
+// like a no-op).
+func TestGateActionFeedback(t *testing.T) {
+	h, svc, _ := newProposalHandler(t)
+	postForm(t, h, "/opportunity/zta-1/select", url.Values{})
+	svc.Wait() // reaches the gate
+
+	rr := postForm(t, h, "/workspace/zta-1/changes", url.Values{"note": {"Tighten it."}})
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("changes: status %d, want 303", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/workspace/zta-1?flash=changes" {
+		t.Errorf("changes redirect = %q, want /workspace/zta-1?flash=changes", loc)
+	}
+	svc.Wait()
+
+	body := get(t, h, "/workspace/zta-1?flash=changes")
+	if !contains(body, "Sent back to Tom") { // "Sent back to Tomás…"
+		t.Errorf("workspace should show a confirmation banner after request-changes")
+	}
+
+	// Approve also confirms (Vera is reviewing).
+	rr = postForm(t, h, "/workspace/zta-1/approve", url.Values{})
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("approve: status %d, want 303", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/workspace/zta-1?flash=approve" {
+		t.Errorf("approve redirect = %q, want /workspace/zta-1?flash=approve", loc)
+	}
+	svc.Wait() // let the final-review goroutine finish before TempDir cleanup
+}
+
+// TestDraftDownloadArtifact proves the gate surfaces the working draft as a
+// real, downloadable artifact rather than dead "draft.md"/"document.json" labels
+// (issue #246 B3): the workspace links draft.md to a download endpoint that
+// serves the Markdown, and the internal document.json is no longer shown.
+func TestDraftDownloadArtifact(t *testing.T) {
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("docs client: %v", err)
+	}
+	svc := proposal.NewService(&proposal.Deps{
+		Opportunities: opps, Documents: docs,
+		Outline: outline.New(docsClient), Writer: writer.New(), Review: finalreview.New(),
+	})
+	now := time.Now()
+	opp := &opportunity.Opportunity{
+		ID: "dl-1", Title: "Download Opp", Agency: "GSA",
+		Selected: true, SelectedAt: &now, ProposalStatus: proposal.StatusGate,
+		ResponseDeadline: now.Add(20 * 24 * time.Hour), UpdatedAt: now,
+	}
+	if err := opps.Save(context.Background(), opp); err != nil {
+		t.Fatalf("seed opp: %v", err)
+	}
+	doc := &document.Document{
+		OpportunityID: "dl-1", Title: "Download Opp — Technical Volume",
+		Sections: []document.Section{
+			{ID: "approach", Heading: "Technical Approach",
+				Body: "Zero trust rollout details for download.", Status: "drafted"},
+		},
+	}
+	if err := docs.Create(doc, "writer", "draft"); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+
+	h := dashboard.NewHandler(dashboard.NewService(opps), dashboard.WithProposals(svc))
+	h.Now = func() time.Time { return now }
+
+	body := get(t, h, "/workspace/dl-1")
+	if !contains(body, `href="/workspace/dl-1/draft.md"`) {
+		t.Errorf("gate should link draft.md to a real download endpoint")
+	}
+	if contains(body, "document.json") {
+		t.Errorf("the internal document.json must not be surfaced as an artifact")
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/workspace/dl-1/draft.md", http.NoBody))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("draft.md download: status %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Errorf("draft.md content-type = %q, want text/markdown", ct)
+	}
+	if !contains(rr.Body.String(), "Zero trust rollout details for download.") {
+		t.Errorf("draft.md download should contain the drafted section body")
+	}
+}
+
+// TestGateCriteriaMatchesParaphrase renders the gate and proves the criteria
+// grid (issue #246 B6): a must-have the draft addresses in different words shows
+// as met, and a genuinely-absent one reads "could not auto-confirm" rather than
+// falsely asserting it is missing. Seeds a gated proposal directly so the test
+// needs no live agents.
+func TestGateCriteriaMatchesParaphrase(t *testing.T) {
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("docs client: %v", err)
+	}
+	svc := proposal.NewService(&proposal.Deps{
+		Opportunities: opps, Documents: docs,
+		Outline: outline.New(docsClient), Writer: writer.New(), Review: finalreview.New(),
+	})
+	now := time.Now()
+	opp := &opportunity.Opportunity{
+		ID: "crit-1", Title: "Criteria Opp", Agency: "DHS",
+		Selected: true, SelectedAt: &now, ProposalStatus: proposal.StatusGate,
+		Requirements:     []string{"FedRAMP High authorization", "ISO 27001 certification"},
+		ResponseDeadline: now.Add(20 * 24 * time.Hour), UpdatedAt: now,
+	}
+	if err := opps.Save(context.Background(), opp); err != nil {
+		t.Fatalf("seed opp: %v", err)
+	}
+	doc := &document.Document{
+		OpportunityID: "crit-1", Title: "Criteria Opp — Technical Volume",
+		Sections: []document.Section{
+			{ID: "approach", Heading: "Technical Approach",
+				Body:   "We deploy only FedRAMP High authorized tooling across the environment.",
+				Status: "drafted"},
+		},
+	}
+	if err := docs.Create(doc, "writer", "draft"); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+
+	h := dashboard.NewHandler(dashboard.NewService(opps), dashboard.WithProposals(svc))
+	h.Now = func() time.Time { return now }
+	body := get(t, h, "/workspace/crit-1")
+
+	// The paraphrased requirement is recognized as met (at least one ok item).
+	if !contains(body, "citem ok") {
+		t.Errorf("paraphrased must-have should render as met (citem ok)")
+	}
+	// The genuinely-absent requirement is honest: not asserted missing.
+	if !contains(body, "could not auto-confirm") {
+		t.Errorf("an unconfirmed must-have should read 'could not auto-confirm', not assert it is missing")
+	}
+	if contains(body, "Not yet addressed in the draft") {
+		t.Errorf("old false-assertion copy should be gone")
 	}
 }
 

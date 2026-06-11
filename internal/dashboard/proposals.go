@@ -3,12 +3,12 @@ package dashboard
 import (
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
-	"github.com/Mawar2/Kaimi/internal/proposal"
 	"github.com/Mawar2/Kaimi/internal/zone2view"
 )
 
@@ -101,6 +101,25 @@ type WorkspaceData struct {
 	OpenFlags     []document.Flag
 	VersionLabel  string
 	AtGate        bool
+	// Flash is a one-shot confirmation banner shown after a gate action
+	// (issue #246 B4), derived from the ?flash= redirect marker.
+	Flash string
+}
+
+// gateFlashMessage maps a ?flash= redirect marker to the confirmation banner the
+// workspace shows after a gate action, so Request changes / Approve / Submit
+// never read as "nothing happened".
+func gateFlashMessage(flash string) string {
+	switch flash {
+	case "changes":
+		return "Sent back to Tomás — he will revise the draft and return it to you."
+	case "approve":
+		return "Approved — Vera is running the final review on your draft."
+	case "submit":
+		return "Submitted to SAM.gov."
+	default:
+		return ""
+	}
 }
 
 // agentLines are the working-state description sentences from the handoff.
@@ -154,7 +173,9 @@ func (h *Handler) handleProposals(w http.ResponseWriter, r *http.Request) {
 		if row.Stage == StageHunted || row.Stage == StageScored {
 			continue
 		}
-		stageIndex, state := zone2view.View(rowStatus(row))
+		// Derive the card state from the SAME raw status the workspace uses, via
+		// zone2view, so the two views can never disagree (issue #246 B2).
+		stageIndex, state := zone2view.View(row.ProposalStatus)
 		card := PropCard{
 			ID:         row.ID,
 			Title:      row.Title,
@@ -199,23 +220,6 @@ func (h *Handler) handleProposals(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// rowStatus recovers the raw ProposalStatus for a list row via its stage:
-// the list view-model doesn't carry the raw status, so re-read it.
-func rowStatus(row *OpportunityRow) string {
-	switch row.Stage {
-	case StageSubmitted:
-		return proposal.StatusSubmitted
-	case StageFinalized:
-		return proposal.StatusReadyToSubmit
-	case StageAwaitingHumanReview:
-		return proposal.StatusGate
-	case StageSelected:
-		return proposal.StatusOutlineRunning
-	default:
-		return proposal.StatusWriterRunning
-	}
-}
-
 // stageLabelFor renders the mini-pipeline caption.
 func stageLabelFor(stageIndex int, state string) string {
 	switch state {
@@ -256,6 +260,10 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 		AtGate:     state == "human",
 	}
 	data.AgentLine = agentLines[agentKeyFor(stageIndex)]
+	data.Flash = gateFlashMessage(r.URL.Query().Get("flash"))
+	// The sidebar shows the same queue/needs/active counts here as on every
+	// other page (issue #246 B1).
+	h.fillShellCounts(r.Context(), &data.shellData)
 	if opp.Score > 0 {
 		data.ScorePct = int(0.5 + opp.Score*100)
 	}
@@ -343,8 +351,33 @@ func (h *Handler) handleAction(action string) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		http.Redirect(w, r, "/workspace/"+id, http.StatusSeeOther)
+		// Redirect with a flash marker so the workspace confirms the action
+		// (issue #246 B4); action is one of the validated literals above.
+		http.Redirect(w, r, "/workspace/"+id+"?flash="+action, http.StatusSeeOther)
 	}
+}
+
+// handleDraftDownload serves the proposal's working draft as a Markdown file so
+// the workspace's "draft.md" is a real, openable artifact instead of a dead
+// label (issue #246 B3). The internal document.json is intentionally not exposed.
+func (h *Handler) handleDraftDownload(w http.ResponseWriter, r *http.Request) {
+	if h.proposals == nil {
+		http.Error(w, "proposal actions are not enabled on this server", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if !opportunityIDPattern.MatchString(id) {
+		h.renderNotFound(w, id)
+		return
+	}
+	doc, err := h.proposals.Document(id)
+	if err != nil {
+		h.renderNotFound(w, id)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", id+"-draft.md"))
+	_, _ = io.WriteString(w, doc.Markdown())
 }
 
 func (h *Handler) handleSectionSave(w http.ResponseWriter, r *http.Request) {

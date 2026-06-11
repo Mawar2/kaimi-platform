@@ -68,6 +68,11 @@ type OpportunityRow struct {
 	Recommendation string
 	// Stage is the derived pipeline stage.
 	Stage Stage
+	// ProposalStatus is the raw Opportunity.ProposalStatus. It is the single
+	// source of truth for the proposal's exact pipeline position; the command
+	// view derives its card state from this so it can never contradict the
+	// workspace (issue #246 B2). Empty until the opportunity is selected.
+	ProposalStatus string
 	// ResponseDeadline is the proposal due date (zero if not set).
 	ResponseDeadline time.Time
 	// LastUpdated is the last store update timestamp.
@@ -173,6 +178,7 @@ func toRow(opp *opportunity.Opportunity, stage Stage, now time.Time) Opportunity
 		ReasoningSnippet: opp.ScoreReasoning,
 		Recommendation:   opp.Recommendation,
 		Stage:            stage,
+		ProposalStatus:   opp.ProposalStatus,
 		ResponseDeadline: opp.ResponseDeadline,
 		LastUpdated:      opp.UpdatedAt,
 		CreatedAt:        opp.CreatedAt,
