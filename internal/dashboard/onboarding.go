@@ -597,6 +597,9 @@ func (h *Handler) newOnboardingData(r *http.Request) OnboardingData {
 			ActiveNav: "onboarding",
 		},
 	}
+	// Populate the sidebar pipeline counts so the bar matches every other screen
+	// (without this the onboarding page showed all zeros — it never lists the store).
+	h.fillShellCounts(r.Context(), &data.shellData)
 	if ident, ok := h.resolveIdentity(r); ok {
 		data.SignedIn = true
 		data.Email = ident.Email
