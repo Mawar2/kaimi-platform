@@ -76,15 +76,22 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	// single profile via scorer.FromProfile rather than a separate hand-maintained
 	// scorer JSON.
 	//
-	// Resolve the profile at runtime (WS-A6): an existing deployment with a real
-	// profile at the configured path behaves identically; a fresh image with no
-	// real profile grounds the Writer on the generic example template plus an
-	// explicit logged warning. ResolveProfile reports which source was used.
-	// TODO(WS-C): the Store/GCS-backed, onboarding-written profile plugs in inside
-	// profile.ResolveProfile (ahead of the local-file check), not here.
+	// Resolve the profile at runtime (WS-A6 → WS-C1): a tenant-written profile in the
+	// ProfileStore (onboarding via the API, no file edits) takes precedence; otherwise
+	// an existing deployment with a real profile at the configured path behaves
+	// identically; a fresh image with neither grounds the Writer on the generic
+	// example template plus an explicit logged warning. ResolveProfileWithStore
+	// reports which source was used.
 	scorerProfile := &scorer.CapabilityProfile{}
 	if cfg.Profile.WriterPath != "" {
-		companyProfile, profileSource, err := profile.ResolveProfile(cfg.Profile.WriterPath)
+		// The profile store roots at the SAME base path as the document/opportunity
+		// stores so the tenant profile persists alongside them and the API and the
+		// proposal pipeline resolve the identical profile.
+		profileStore, err := profile.NewJSONProfileStore(opts.BasePath)
+		if err != nil {
+			return nil, fmt.Errorf("profile store: %w", err)
+		}
+		companyProfile, profileSource, err := profile.ResolveProfileWithStore(profileStore, cfg.Profile.WriterPath)
 		if err != nil {
 			return nil, fmt.Errorf("load profile: %w", err)
 		}

@@ -34,12 +34,50 @@ const ExampleCompanyName = "Example Federal Co"
 // exist at path" (e.g. a malformed profile, or a missing example template) is
 // returned wrapped.
 //
-// TODO(WS-C): when the onboarding API + Store/GCS-backed profile lands, resolve
-// the active profile from the Store first (real, tenant-written profile), then
-// fall back to a local file at path, and only then to ExampleProfilePath. The
-// example template remains the final no-data fallback; this function is the seam
-// where the Store-backed lookup plugs in ahead of the local-file check.
+// ResolveProfile resolves the active profile from the configured file path only,
+// with the example-template fallback. It is the file-only entry point retained for
+// callers that have no ProfileStore wired (e.g. probes). Production binaries use
+// ResolveProfileWithStore so a tenant-written profile takes precedence; this is
+// exactly ResolveProfileWithStore(nil, path).
 func ResolveProfile(path string) (*CapabilityProfile, string, error) {
+	return ResolveProfileWithStore(nil, path)
+}
+
+// ResolveProfileWithStore resolves the active company profile at runtime, fulfilling
+// the WS-C onboarding seam: a tenant can configure a deployment by writing a profile
+// to the ProfileStore at runtime, with NO file editing.
+//
+// Resolution order (highest precedence first):
+//  1. The ProfileStore (the real, tenant-written profile). If ps is non-nil and a
+//     stored profile exists, it is returned with source "store" and no warning.
+//  2. The configured file at path (the existing-deployment path, config/profile.json).
+//     Returned with source == path and no warning.
+//  3. The generic ExampleProfilePath template, with an explicit logged warning that
+//     onboarding/configuration is required. This is the final no-data fallback.
+//
+// A nil ps (or an empty store) skips step 1 entirely, making the behavior IDENTICAL
+// to the original file-first ResolveProfile — so an existing file-based deployment is
+// unchanged when no stored profile exists. ErrProfileNotFound from the store is the
+// expected "not configured yet" signal and falls through to the file check; any OTHER
+// store error fails loud (a corrupt or unreachable store must not be masked).
+func ResolveProfileWithStore(ps ProfileStore, path string) (*CapabilityProfile, string, error) {
+	// Step 1: consult the ProfileStore first (the WS-A6 TODO seam). A stored,
+	// tenant-written profile wins over the baked-in file and the example template.
+	if ps != nil {
+		stored, err := ps.Load()
+		switch {
+		case err == nil:
+			return stored, "store", nil
+		case errors.Is(err, ErrProfileNotFound):
+			// Not onboarded yet: fall through to the file/example resolution below.
+		default:
+			// A real store failure (corrupt JSON, unreachable backend). Fail loud
+			// rather than silently serving a stale file or the example template.
+			return nil, "", fmt.Errorf("failed to load profile from store: %w", err)
+		}
+	}
+
+	// Steps 2 & 3: the original file-first resolution, unchanged.
 	// Try the configured path directly and branch on the error, rather than a
 	// separate os.Stat existence check. The stat-then-load pattern is both a
 	// TOCTOU race (the file can change between the check and the load) and an
