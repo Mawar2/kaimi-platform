@@ -61,7 +61,7 @@ type JSONProfileStore struct {
 func NewJSONProfileStore(basePath string) (*JSONProfileStore, error) {
 	info, err := os.Stat(basePath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			if mkErr := os.MkdirAll(basePath, 0o755); mkErr != nil {
 				return nil, fmt.Errorf("create profile store base directory %q: %w", basePath, mkErr)
 			}
@@ -100,6 +100,13 @@ func (s *JSONProfileStore) Load() (*CapabilityProfile, error) {
 // Save persists the profile as indented JSON, overwriting any prior profile. It
 // rejects a nil profile rather than writing a null document that would later load
 // as an empty profile.
+//
+// The write is atomic: it writes to a temp file in the SAME directory and then
+// os.Renames it over the destination. os.Rename replaces the destination
+// atomically on both Unix and Windows, so a crash or disk-full mid-write leaves
+// the old profile.json intact rather than a truncated, unparseable one — which
+// matters because ResolveProfileWithStore fails loud on a parse error, and a
+// corrupt profile would otherwise brick the deployment on the next boot.
 func (s *JSONProfileStore) Save(p *CapabilityProfile) error {
 	if p == nil {
 		return fmt.Errorf("profile cannot be nil")
@@ -112,8 +119,18 @@ func (s *JSONProfileStore) Save(p *CapabilityProfile) error {
 	if err != nil {
 		return fmt.Errorf("marshal profile: %w", err)
 	}
-	if err := os.WriteFile(s.path, data, 0o644); err != nil {
-		return fmt.Errorf("write profile file %q: %w", s.path, err)
+
+	// Write to a temp file in the same directory so the rename stays on the same
+	// filesystem (cross-device renames are not atomic and would fail).
+	tmpPath := s.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		// Best-effort cleanup: the temp file may or may not exist.
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write temp profile file %q: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		_ = os.Remove(tmpPath) // Best-effort cleanup of the leftover temp file.
+		return fmt.Errorf("rename temp profile %q to %q: %w", tmpPath, s.path, err)
 	}
 	return nil
 }

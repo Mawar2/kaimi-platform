@@ -106,6 +106,47 @@ func TestJSONProfileStore_SaveOverwrites(t *testing.T) {
 	}
 }
 
+// TestJSONProfileStore_SaveAtomic verifies the atomic write: after Save no
+// leftover "<path>.tmp" file remains (the temp file is renamed, not left behind),
+// and a second Save (overwrite) leaves valid, parseable JSON that Load returns as
+// the latest profile — i.e. the temp+rename never strands a half-written file.
+func TestJSONProfileStore_SaveAtomic(t *testing.T) {
+	base := t.TempDir()
+	ps, err := NewJSONProfileStore(base)
+	if err != nil {
+		t.Fatalf("NewJSONProfileStore: %v", err)
+	}
+
+	tmpPath := filepath.Join(base, ProfileFileName+".tmp")
+
+	first := sampleProfile()
+	if err := ps.Save(first); err != nil {
+		t.Fatalf("Save first: %v", err)
+	}
+	if _, err := os.Stat(tmpPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("leftover temp file after first Save: stat(%q) err = %v, want ErrNotExist", tmpPath, err)
+	}
+
+	// Overwrite, then confirm no temp file lingers and the latest profile loads
+	// back as valid, parseable JSON.
+	second := sampleProfile()
+	second.Company = "Atomic Co"
+	if err := ps.Save(second); err != nil {
+		t.Fatalf("Save second: %v", err)
+	}
+	if _, err := os.Stat(tmpPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("leftover temp file after overwrite: stat(%q) err = %v, want ErrNotExist", tmpPath, err)
+	}
+
+	got, err := ps.Load()
+	if err != nil {
+		t.Fatalf("Load after overwrite: %v", err)
+	}
+	if got.Company != "Atomic Co" {
+		t.Errorf("Company = %q, want the overwritten %q", got.Company, "Atomic Co")
+	}
+}
+
 // TestJSONProfileStore_SaveNil rejects a nil profile rather than writing a null
 // document that would later load as an empty profile.
 func TestJSONProfileStore_SaveNil(t *testing.T) {
