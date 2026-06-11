@@ -26,6 +26,12 @@ type Deps struct {
 	// read-only API deployment, in which case the action/status endpoints answer
 	// 503 Service Unavailable.
 	Proposals ProposalService
+
+	// Auth serves the unauthenticated /auth/* OAuth endpoints (WS-B4). It is nil in
+	// the offline/dev deployment (OAuth not configured), in which case the /auth/*
+	// routes are simply not registered. When present, its session manager also backs
+	// the WS-B5 RequireSession middleware via ParseSession.
+	Auth *AuthHandler
 }
 
 // Server is the JSON API's HTTP application. It holds its dependencies and builds
@@ -91,7 +97,16 @@ func (s *Server) Routes() http.Handler {
 
 	// Unauthenticated routes live on the root mux, outside the wrapped group.
 	rootMux.HandleFunc("GET /healthz", s.handleHealth)
-	// TODO(WS-B4): rootMux.Handle("/auth/", authHandler) — also unauthenticated.
+
+	// OAuth sign-in endpoints (WS-B4). They are registered on the root mux — OUTSIDE
+	// the protected /api/v1 group — because a user must be able to reach login and
+	// callback WITHOUT a session. They are wired only when OAuth is configured;
+	// offline/dev mode (Auth nil) omits them.
+	if s.deps.Auth != nil {
+		rootMux.HandleFunc("GET /auth/login", s.deps.Auth.handleLogin)
+		rootMux.HandleFunc("GET /auth/callback", s.deps.Auth.handleCallback)
+		rootMux.HandleFunc("POST /auth/logout", s.deps.Auth.handleLogout)
+	}
 
 	// Wrap the mux so its built-in plain-text 404/405 responses come back as JSON.
 	// A catch-all "/" route is intentionally NOT used: it would shadow the mux's
