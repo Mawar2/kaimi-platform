@@ -223,13 +223,18 @@ Full `Opportunity.Description` rendered inside a `<pre style="white-space:pre-wr
 
 #### Section: Eligibility
 
-Eligibility results are derived from the set-aside code and the company's capability profile. In Phase 0 / Wave 3 this section is rendered as a placeholder:
+Eligibility is enforced upstream: the Zone-1 pipeline (`internal/pipeline`) applies the
+NAICS + set-aside gate (`profile.IsEligible`) before scoring, and ineligible
+opportunities are dropped before they reach the store. Every opportunity on the detail
+page has therefore passed screening by construction, and the section states that:
 
 ```
-Eligibility check: not yet implemented (Phase 1+)
+Passed Zone-1 eligibility screening (NAICS + set-aside gate against the capability profile) before scoring.
 ```
 
-The HTML element `<div id="eligibility-placeholder">` must be present so Wave 3 handler tests can assert its existence.
+The HTML element `<div id="eligibility-note">` must be present so handler tests can
+assert its existence. (Until issue #256 this section was a stale "not yet implemented
+(Phase 1+)" placeholder that predated the gate.)
 
 #### Section: Proposal Status
 

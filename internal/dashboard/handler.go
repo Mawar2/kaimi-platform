@@ -420,7 +420,9 @@ const detailContentTmpl = `{{define "content"}}
   </table>
 
   <div class="dr-sec-h">Eligibility</div>
-  <div id="eligibility-placeholder">Eligibility check: not yet implemented (Phase 1+)</div>
+  <!-- Every opportunity in the store passed the Zone-1 gate by construction:
+       internal/pipeline drops ineligible ones before saving (issue #256). -->
+  <div id="eligibility-note">Passed Zone-1 eligibility screening (NAICS + set-aside gate against the capability profile) before scoring.</div>
 
   <div class="dr-sec-h">Proposal Status</div>
   <table class="kv">
