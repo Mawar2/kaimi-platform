@@ -71,10 +71,18 @@ func run() error {
 	// One profile feeds both the Hunter gate and the Scorer (WS-A3). The Hunter
 	// uses the structured eligibility facts (NAICS tiers, set-aside flags) directly;
 	// the Scorer consumes the flattened, weighted view derived via scorer.FromProfile.
-	companyProfile, err := profile.LoadProfile(cfg.Profile.EligibilityPath)
+	//
+	// Resolve the profile at runtime (WS-A6): an existing deployment with a real
+	// profile at the configured path behaves identically to before; a fresh image
+	// with no real profile boots on the generic example template plus an explicit
+	// logged warning. ResolveProfile reports which source was actually used.
+	// TODO(WS-C): the Store/GCS-backed, onboarding-written profile plugs in inside
+	// profile.ResolveProfile (ahead of the local-file check), not here.
+	companyProfile, profileSource, err := profile.ResolveProfile(cfg.Profile.EligibilityPath)
 	if err != nil {
 		return fmt.Errorf("failed to load company profile: %w", err)
 	}
+	fmt.Printf("Profile source: %s\n", profileSource)
 	eligibilityProfile := companyProfile
 	scoringProfile := scorer.FromProfile(companyProfile)
 

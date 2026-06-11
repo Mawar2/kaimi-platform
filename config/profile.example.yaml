@@ -1,0 +1,81 @@
+# config/profile.example.yaml — GENERIC company profile template.
+#
+# This is the neutral, placeholder profile that ships INSIDE the product image so
+# the image carries NO real customer data. It is used at runtime ONLY as the
+# explicit, logged fallback when no real profile is present at the configured path
+# (see internal/profile.ResolveProfile). A real deployment supplies its own
+# profile (config/profile.json today; a Store/GCS-backed, onboarding-written
+# profile under WS-C) which takes precedence over this template.
+#
+# Every value below is a placeholder. Replace them during onboarding. The file is
+# a valid internal/profile.CapabilityProfile and INCLUDES a `scoring` block so the
+# derived Scorer view (scorer.FromProfile) works without a real profile present.
+
+uei: "EXAMPLE000000"          # 12-char SAM.gov Unique Entity ID — replace with the company's real UEI.
+cage: "00000"                 # 5-char CAGE code — replace with the company's real CAGE.
+company: "Example Federal Co" # Display/legal name used by the Writer; replace with the real company name.
+address: "100 Example Ave, Suite 1, Anytown, ST 00000 USA"
+
+# Generic NAICS codes for an IT/professional-services firm. Replace with the
+# company's actual codes and tiers (primary = strongest fit).
+naics_codes:
+  - {code: "541512", description: "Computer Systems Design Services", tier: "primary"}
+  - {code: "541511", description: "Custom Computer Programming Services", tier: "primary"}
+  - {code: "541519", description: "Other Computer Related Services", tier: "secondary"}
+  - {code: "541611", description: "Administrative Management and General Management Consulting Services", tier: "tertiary"}
+
+# Conservative default certifications: small business only. Replace with the
+# company's actual set-aside certifications during onboarding.
+set_aside:
+  small_business: true
+  sdb: false
+  minority_owned: false
+  eight_a: false
+  sdvosb: false
+  wosb: false
+  hubzone: false
+
+clearance: "None"
+
+competencies:
+  - "Software Development"
+  - "Cloud Infrastructure"
+  - "System Integration"
+  - "Data Analytics"
+
+# Generic, neutral past performance. Replace with the company's real engagements.
+past_performance:
+  - client: "Example Federal Agency"
+    scope: "Modernized a legacy public-facing web application and migrated it to a managed cloud platform"
+    value: "Example engagement"
+    what_it_proves: ["Federal experience", "Cloud migration", "Web application development"]
+  - client: "Example State Government"
+    scope: "Built a data analytics dashboard integrating multiple agency data sources via APIs"
+    value: "Example engagement"
+    what_it_proves: ["Data visualization", "API development", "System integration"]
+
+# Curated scoring signals the Scorer consumes (derived into a scorer.CapabilityProfile
+# via scorer.FromProfile). These are intentionally distinct from the eligibility
+# facts above; see internal/profile.ScoringHints for why. All placeholder values.
+scoring:
+  primary_naics:
+    - "541512"
+    - "541511"
+  secondary_naics:
+    - "541519"
+    - "541611"
+  competency_tags:
+    - "software development"
+    - "web application"
+    - "modernization"
+    - "cloud"
+    - "api development"
+    - "system integration"
+    - "data analytics"
+    - "data visualization"
+  past_performance:
+    - "Example Federal Agency: modernized a legacy public-facing web application and migrated it to a managed cloud platform — proves federal experience, cloud migration, and web application development"
+    - "Example State Government: built a data analytics dashboard integrating multiple agency data sources via APIs — proves data visualization, API development, and system integration"
+  qualifying_set_asides:
+    - "SBA"
+    - "SBP"

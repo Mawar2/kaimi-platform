@@ -72,12 +72,20 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 	// (WS-A3). The Writer consumes the flattened scorer view, derived from the
 	// single profile via scorer.FromProfile rather than a separate hand-maintained
 	// scorer JSON.
+	//
+	// Resolve the profile at runtime (WS-A6): an existing deployment with a real
+	// profile at the configured path behaves identically; a fresh image with no
+	// real profile grounds the Writer on the generic example template plus an
+	// explicit logged warning. ResolveProfile reports which source was used.
+	// TODO(WS-C): the Store/GCS-backed, onboarding-written profile plugs in inside
+	// profile.ResolveProfile (ahead of the local-file check), not here.
 	scorerProfile := &scorer.CapabilityProfile{}
 	if cfg.Profile.WriterPath != "" {
-		companyProfile, err := profile.LoadProfile(cfg.Profile.WriterPath)
+		companyProfile, profileSource, err := profile.ResolveProfile(cfg.Profile.WriterPath)
 		if err != nil {
 			return nil, fmt.Errorf("load profile: %w", err)
 		}
+		log.Printf("Company profile source: %s", profileSource)
 		derived := scorer.FromProfile(companyProfile)
 		scorerProfile = &derived
 	}
