@@ -121,7 +121,8 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	// The live agents share one Vertex AI region. The Gemini 3.x family —
 	// gemini-3.1-pro-preview (drafting) and gemini-3.5-flash (outline structure) —
 	// is served only from the global endpoint, so that is the default
-	// (config.GCP.AgentRegion: GCP_REGION with a "global" default).
+	// (config.GCP.AgentRegion defaults to "global", independent of GCP_REGION;
+	// overridable only via GCP_AGENT_REGION).
 	region := cfg.GCP.AgentRegion
 
 	ol := outline.New(docsClient) // deterministic section planner (offline default)

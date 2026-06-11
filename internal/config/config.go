@@ -42,17 +42,23 @@ type Tenant struct {
 }
 
 // GCP holds Google Cloud project, region, and model selection. Region and
-// AgentRegion both resolve from GCP_REGION but carry different defaults to
-// preserve historic behavior: the dashboard's Outline/Writer agents defaulted
-// to the "global" Vertex endpoint, while the pipeline scorer and Final Review
-// defaulted to "us-east4".
+// AgentRegion are resolved independently: Region targets the regional Vertex
+// endpoint that serves the gemini-2.5-pro Scorer and Final Review, while
+// AgentRegion targets the "global" endpoint that the 3.x Outline/Writer agents
+// require. They are deliberately decoupled (see AgentRegion below).
 type GCP struct {
 	ProjectID string `yaml:"project_id"` // GCP_PROJECT_ID
 	Region    string `yaml:"region"`     // GCP_REGION, default us-east4
 
-	// AgentRegion is GCP_REGION with a "global" default, used by the dashboard's
-	// Outline planner and Writer generator (the Gemini 3.x family is served only
-	// from the global endpoint).
+	// AgentRegion selects the Vertex endpoint for the dashboard's Outline planner
+	// and Writer generator. It defaults to "global" and is independent of
+	// GCP_REGION (overridable only via its own GCP_AGENT_REGION env var) because
+	// those agents run Gemini 3.x models (gemini-3.5-flash / gemini-3.1-pro-preview)
+	// which are served ONLY from the global Vertex endpoint — they 404 NOT_FOUND on
+	// regional endpoints like us-east4. The regional Scorer/Final Review
+	// (gemini-2.5-pro) continue to use Region. If AgentRegion tracked GCP_REGION, a
+	// correct regional setting (us-east4) would silently 404 the 3.x agents and the
+	// proposal would fail at "outline:failed".
 	AgentRegion string `yaml:"agent_region"`
 
 	ScorerModel      string `yaml:"scorer_model"`      // GEMINI_MODEL for the pipeline scorer, default gemini-2.5-pro
@@ -205,12 +211,12 @@ func applyEnv(cfg *Config) {
 		cfg.Profile.NAICSCodes = splitCSV(v)
 	}
 	envInto(&cfg.GCP.ProjectID, "GCP_PROJECT_ID")
-	// GCP_REGION drives both region values; the differing defaults are only
-	// applied later when the env var is absent.
-	if v := os.Getenv("GCP_REGION"); v != "" {
-		cfg.GCP.Region = v
-		cfg.GCP.AgentRegion = v
-	}
+	// GCP_REGION sets the regional endpoint (Scorer/FinalReview) only. AgentRegion
+	// is intentionally decoupled: the 3.x Outline/Writer agents are served only
+	// from the "global" Vertex endpoint, so it defaults to "global" and is
+	// overridden solely by its own GCP_AGENT_REGION var — never by GCP_REGION.
+	envInto(&cfg.GCP.Region, "GCP_REGION")
+	envInto(&cfg.GCP.AgentRegion, "GCP_AGENT_REGION")
 	// GEMINI_MODEL is overloaded: the pipeline reads it as the scorer model and
 	// the dashboard reads it as the writer model. Apply it to both.
 	if v := os.Getenv("GEMINI_MODEL"); v != "" {
@@ -240,9 +246,11 @@ func applyFlags(flags *Flags, cfg *Config) {
 	flagInto(&cfg.Mode, flags.Mode)
 	flagInto(&cfg.Store.Path, flags.StorePath)
 	flagInto(&cfg.GCP.ProjectID, flags.ProjectID)
+	// The -region flag sets the regional endpoint only. AgentRegion stays decoupled
+	// (defaults to "global", overridable only via GCP_AGENT_REGION) so the flag
+	// cannot strand the global-only Outline/Writer agents — see the GCP struct doc.
 	if flags.Region != nil {
 		cfg.GCP.Region = *flags.Region
-		cfg.GCP.AgentRegion = *flags.Region
 	}
 	flagInto(&cfg.Profile.EligibilityPath, flags.EligibilityProfilePath)
 	if flags.NAICSCodes != nil {

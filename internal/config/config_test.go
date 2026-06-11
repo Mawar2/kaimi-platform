@@ -78,13 +78,14 @@ func TestLoad_EnvOverridesDefault(t *testing.T) {
 	if cfg.GCP.ProjectID != "env-project" {
 		t.Errorf("GCP.ProjectID = %q, want env-project", cfg.GCP.ProjectID)
 	}
-	// GCP_REGION must drive BOTH region values (the agent region default of
-	// "global" is only used when GCP_REGION is unset).
+	// GCP_REGION drives the regional Region only. AgentRegion is decoupled and
+	// must NOT follow GCP_REGION (the 3.x Outline/Writer agents are served only
+	// from the "global" Vertex endpoint), so it stays at its "global" default.
 	if cfg.GCP.Region != "europe-west1" {
 		t.Errorf("GCP.Region = %q, want europe-west1", cfg.GCP.Region)
 	}
-	if cfg.GCP.AgentRegion != "europe-west1" {
-		t.Errorf("GCP.AgentRegion = %q, want europe-west1", cfg.GCP.AgentRegion)
+	if cfg.GCP.AgentRegion != "global" {
+		t.Errorf("GCP.AgentRegion = %q, want global (decoupled from GCP_REGION)", cfg.GCP.AgentRegion)
 	}
 	if cfg.GCP.WriterModel != "env-writer-model" {
 		t.Errorf("GCP.WriterModel = %q, want env-writer-model", cfg.GCP.WriterModel)
@@ -95,6 +96,61 @@ func TestLoad_EnvOverridesDefault(t *testing.T) {
 	if cfg.Server.Port != 9999 {
 		t.Errorf("Server.Port = %d, want 9999", cfg.Server.Port)
 	}
+}
+
+// TestLoad_AgentRegionDecoupledFromGCPRegion locks in the fix for the live-deploy
+// bug where GCP_REGION leaked into AgentRegion. The 3.x Outline/Writer agents are
+// served only from the "global" Vertex endpoint, while the gemini-2.5-pro Scorer
+// and Final Review run in the regional endpoint, so the two regions must resolve
+// independently.
+func TestLoad_AgentRegionDecoupledFromGCPRegion(t *testing.T) {
+	t.Run("GCP_REGION set, GCP_AGENT_REGION unset: Region follows, AgentRegion stays global", func(t *testing.T) {
+		// This is the deployed-API scenario: GCP_REGION=us-east4 is correct for the
+		// regional Scorer/FinalReview but must NOT drag the global-only agents to
+		// us-east4 (which 404s for the 3.x models).
+		clearKaimiEnv(t)
+		setEnv(t, "GCP_REGION", "us-east4")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() unexpected error: %v", err)
+		}
+		if cfg.GCP.Region != "us-east4" {
+			t.Errorf("GCP.Region = %q, want us-east4", cfg.GCP.Region)
+		}
+		if cfg.GCP.AgentRegion != "global" {
+			t.Errorf("GCP.AgentRegion = %q, want global (must not follow GCP_REGION)", cfg.GCP.AgentRegion)
+		}
+	})
+
+	t.Run("GCP_AGENT_REGION override sets AgentRegion only", func(t *testing.T) {
+		clearKaimiEnv(t)
+		setEnv(t, "GCP_AGENT_REGION", "us-central1")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() unexpected error: %v", err)
+		}
+		if cfg.GCP.AgentRegion != "us-central1" {
+			t.Errorf("GCP.AgentRegion = %q, want us-central1 (explicit override)", cfg.GCP.AgentRegion)
+		}
+		// Region keeps its own default, untouched by GCP_AGENT_REGION.
+		if cfg.GCP.Region != "us-east4" {
+			t.Errorf("GCP.Region = %q, want us-east4 (default, unaffected by GCP_AGENT_REGION)", cfg.GCP.Region)
+		}
+	})
+
+	t.Run("neither set: Region defaults us-east4, AgentRegion defaults global", func(t *testing.T) {
+		clearKaimiEnv(t)
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() unexpected error: %v", err)
+		}
+		if cfg.GCP.Region != "us-east4" {
+			t.Errorf("GCP.Region = %q, want us-east4 (default)", cfg.GCP.Region)
+		}
+		if cfg.GCP.AgentRegion != "global" {
+			t.Errorf("GCP.AgentRegion = %q, want global (default)", cfg.GCP.AgentRegion)
+		}
+	})
 }
 
 // TestLoad_ProfilePathAlias documents the WS-A3 consolidation: one company
@@ -154,6 +210,11 @@ func TestLoad_FlagOverridesEnv(t *testing.T) {
 	}
 	if cfg.GCP.Region != "asia-south1" {
 		t.Errorf("GCP.Region = %q, want asia-south1 (flag beats env)", cfg.GCP.Region)
+	}
+	// The -region flag sets the regional Region only; AgentRegion stays decoupled
+	// at its "global" default so the flag cannot strand the global-only agents.
+	if cfg.GCP.AgentRegion != "global" {
+		t.Errorf("GCP.AgentRegion = %q, want global (region flag must not set it)", cfg.GCP.AgentRegion)
 	}
 }
 
@@ -303,6 +364,7 @@ func clearKaimiEnv(t *testing.T) {
 	vars := []string{
 		"MODE", "STORE_PATH", "PROFILE_PATH", "ELIGIBILITY_PROFILE_PATH",
 		"NAICS_CODES", "SAM_API_KEY", "GCP_PROJECT_ID", "GCP_REGION",
+		"GCP_AGENT_REGION",
 		"GEMINI_MODEL", "OUTLINE_MODEL", "FINALREVIEW_MODEL", "PORT", "HOST",
 		"GCS_SOLICITATIONS_BUCKET", "DOCUMENTAI_PROCESSOR_ID", "DOCUMENTAI_LOCATION",
 	}
