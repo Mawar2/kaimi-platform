@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 )
 
 // ExampleProfilePath is the repo-relative path to the generic, neutral company
@@ -41,31 +40,37 @@ const ExampleCompanyName = "Example Federal Co"
 // example template remains the final no-data fallback; this function is the seam
 // where the Store-backed lookup plugs in ahead of the local-file check.
 func ResolveProfile(path string) (*CapabilityProfile, string, error) {
-	_, statErr := os.Stat(path)
+	// Try the configured path directly and branch on the error, rather than a
+	// separate os.Stat existence check. The stat-then-load pattern is both a
+	// TOCTOU race (the file can change between the check and the load) and an
+	// anti-idiom in Go: just attempt the operation and inspect the error.
+	p, err := LoadProfile(path)
 	switch {
-	case statErr == nil:
-		// A real profile exists at the configured path: load it exactly as before.
-		p, err := LoadProfile(path)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to load company profile %q: %w", path, err)
-		}
+	case err == nil:
+		// A real profile exists at the configured path: return it exactly as a
+		// direct LoadProfile(path) would, with no warning. This is the existing-
+		// deployment path (config/profile.json present).
 		return p, path, nil
 
-	case errors.Is(statErr, fs.ErrNotExist):
-		// No real profile present. Fall back to the generic example template and
+	case errors.Is(err, fs.ErrNotExist):
+		// No profile file at path. Fall back to the generic example template and
 		// be loud about it so a fresh deployment knows it must be onboarded.
-		p, err := LoadProfile(ExampleProfilePath)
-		if err != nil {
-			return nil, "", fmt.Errorf("no profile at %q and failed to load example template %q: %w", path, ExampleProfilePath, err)
+		// LoadProfile wraps os.ReadFile's error with %w, so fs.ErrNotExist
+		// surfaces here only for a genuinely missing file — not for a parse or
+		// permission error, which fall through to the default branch below.
+		example, exErr := LoadProfile(ExampleProfilePath)
+		if exErr != nil {
+			return nil, "", fmt.Errorf("no profile at %q and failed to load example template %q: %w", path, ExampleProfilePath, exErr)
 		}
 		log.Printf("WARNING: no company profile found at %q; using the generic example template %q (company %q). "+
 			"This deployment is NOT configured with real company data — complete onboarding/configure a real profile before production use.",
-			path, ExampleProfilePath, p.Company)
-		return p, ExampleProfilePath, nil
+			path, ExampleProfilePath, example.Company)
+		return example, ExampleProfilePath, nil
 
 	default:
-		// Some other stat error (e.g. permission); surface it rather than silently
-		// falling back, so a misconfigured path is not masked by the example.
-		return nil, "", fmt.Errorf("failed to check company profile path %q: %w", path, statErr)
+		// Any other error (permission denied, malformed JSON/YAML, unsupported
+		// extension). Fail safe and loud rather than masking a misconfigured or
+		// corrupt real profile by silently serving the example template.
+		return nil, "", fmt.Errorf("failed to load company profile at %q: %w", path, err)
 	}
 }

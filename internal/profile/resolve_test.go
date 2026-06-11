@@ -121,6 +121,39 @@ func TestResolveProfile_FallsBackToExample(t *testing.T) {
 	}
 }
 
+// TestResolveProfile_MalformedRealProfileFailsLoud verifies that a profile file
+// that EXISTS at the configured path but is malformed (invalid JSON) returns an
+// error and does NOT fall back to the example template. Only a genuinely missing
+// file triggers the fallback; a corrupt or misconfigured real profile must fail
+// safe and loud rather than be silently masked by the example.
+func TestResolveProfile_MalformedRealProfileFailsLoud(t *testing.T) {
+	chdirRepoRoot(t)
+	bad := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(bad, []byte("{ this is not valid json"), 0o600); err != nil {
+		t.Fatalf("write malformed profile: %v", err)
+	}
+
+	var p *profile.CapabilityProfile
+	var source string
+	var err error
+	out := captureLog(t, func() {
+		p, source, err = profile.ResolveProfile(bad)
+	})
+	if err == nil {
+		t.Fatalf("ResolveProfile(%q) on a malformed profile = nil error; want a fail-loud error", bad)
+	}
+	if p != nil {
+		t.Errorf("ResolveProfile returned a non-nil profile (%+v) on a malformed file; want nil", p)
+	}
+	if source != "" {
+		t.Errorf("source = %q on a malformed file; want empty (no fallback)", source)
+	}
+	// It must NOT have fallen back to the example template.
+	if strings.Contains(strings.ToLower(out), "example") {
+		t.Errorf("ResolveProfile fell back to the example template on a malformed real profile:\n%s", out)
+	}
+}
+
 // TestExampleProfile_LoadsAndDerivesScorer verifies the shipped example template
 // is a valid CapabilityProfile that both LoadProfile and scorer.FromProfile
 // accept, with a non-empty scoring block so the derived Scorer view is usable.

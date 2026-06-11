@@ -35,6 +35,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 
@@ -82,7 +83,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to load company profile: %w", err)
 	}
-	fmt.Printf("Profile source: %s\n", profileSource)
+	log.Printf("Profile source: %s\n", profileSource)
 	eligibilityProfile := companyProfile
 	scoringProfile := scorer.FromProfile(companyProfile)
 
