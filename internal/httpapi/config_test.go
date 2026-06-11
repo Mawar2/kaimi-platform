@@ -59,6 +59,68 @@ func TestLoadConfigPORTWinsOverAPIPORT(t *testing.T) {
 	}
 }
 
+// TestLoadOAuthConfigDisabledWhenUnset verifies that with no OAUTH_* env set, OAuth
+// is reported disabled and no error is returned — the offline cmd/api dev mode must
+// still construct.
+func TestLoadOAuthConfigDisabledWhenUnset(t *testing.T) {
+	for _, e := range []string{envOAuthClientID, envOAuthClientSecret, envOAuthRedirectURL, envOAuthAllowedDomain, envOAuthSessionSecret} {
+		t.Setenv(e, "")
+	}
+	cfg, enabled, err := LoadOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadOAuthConfig (all unset): %v", err)
+	}
+	if enabled {
+		t.Errorf("OAuth enabled = true with nothing set; want disabled. cfg=%+v", cfg)
+	}
+}
+
+// TestLoadOAuthConfigEnabledFull verifies that with all OAUTH_* env present, OAuth
+// is enabled and the values are read through.
+func TestLoadOAuthConfigEnabledFull(t *testing.T) {
+	t.Setenv(envOAuthClientID, "cid")
+	t.Setenv(envOAuthClientSecret, "csecret")
+	t.Setenv(envOAuthRedirectURL, "https://app/auth/callback")
+	t.Setenv(envOAuthAllowedDomain, "example.com")
+	t.Setenv(envOAuthSessionSecret, "a-long-enough-session-secret-1234567890")
+
+	cfg, enabled, err := LoadOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadOAuthConfig (full): %v", err)
+	}
+	if !enabled {
+		t.Fatal("OAuth enabled = false with full config; want enabled")
+	}
+	if cfg.ClientID != "cid" || cfg.AllowedDomain != "example.com" || cfg.RedirectURL != "https://app/auth/callback" {
+		t.Errorf("cfg read-through wrong: %+v", cfg)
+	}
+	if cfg.SessionSecret != "a-long-enough-session-secret-1234567890" {
+		t.Error("session secret not read through")
+	}
+}
+
+// TestLoadOAuthConfigPartialMissingRequired verifies that setting SOME OAUTH_* vars
+// (signaling intent to enable) but omitting a required one errors, naming the
+// missing var and wrapping ErrMissingRequired.
+func TestLoadOAuthConfigPartialMissingRequired(t *testing.T) {
+	t.Setenv(envOAuthClientID, "cid")
+	t.Setenv(envOAuthClientSecret, "csecret")
+	t.Setenv(envOAuthRedirectURL, "https://app/auth/callback")
+	t.Setenv(envOAuthAllowedDomain, "") // required, missing
+	t.Setenv(envOAuthSessionSecret, "a-long-enough-session-secret-1234567890")
+
+	_, _, err := LoadOAuthConfig()
+	if err == nil {
+		t.Fatal("LoadOAuthConfig (partial): want error, got nil")
+	}
+	if !errors.Is(err, ErrMissingRequired) {
+		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
+	}
+	if got := err.Error(); !strings.Contains(got, envOAuthAllowedDomain) {
+		t.Errorf("error %q should name the missing var %q", got, envOAuthAllowedDomain)
+	}
+}
+
 // TestLoadConfigPortParseError verifies a non-integer port is reported as an error
 // that names the offending variable and wraps ErrInvalidConfig (the value is
 // present but malformed) — NOT ErrMissingRequired, which is reserved for absent

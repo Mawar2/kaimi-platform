@@ -38,10 +38,92 @@ type Config struct {
 	// container platforms) takes precedence over API_PORT and the built-in
 	// default, mirroring cmd/dashboard's port precedence.
 	Port int
+}
 
-	// TODO(WS-B4): OAuth fields land here (e.g. OAuthClientID, OAuthClientSecret,
-	// OAuthRedirectURL, SessionSigningKey), resolved from their own env vars in
-	// LoadConfig and validated against ErrMissingRequired when auth is enabled.
+// OAuthConfig holds the Google Workspace OAuth2/OIDC settings for sign-in (WS-B4).
+// It is loaded separately from Config because auth is optional to construct: the
+// offline cmd/api dev mode runs without it. PRODUCTION MUST set every field — the
+// secrets (ClientSecret, SessionSecret) come from Secret Manager, surfaced as env
+// vars in Cloud Run.
+//
+// SECURITY: SessionSecret and ClientSecret are credentials and must never be
+// logged. LoadOAuthConfig reads them but neither it nor any handler emits them.
+type OAuthConfig struct {
+	// ClientID is the Google OAuth client id. It is also the audience the callback
+	// validates the ID token against.
+	ClientID string
+	// ClientSecret is the Google OAuth client secret (Secret Manager → env).
+	ClientSecret string
+	// RedirectURL is this service's absolute /auth/callback URL registered with Google.
+	RedirectURL string
+	// AllowedDomain is the Google Workspace domain ("hd") permitted to sign in. The
+	// callback rejects any account whose verified hd claim differs.
+	AllowedDomain string
+	// SessionSecret is the HMAC-SHA256 key used to sign session tokens (Secret
+	// Manager → env). Rotating it invalidates all existing sessions.
+	SessionSecret string
+	// PostLoginPath is where a successful login redirects. Defaults to "/" when empty.
+	PostLoginPath string
+}
+
+const (
+	envOAuthClientID      = "OAUTH_CLIENT_ID"
+	envOAuthClientSecret  = "OAUTH_CLIENT_SECRET"
+	envOAuthRedirectURL   = "OAUTH_REDIRECT_URL"
+	envOAuthAllowedDomain = "OAUTH_ALLOWED_DOMAIN"
+	envOAuthSessionSecret = "SESSION_SECRET"
+	envOAuthPostLoginPath = "OAUTH_POST_LOGIN_PATH"
+)
+
+// LoadOAuthConfig resolves the Workspace OAuth settings from the environment.
+//
+// Auth is OPTIONAL: if NONE of the OAUTH_* / SESSION_SECRET variables are set, it
+// returns (zero, false, nil) so the offline cmd/api dev mode still builds and runs
+// with auth disabled. If ANY of them is set — signaling intent to enable auth —
+// then EVERY required value (client id, client secret, redirect URL, allowed
+// domain, session secret) must be present; a missing one returns an error naming
+// the variable and wrapping ErrMissingRequired. The returned bool reports whether
+// auth is enabled.
+func LoadOAuthConfig() (OAuthConfig, bool, error) {
+	cfg := OAuthConfig{
+		ClientID:      os.Getenv(envOAuthClientID),
+		ClientSecret:  os.Getenv(envOAuthClientSecret),
+		RedirectURL:   os.Getenv(envOAuthRedirectURL),
+		AllowedDomain: os.Getenv(envOAuthAllowedDomain),
+		SessionSecret: os.Getenv(envOAuthSessionSecret),
+		PostLoginPath: os.Getenv(envOAuthPostLoginPath),
+	}
+
+	// Required values keyed by their env var, so an error can name the missing one.
+	required := []struct {
+		env, val string
+	}{
+		{envOAuthClientID, cfg.ClientID},
+		{envOAuthClientSecret, cfg.ClientSecret},
+		{envOAuthRedirectURL, cfg.RedirectURL},
+		{envOAuthAllowedDomain, cfg.AllowedDomain},
+		{envOAuthSessionSecret, cfg.SessionSecret},
+	}
+
+	anySet := false
+	for _, r := range required {
+		if r.val != "" {
+			anySet = true
+		}
+	}
+	if !anySet {
+		// Nothing configured: auth disabled. Offline/dev mode path.
+		return OAuthConfig{}, false, nil
+	}
+
+	// At least one OAuth var is set, so the operator intends auth. Demand all of them.
+	for _, r := range required {
+		if r.val == "" {
+			return OAuthConfig{}, false, fmt.Errorf("%s must be set when OAuth is enabled: %w", r.env, ErrMissingRequired)
+		}
+	}
+
+	return cfg, true, nil
 }
 
 const (

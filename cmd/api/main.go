@@ -102,9 +102,30 @@ func run() error {
 		return fmt.Errorf("failed to wire proposal service: %w", err)
 	}
 
+	// Resolve Workspace OAuth sign-in (WS-B4). It is OPTIONAL: with no OAUTH_*/
+	// SESSION_SECRET env set, auth is disabled and the /auth/* routes are omitted so
+	// the offline/dev mode still runs. PRODUCTION must set them (Secret Manager →
+	// env in Cloud Run). When enabled, the auth handler also backs the WS-B5
+	// RequireSession middleware via ParseSession.
+	oauthCfg, oauthEnabled, err := httpapi.LoadOAuthConfig()
+	if err != nil {
+		return fmt.Errorf("load OAuth config: %w", err)
+	}
+	var auth *httpapi.AuthHandler
+	if oauthEnabled {
+		auth, err = httpapi.NewAuthHandler(&oauthCfg)
+		if err != nil {
+			return fmt.Errorf("build auth handler: %w", err)
+		}
+		log.Printf("Workspace OAuth enabled for domain %q", oauthCfg.AllowedDomain)
+	} else {
+		log.Printf("Workspace OAuth disabled (no OAUTH_* config); /auth/* routes omitted")
+	}
+
 	srv := httpapi.New(httpapi.Deps{
 		Dashboard: dashboard.NewService(s),
 		Proposals: proposals,
+		Auth:      auth,
 	})
 
 	addr := net.JoinHostPort(apiCfg.Host, fmt.Sprintf("%d", apiCfg.Port))
