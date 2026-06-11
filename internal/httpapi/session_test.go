@@ -43,9 +43,12 @@ func TestSessionVerifyRejectsTamperedPayload(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatalf("token has no payload.sig structure: %q", token)
 	}
-	// Flip the last character of the payload segment; the signature no longer matches.
+	// Flip the FIRST character of the payload segment so the decoded bytes are
+	// guaranteed to change. (Flipping the LAST base64 char is unreliable: the final
+	// char of a base64 string carries "don't-care" trailing bits, so A<->B there can
+	// decode to the same bytes and leave the signature still valid — a flaky test.)
 	payload := parts[0]
-	tampered := payload[:len(payload)-1] + flipChar(payload[len(payload)-1]) + "." + parts[1]
+	tampered := flipChar(payload[0]) + payload[1:] + "." + parts[1]
 
 	if _, err := sm.verify(tampered); err == nil {
 		t.Fatal("verify tampered payload: want error, got nil")
@@ -62,8 +65,11 @@ func TestSessionVerifyRejectsTamperedSignature(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatalf("token has no payload.sig structure: %q", token)
 	}
+	// Flip the FIRST character of the signature so the decoded MAC bytes are
+	// guaranteed to change (see the payload test: the last base64 char has don't-care
+	// trailing bits and can flip to the same bytes, which made this test flaky).
 	sig := parts[1]
-	tampered := parts[0] + "." + sig[:len(sig)-1] + flipChar(sig[len(sig)-1])
+	tampered := parts[0] + "." + flipChar(sig[0]) + sig[1:]
 
 	if _, err := sm.verify(tampered); err == nil {
 		t.Fatal("verify tampered signature: want error, got nil")
