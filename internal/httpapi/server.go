@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
-	"github.com/Mawar2/Kaimi/internal/proposal"
 )
 
 // serviceName identifies this binary in health and (later) log output.
@@ -21,8 +20,12 @@ type Deps struct {
 	Dashboard *dashboard.Service
 
 	// Proposals is the Zone-2 action service the select/gate endpoints (WS-B3)
-	// drive.
-	Proposals *proposal.Service
+	// drive. It is the ProposalService interface (not the concrete
+	// *proposal.Service) so production wiring injects the real service while tests
+	// inject a fake — "accept interfaces, return structs." It may be nil for a
+	// read-only API deployment, in which case the action/status endpoints answer
+	// 503 Service Unavailable.
+	Proposals ProposalService
 }
 
 // Server is the JSON API's HTTP application. It holds its dependencies and builds
@@ -70,6 +73,11 @@ func (s *Server) Routes() http.Handler {
 	apiMux.HandleFunc("GET /api/v1/opportunities", s.handleListOpportunities)
 	apiMux.HandleFunc("GET /api/v1/opportunities/{id}", s.handleGetOpportunity)
 	apiMux.HandleFunc("GET /api/v1/stages/counts", s.handleStageCounts)
+
+	// WS-B3 action + proposal-status endpoints. The select POST is the Zone-1 →
+	// Zone-2 bridge; the proposal GET composes the read layer with the draft.
+	apiMux.HandleFunc("POST /api/v1/opportunities/{id}/select", s.handleSelectOpportunity)
+	apiMux.HandleFunc("GET /api/v1/proposals/{id}", s.handleGetProposalStatus)
 
 	var apiHandler http.Handler = apiMux
 	// TODO(WS-B5): apiHandler = authMiddleware(apiHandler) — wrap ONLY this group.

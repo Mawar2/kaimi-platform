@@ -2,6 +2,7 @@ package proposal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,6 +38,19 @@ const (
 	// StatusSubmitted is the terminal state, set only by the human Submit
 	// action. Agents stand down.
 	StatusSubmitted = "submitted"
+)
+
+// Sentinel errors for the Select bridge so callers (e.g. the JSON API) can map
+// them to precise HTTP status codes with errors.Is, rather than matching on
+// message text. Both are "already in flight" conflicts but are distinguished so
+// a caller can tell "you already pursued this" from "a stage is mid-run".
+var (
+	// ErrAlreadySelected means the opportunity has already been selected into
+	// the proposals pipeline (a duplicate Select).
+	ErrAlreadySelected = errors.New("opportunity is already in your proposals")
+	// ErrStageRunning means a background stage is currently running for the
+	// opportunity, so a new one cannot be claimed.
+	ErrStageRunning = errors.New("opportunity already has a stage running")
 )
 
 // stageTimeout bounds each background agent stage.
@@ -110,10 +124,10 @@ func (s *Service) Select(ctx context.Context, oppID string) error {
 		return fmt.Errorf("select %s: %w", oppID, err)
 	}
 	if opp.Selected {
-		return fmt.Errorf("opportunity %s is already in your proposals", oppID)
+		return fmt.Errorf("select %s: %w", oppID, ErrAlreadySelected)
 	}
 	if !s.claim(oppID) {
-		return fmt.Errorf("opportunity %s already has a stage running", oppID)
+		return fmt.Errorf("select %s: %w", oppID, ErrStageRunning)
 	}
 
 	now := s.Now()
@@ -233,6 +247,29 @@ func (s *Service) Submit(ctx context.Context, oppID string) error {
 // atGate reports whether the proposal is paused for the human.
 func atGate(status string) bool {
 	return status == StatusGate || status == StatusReviewNeedsHuman
+}
+
+// DisplayState maps a persisted ProposalStatus to a coarse display state for
+// clients: "progress" (an agent is working), "human" (paused at the review
+// gate), "done" (ready to submit), "submitted" (terminal), or "failed" (a stage
+// errored). The empty/unknown status reads as "progress" — selected but with no
+// pipeline state yet. This is the API-facing twin of the HTML dashboard's
+// proposalView state and keeps the web and desktop surfaces consistent.
+func DisplayState(status string) string {
+	switch status {
+	case StatusGate, StatusReviewNeedsHuman:
+		return "human"
+	case StatusReadyToSubmit:
+		return "done"
+	case StatusSubmitted:
+		return "submitted"
+	case "outline:failed", "writer:failed", "final-review:failed":
+		return "failed"
+	default:
+		// StatusOutlineRunning, StatusWriterRunning, StatusReviewRunning, the empty
+		// status, and any legacy value all read as in-progress.
+		return "progress"
+	}
 }
 
 // claim/release guard against concurrent stages on one opportunity.
