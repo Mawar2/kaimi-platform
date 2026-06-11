@@ -13,9 +13,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
-    # google-beta is required for the Cloud Run GCS volume mount on the pipeline
-    # Job. The mount (type=cloud-storage) mirrors setup-gcp.sh's --add-volume and
-    # is still surfaced through the beta provider for google_cloud_run_v2_job.
+    # google-beta is required for the Cloud Run GCS volume mount on BOTH the
+    # pipeline Job and the API Service. The mount (type=cloud-storage) mirrors
+    # setup-gcp.sh's --add-volume and is still surfaced through the beta provider
+    # for google_cloud_run_v2_job and google_cloud_run_v2_service.
     google-beta = {
       source  = "hashicorp/google-beta"
       version = "~> 6.0"

@@ -152,21 +152,36 @@ resource "google_storage_bucket_iam_member" "solicitations_object_admin" {
 }
 
 # -----------------------------------------------------------------------------
-# 6. Secret Manager secret CONTAINERS (created empty)
+# 6. Secret Manager secret CONTAINERS (+ a placeholder version each)
 #    setup-gcp.sh Step 7 created only samgov-api-key (lines 138-149) and seeded a
 #    placeholder version. Here we create the containers for every secret the
-#    pipeline and API consume but add NO versions: the actual secret values never
-#    enter Terraform state or tfvars. The customer runs `gcloud secrets versions
-#    add ...` out-of-band (README.md). Secret accessor IAM is granted in
-#    section 3 (project-wide secretAccessor) — sufficient and least-privilege.
+#    pipeline and API consume. We also seed each container with ONE placeholder
+#    version. The placeholder is required, not optional: Cloud Run validates that
+#    a referenced secret version exists at create time, so without a "latest"
+#    version the Job/Service apply fails with "Secret version latest does not
+#    exist" — a chicken-and-egg that blocks a one-step apply.
+#
+#    The placeholder value is an obvious sentinel ("REPLACE_ME_VIA_GCLOUD"), NOT a
+#    real secret. The operator adds the real value out-of-band with
+#    `gcloud secrets versions add <name> --data-file=-` (README.md); that becomes
+#    the new "latest" and new Cloud Run revisions/instances pick it up. The
+#    `lifecycle { ignore_changes = [secret_data] }` on the version below ensures
+#    Terraform never reverts the operator's real value back to the placeholder —
+#    so the real secret never has to enter Terraform state or tfvars.
 # -----------------------------------------------------------------------------
-resource "google_secret_manager_secret" "secrets" {
-  for_each = toset([
+locals {
+  # The set of secret containers, reused by both the container and version
+  # resources so the two stay DRY and in lock-step.
+  secret_ids = toset([
     "samgov-api-key",            # SAM_API_KEY (pipeline + API) — setup-gcp.sh:139
     "oauth-client-secret",       # OAUTH_CLIENT_SECRET (API sign-in)
     "drive-oauth-client-secret", # DRIVE_OAUTH_CLIENT_SECRET (API customer-Drive)
     "session-secret",            # SESSION_SECRET (API session signing)
   ])
+}
+
+resource "google_secret_manager_secret" "secrets" {
+  for_each = local.secret_ids
 
   project   = var.project_id
   secret_id = each.value
@@ -176,10 +191,27 @@ resource "google_secret_manager_secret" "secrets" {
     auto {} # setup-gcp.sh:146 --replication-policy=automatic
   }
 
-  # NOTE: no google_secret_manager_secret_version here. Versions are added
-  # out-of-band so secret values never live in state. See README.md.
-
   depends_on = [google_project_service.required]
+}
+
+# Placeholder version per secret. This exists only so `version = "latest"` refs
+# resolve at Cloud Run create time (a one-step apply). The operator replaces each
+# with the real value via `gcloud secrets versions add` (README.md); the
+# ignore_changes lifecycle below keeps Terraform from clobbering that real value
+# on subsequent applies. NO real secret ever lives in this config or in state.
+resource "google_secret_manager_secret_version" "placeholder" {
+  for_each = local.secret_ids
+
+  secret      = google_secret_manager_secret.secrets[each.key].id
+  secret_data = "REPLACE_ME_VIA_GCLOUD"
+
+  lifecycle {
+    # The operator adds the real value out-of-band, which becomes a newer version
+    # and the new "latest". Ignore drift on secret_data so Terraform never reverts
+    # to the placeholder. (Terraform still manages the placeholder version's
+    # existence; it just won't rewrite its data.)
+    ignore_changes = [secret_data]
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -290,6 +322,13 @@ resource "google_cloud_run_v2_job" "pipeline" {
   depends_on = [
     google_project_iam_member.runtime_roles,
     google_storage_bucket_iam_member.queue_object_admin,
+    # The Job reads/writes GCS_SOLICITATIONS_BUCKET, so it needs objectAdmin on
+    # the solicitations bucket too; depend on the binding to avoid an
+    # IAM-propagation race on first run (matches the queue binding above).
+    google_storage_bucket_iam_member.solicitations_object_admin,
+    # Cloud Run validates referenced secret versions at create time; ensure the
+    # placeholder versions exist before the Job is created.
+    google_secret_manager_secret_version.placeholder,
   ]
 }
 
@@ -302,6 +341,11 @@ resource "google_cloud_run_v2_job" "pipeline" {
 #    container args pass the store path + bind host (the API also reads $PORT).
 # -----------------------------------------------------------------------------
 resource "google_cloud_run_v2_service" "api" {
+  # The API mounts a cloud-storage (GCS) volume, which is a beta-only feature on
+  # the Cloud Run v2 resources — same as the pipeline Job above. Without the beta
+  # provider the volumes/gcs block is rejected at plan/apply time.
+  provider = google-beta
+
   project  = var.project_id
   name     = local.api_service_name
   location = var.region
@@ -472,6 +516,10 @@ resource "google_cloud_run_v2_service" "api" {
   depends_on = [
     google_project_iam_member.runtime_roles,
     google_storage_bucket_iam_member.queue_object_admin,
+    # Cloud Run validates referenced secret versions at create time; ensure the
+    # placeholder versions (samgov / oauth / session / drive-oauth) exist before
+    # the Service is created.
+    google_secret_manager_secret_version.placeholder,
   ]
 }
 

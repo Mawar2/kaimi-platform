@@ -35,7 +35,7 @@ deploy/terraform/
 | Artifact Registry repo `kaimi` | `google_artifact_registry_repository.kaimi` | Step 10 |
 | GCS buckets `${project}-queue`, `${project}-solicitations` (uniform access, public-access prevention) | `google_storage_bucket.{queue,solicitations}` | Steps 10–11 |
 | Bucket IAM: `storage.objectAdmin` on each bucket | `google_storage_bucket_iam_member.*` | Steps 10–11 |
-| Secret containers `samgov-api-key`, `oauth-client-secret`, `drive-oauth-client-secret`, `session-secret` (**empty**) | `google_secret_manager_secret.secrets` | Step 7 (extended; values added out-of-band) |
+| Secret containers `samgov-api-key`, `oauth-client-secret`, `drive-oauth-client-secret`, `session-secret` (each seeded with a **placeholder** version) | `google_secret_manager_secret.secrets` + `google_secret_manager_secret_version.placeholder` | Step 7 (extended; **real** values added out-of-band) |
 | Cloud Run **Job** `kaimi-pipeline` (GCS volume mount, secret env) | `google_cloud_run_v2_job.pipeline` | Step 10 |
 | Cloud Run **Service** `kaimi-api` | `google_cloud_run_v2_service.api` | **NEW** (not in the script) |
 | Cloud Scheduler `kaimi-pipeline-schedule` (cron `0 7,12,17 * * *`) | `google_cloud_scheduler_job.pipeline_schedule` | Step 10 |
@@ -45,8 +45,14 @@ deploy/terraform/
 - **No service-account JSON key** is created. Cloud Run uses the attached SA's
   Application Default Credentials. (The script wrote `kaimi-sa-key.json`.)
 - The SA gets **`secretmanager.secretAccessor`**, not `secretmanager.admin`.
-- **Secret values never enter Terraform state or tfvars.** The module creates the
-  secret containers empty; you add versions with `gcloud` (below).
+- **Real secret values never enter Terraform state or tfvars.** The module creates
+  each secret container and seeds it with a single, obvious **placeholder** version
+  (`REPLACE_ME_VIA_GCLOUD`) — never a real secret. You add the real value with
+  `gcloud` (below); a `lifecycle { ignore_changes = [secret_data] }` on the
+  placeholder keeps Terraform from ever clobbering that real version on later
+  applies. (The placeholder exists only because Cloud Run validates that a
+  referenced secret version exists at create time — without it, the very first
+  `apply` fails with `Secret version latest does not exist`.)
 
 ### Drive/Docs note
 The customer-Drive and Google Docs integrations use **user OAuth scopes**, not
@@ -105,6 +111,12 @@ terraform apply
 ```
 
 ### 5. Seed the secrets (out-of-band — values never touch Terraform)
+> **Required before the deployment is functional.** Each secret was created with a
+> harmless **placeholder** version (`REPLACE_ME_VIA_GCLOUD`) so the first `apply`
+> succeeds. The running Job/Service will read that placeholder until you add the
+> real value here. The commands below add a *new* version that becomes `:latest`;
+> Terraform's `ignore_changes` on the placeholder means it will never overwrite
+> your real value, and the real value never enters Terraform state or tfvars.
 ```sh
 # SAM.gov API key (required for live hunting)
 printf '%s' 'YOUR_SAM_GOV_KEY' | gcloud secrets versions add samgov-api-key --data-file=- --project=acme-kaimi-prod
