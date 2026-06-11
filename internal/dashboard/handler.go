@@ -667,6 +667,16 @@ func sameDay(a, b time.Time) bool {
 // before the store is consulted.
 var opportunityIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
+// ValidOpportunityID reports whether id is a well-formed opportunity (store key)
+// identifier: an alphanumeric first character followed by up to 127 more
+// alphanumerics, dots, dashes, or underscores. It is the single source of truth
+// for ID validation shared by the HTML dashboard and the JSON API (internal/
+// httpapi), so both surfaces reject path traversal, spaces, and markup the same
+// way before the store is consulted.
+func ValidOpportunityID(id string) bool {
+	return opportunityIDPattern.MatchString(id)
+}
+
 // DetailData is the view-model for the /opportunity/{id} page.
 type DetailData struct {
 	shellData
@@ -686,7 +696,7 @@ type DetailData struct {
 
 func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !opportunityIDPattern.MatchString(id) {
+	if !ValidOpportunityID(id) {
 		h.renderNotFound(w, id)
 		return
 	}
