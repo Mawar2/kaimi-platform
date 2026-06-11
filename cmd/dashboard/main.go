@@ -15,16 +15,8 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
-	"github.com/Mawar2/Kaimi/internal/document"
-	"github.com/Mawar2/Kaimi/internal/finalreview"
-	"github.com/Mawar2/Kaimi/internal/googledocs"
-	"github.com/Mawar2/Kaimi/internal/ingest"
-	"github.com/Mawar2/Kaimi/internal/outline"
-	"github.com/Mawar2/Kaimi/internal/profile"
-	"github.com/Mawar2/Kaimi/internal/proposal"
-	"github.com/Mawar2/Kaimi/internal/scorer"
+	"github.com/Mawar2/Kaimi/internal/proposalwiring"
 	"github.com/Mawar2/Kaimi/internal/store"
-	"github.com/Mawar2/Kaimi/internal/writer"
 )
 
 func main() {
@@ -45,145 +37,6 @@ func newMux(h *dashboard.Handler) *http.ServeMux {
 	mux.Handle("/opportunities", h)
 	mux.Handle("/opportunities/", h)
 	return mux
-}
-
-// newProposalService wires the REAL Zone 2 agents behind the shared gated
-// lifecycle (epic #153): the Outline agent (cached docs client unless live
-// Google credentials are configured elsewhere), the Technical Writer (stub
-// by default; -live-writer drafts with Gemini over Vertex AI ADC), and the
-// Final Review agent (deterministic checks by default; -live-review adds the
-// Gemini compliance pass over Vertex AI ADC).
-//
-// With -live-ingest, the proposal service ingests the solicitation attachments
-// (HTTP fetch → GCS store → Document AI / stdlib DOCX extraction) at draft time
-// and threads their text into the Writer and the live Final Review compliance
-// pass. Without it, ingestion is skipped and the pipeline behaves as before.
-func newProposalService(s store.Store, basePath string, liveWriter, liveReview, liveIngest bool, cfg *config.Config) (*proposal.Service, error) {
-	docs, err := document.NewStore(basePath)
-	if err != nil {
-		return nil, fmt.Errorf("document store: %w", err)
-	}
-	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
-	if err != nil {
-		return nil, fmt.Errorf("docs client: %w", err)
-	}
-
-	// One company profile feeds both the Hunter/Scorer and the Writer's grounding
-	// (WS-A3). The Writer consumes the flattened scorer view, derived from the
-	// single profile via scorer.FromProfile rather than a separate hand-maintained
-	// scorer JSON.
-	//
-	// Resolve the profile at runtime (WS-A6): an existing deployment with a real
-	// profile at the configured path behaves identically; a fresh image with no
-	// real profile grounds the Writer on the generic example template plus an
-	// explicit logged warning. ResolveProfile reports which source was used.
-	// TODO(WS-C): the Store/GCS-backed, onboarding-written profile plugs in inside
-	// profile.ResolveProfile (ahead of the local-file check), not here.
-	scorerProfile := &scorer.CapabilityProfile{}
-	if cfg.Profile.WriterPath != "" {
-		companyProfile, profileSource, err := profile.ResolveProfile(cfg.Profile.WriterPath)
-		if err != nil {
-			return nil, fmt.Errorf("load profile: %w", err)
-		}
-		log.Printf("Company profile source: %s", profileSource)
-		derived := scorer.FromProfile(companyProfile)
-		scorerProfile = &derived
-	}
-
-	// The live agents share one Vertex AI region. The Gemini 3.x family —
-	// gemini-3.1-pro-preview (drafting) and gemini-3.5-flash (outline structure) —
-	// is served only from the global endpoint, so that is the default
-	// (config.GCP.AgentRegion: GCP_REGION with a "global" default).
-	region := cfg.GCP.AgentRegion
-
-	ol := outline.New(docsClient) // deterministic section planner (offline default)
-	w := writer.New()             // stub writer (offline default)
-	if liveWriter {
-		projectID := cfg.GCP.ProjectID
-		if projectID == "" {
-			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
-		}
-		// Outline plans the section structure with gemini-3.5-flash; the Writer
-		// persona "Thomas" drafts the prose with gemini-3.1-pro-preview while the
-		// Claude/Opus 4.8 Vertex quota is pending (swap GEMINI_MODEL when it lands).
-		planner, err := outline.NewGeminiSectionPlanner(context.Background(),
-			projectID, region, cfg.GCP.OutlineModel)
-		if err != nil {
-			return nil, fmt.Errorf("gemini outline planner: %w", err)
-		}
-		ol = outline.NewWithPlanner(docsClient, planner)
-
-		gen, err := writer.NewGeminiGenerator(context.Background(),
-			projectID, region, cfg.GCP.WriterModel)
-		if err != nil {
-			return nil, fmt.Errorf("gemini generator: %w", err)
-		}
-		w = writer.NewWithGenerator(gen)
-		log.Printf("Outline: LIVE gemini-3.5-flash planner; Technical Writer %q: LIVE gemini-3.1-pro-preview drafting (project %s)", "Thomas", projectID)
-	} else {
-		log.Printf("Outline + Technical Writer: OFFLINE stub mode (-offline) — live Gemini agents are the default")
-	}
-
-	review := finalreview.New()
-	if liveReview {
-		projectID := cfg.GCP.ProjectID
-		if projectID == "" {
-			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
-		}
-		// The reviewer model is configured INDEPENDENTLY of the Writer's GEMINI_MODEL.
-		// The Final Review verifier bake-off found gemini-2.5-pro is the best Gemini
-		// compliance verifier (83% defect recall) while gemini-3.1-pro is the worst
-		// (17%) — so the gate must not silently inherit whatever the Writer is set to.
-		// FINALREVIEW_MODEL lets it stay on the validated model (and swap to a Claude
-		// model once Anthropic-on-Vertex quota lands), regardless of GEMINI_MODEL.
-		// The reviewer uses config.GCP.Region (GCP_REGION with a "us-east4" default),
-		// distinct from the agents' "global" AgentRegion above.
-		reviewModel := cfg.GCP.FinalReviewModel
-		checker, err := finalreview.NewGeminiComplianceChecker(context.Background(),
-			projectID, cfg.GCP.Region, reviewModel)
-		if err != nil {
-			return nil, fmt.Errorf("gemini compliance checker: %w", err)
-		}
-		review = finalreview.NewWithComplianceChecker(checker)
-		log.Printf("Final Review: LIVE Gemini compliance pass enabled (project %s, model %s)", projectID, reviewModel)
-	} else {
-		log.Printf("Final Review: OFFLINE deterministic checks only (-offline) — live Gemini compliance is the default")
-	}
-
-	// Document ingestion is opt-in via -live-ingest. A true nil interface (not a
-	// typed-nil) is essential so proposal.Service's `Ingest == nil` check skips it.
-	var ingestor proposal.Ingestor
-	if liveIngest {
-		projectID := cfg.GCP.ProjectID
-		bucket := cfg.Ingest.GCSBucket
-		processorID := cfg.Ingest.DocumentAIProcessor
-		if projectID == "" || bucket == "" || processorID == "" {
-			return nil, fmt.Errorf("-live-ingest requires GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, and DOCUMENTAI_PROCESSOR_ID")
-		}
-		ctx := context.Background()
-		gcs, _, err := ingest.NewGCSStore(ctx, bucket)
-		if err != nil {
-			return nil, fmt.Errorf("gcs store: %w", err)
-		}
-		docAI, _, err := ingest.NewDocumentAIExtractor(ctx, projectID, cfg.Ingest.DocumentAILocation, processorID, bucket)
-		if err != nil {
-			return nil, fmt.Errorf("document ai extractor: %w", err)
-		}
-		ingestor = ingest.New(ingest.NewHTTPFetcher(nil, 0), gcs, ingest.NewRoutingExtractor(docAI))
-		log.Printf("Document ingestion: LIVE (bucket %s, Document AI processor %s)", bucket, processorID)
-	} else {
-		log.Printf("Document ingestion: off (pass -live-ingest to fetch + extract solicitation documents)")
-	}
-
-	return proposal.NewService(&proposal.Deps{
-		Opportunities: s,
-		Documents:     docs,
-		Outline:       ol,
-		Writer:        w,
-		Review:        review,
-		Profile:       scorerProfile,
-		Ingest:        ingestor,
-	}), nil
 }
 
 func envOr(key, fallback string) string {
@@ -252,7 +105,13 @@ func run() error {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	proposals, err := newProposalService(s, *storePath, lw, lr, *liveIngest, &cfg)
+	proposals, err := proposalwiring.New(context.Background(), &cfg, proposalwiring.Options{
+		Store:      s,
+		BasePath:   *storePath,
+		LiveWriter: lw,
+		LiveReview: lr,
+		LiveIngest: *liveIngest,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to wire proposal service: %w", err)
 	}
