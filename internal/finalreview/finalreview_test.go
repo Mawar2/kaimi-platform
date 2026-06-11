@@ -264,6 +264,75 @@ func TestReview_MustHaveAddressed_ReadyToSubmit(t *testing.T) {
 	}
 }
 
+// TestReview_MustHaveParaphrased_ReadyToSubmit locks the fix for issue #262: a
+// requirement the draft addresses in different words (or with small wording
+// shifts like an inserted "the") must NOT be flagged. The cases mirror the
+// tester-reported gate block: the draft plainly qualified the company, yet the
+// verbatim-substring matcher flagged every must-have and blocked approval.
+func TestReview_MustHaveParaphrased_ReadyToSubmit(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	// Mirrors the deployed draft's Technical Approach opening (issue #262).
+	draft := `## Technical Approach
+As a Small Disadvantaged Business fully qualifying under NAICS 541519
+(Other Computer Related Services), BlueMeta Technologies will execute the
+Website Modernization for the Selective Service System by leveraging our
+core competencies in website modernization and secure federal delivery.`
+
+	opp := fixture()
+	opp.Requirements = []string{
+		// None of these appear verbatim in the draft, but all are addressed.
+		"Website Modernization for Selective Service System",
+		"Must qualify under NAICS 541519 (Other Computer Related Services)",
+		"Must qualify as a Small Business",
+	}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draft,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q when every must-have is addressed in the draft's own words; flags: %v",
+			result.Status, agent.StatusReadyToSubmit, result.Flags)
+	}
+}
+
+// TestReview_MustHaveParaphrased_StillFlagsAbsent proves the lenient matcher
+// does not false-green: a requirement genuinely absent from the draft is
+// still flagged even alongside addressed ones.
+func TestReview_MustHaveParaphrased_StillFlagsAbsent(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	draft := `## Technical Approach
+As a Small Disadvantaged Business fully qualifying under NAICS 541519,
+BlueMeta Technologies will modernize the Selective Service System website.`
+
+	opp := fixture()
+	opp.Requirements = []string{
+		"Must qualify as a Small Business", // addressed
+		"FedRAMP High authorization",       // absent — must be flagged
+	}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       draft,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when one must-have is genuinely absent", result.Status, agent.StatusNeedsHuman)
+	}
+	if got := result.Flags["issues_found"]; got != "1" {
+		t.Errorf("Flags[issues_found] = %q, want %q (only the absent requirement flagged); flags: %v", got, "1", result.Flags)
+	}
+}
+
 func TestReview_MultipleMustHaves_AllMissing_NeedsHuman(t *testing.T) {
 	ctx := context.Background()
 	a := finalreview.New()
