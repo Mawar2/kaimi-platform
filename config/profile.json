@@ -73,5 +73,66 @@
       "value": "$54,000 (Feb 2025 - May 2025, delivered in 8 weeks)",
       "what_it_proves": ["Fintech expertise", "Banking integration", "PCI compliance", "AI/ML", "Agentic development innovation", "Scalability (100k+ concurrent users)"]
     }
-  ]
+  ],
+  "scoring": {
+    "_comment": "Curated scoring signals consumed by the Scorer (derived into scorer.CapabilityProfile via profile.ToScorerProfile). These are intentionally distinct from the eligibility facts above: competency_tags are keyword expansions for substring matching, past_performance is one prose sentence per engagement, and primary/secondary_naics are the Scorer's weighting buckets (not the eligibility tiers). sdb_status is NOT stored here — it is derived from set_aside.sdb above so it can never drift.",
+    "primary_naics": [
+      "541519",
+      "541512",
+      "541511"
+    ],
+    "secondary_naics": [
+      "518210",
+      "513210",
+      "541715",
+      "541690",
+      "541513",
+      "519290"
+    ],
+    "competency_tags": [
+      "AI/ML",
+      "artificial intelligence",
+      "machine learning",
+      "agentic",
+      "software development",
+      "web application",
+      "website",
+      "modernization",
+      "cloud",
+      "GCP",
+      "Google Cloud",
+      "API development",
+      "system integration",
+      "data visualization",
+      "data analytics",
+      "mobile",
+      "iOS",
+      "Android",
+      "identity verification",
+      "authentication",
+      "multilingual",
+      "geospatial",
+      "GIS",
+      "automation",
+      "workflow",
+      "federal systems",
+      "federal compliance",
+      "cybersecurity",
+      "user experience",
+      "community engagement"
+    ],
+    "past_performance": [
+      "U.S. Census Bureau: built SpeakEase, an AI-powered multilingual communications platform for local governments (2024 Opportunity Project Sprint partnership) — proves federal experience, AI/ML, multilingual systems, and accessible public-facing design",
+      "Justice40 Initiative (Federal): developed a federal funding-tracking tool surfacing investment flows to disadvantaged communities — proves federal data integration, data visualization, and compliance-minded public reporting",
+      "Bullard Center for Environmental Justice (Texas Southern University): enhanced the federal Climate and Economic Justice Screening Tool (CEJST) with demographic data layers — proves GIS/geospatial, API development, and database engineering on a government-facing application",
+      "Center for Community Engagement, Environmental Justice, and Health (CEEJH): delivered MyBlockCounts, an iOS/Android geospatial data-collection app — proves mobile development and cloud integration",
+      "ByBlack: fintech platform with Plaid banking integration across 12,000+ institutions and AI merchant categorization, delivered in 8 weeks — proves scalable secure delivery, PCI compliance, and AI/ML",
+      "Baltimore City Board of School Commissioners: automated data-entry system for meeting logs and budgeting — proves government experience and data automation"
+    ],
+    "qualifying_set_asides": [
+      "SDB",
+      "SBA",
+      "SBP"
+    ]
+  }
 }

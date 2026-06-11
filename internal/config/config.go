@@ -61,13 +61,16 @@ type GCP struct {
 	FinalReviewModel string `yaml:"finalreview_model"` // FINALREVIEW_MODEL, default gemini-2.5-pro
 }
 
-// Profile holds paths to the capability/eligibility profiles the agents ground
-// on. These are three distinct files in the current binaries.
+// Profile holds paths to the single company profile the agents ground on. Since
+// WS-A3 one profile.CapabilityProfile file feeds both the Hunter eligibility gate
+// and the Scorer (the scorer view is derived via scorer.FromProfile), so there is
+// no longer a separate scoring-profile path.
 type Profile struct {
-	ScoringPath     string   `yaml:"scoring_path"`     // PROFILE_PATH (pipeline scorer.CapabilityProfile)
-	EligibilityPath string   `yaml:"eligibility_path"` // ELIGIBILITY_PROFILE_PATH (profile.CapabilityProfile)
-	WriterPath      string   `yaml:"writer_path"`      // dashboard -profile flag (writer grounding)
-	NAICSCodes      []string `yaml:"naics_codes"`      // NAICS_CODES override (empty → eligibility profile's codes)
+	// EligibilityPath is the single company-profile file. ELIGIBILITY_PROFILE_PATH
+	// sets it; PROFILE_PATH is honored as a backward-compatible alias (see applyEnv).
+	EligibilityPath string   `yaml:"eligibility_path"`
+	WriterPath      string   `yaml:"writer_path"` // dashboard -profile flag (company profile; writer grounding derived via scorer.FromProfile)
+	NAICSCodes      []string `yaml:"naics_codes"` // NAICS_CODES override (empty → eligibility profile's codes)
 }
 
 // Drive holds the Google Drive target for created proposal documents. Modeled
@@ -115,7 +118,6 @@ type Flags struct {
 	Region    *string
 
 	// Pipeline-specific.
-	ScoringProfilePath     *string
 	EligibilityProfilePath *string
 	NAICSCodes             *string // comma-separated
 	ScorerModel            *string
@@ -129,9 +131,8 @@ type Flags struct {
 const (
 	defaultMode             = "cached"
 	defaultStorePath        = "./queue"
-	defaultScoringProfile   = "./test/fixtures/capability_profile.json"
 	defaultEligibility      = "config/profile.json"
-	defaultWriterProfile    = "config/bluemeta_scorer_profile.json"
+	defaultWriterProfile    = "config/profile.json"
 	defaultRegion           = "us-east4"
 	defaultAgentRegion      = "global"
 	defaultScorerModel      = "gemini-2.5-pro"
@@ -193,7 +194,12 @@ func loadFile(path string, cfg *Config) error {
 func applyEnv(cfg *Config) {
 	envInto(&cfg.Mode, "MODE")
 	envInto(&cfg.Store.Path, "STORE_PATH")
-	envInto(&cfg.Profile.ScoringPath, "PROFILE_PATH")
+	// One company profile now feeds both the Hunter gate and the Scorer (WS-A3).
+	// ELIGIBILITY_PROFILE_PATH is the canonical env var; PROFILE_PATH is honored as
+	// a backward-compatible alias for it (it formerly set the now-removed separate
+	// scoring profile). Apply the alias first so the canonical var wins when both
+	// are set.
+	envInto(&cfg.Profile.EligibilityPath, "PROFILE_PATH")
 	envInto(&cfg.Profile.EligibilityPath, "ELIGIBILITY_PROFILE_PATH")
 	if v := os.Getenv("NAICS_CODES"); v != "" {
 		cfg.Profile.NAICSCodes = splitCSV(v)
@@ -238,7 +244,6 @@ func applyFlags(flags *Flags, cfg *Config) {
 		cfg.GCP.Region = *flags.Region
 		cfg.GCP.AgentRegion = *flags.Region
 	}
-	flagInto(&cfg.Profile.ScoringPath, flags.ScoringProfilePath)
 	flagInto(&cfg.Profile.EligibilityPath, flags.EligibilityProfilePath)
 	if flags.NAICSCodes != nil {
 		cfg.Profile.NAICSCodes = splitCSV(*flags.NAICSCodes)
@@ -255,7 +260,6 @@ func applyFlags(flags *Flags, cfg *Config) {
 func applyDefaults(cfg *Config) {
 	defaultInto(&cfg.Mode, defaultMode)
 	defaultInto(&cfg.Store.Path, defaultStorePath)
-	defaultInto(&cfg.Profile.ScoringPath, defaultScoringProfile)
 	defaultInto(&cfg.Profile.EligibilityPath, defaultEligibility)
 	defaultInto(&cfg.Profile.WriterPath, defaultWriterProfile)
 	defaultInto(&cfg.GCP.Region, defaultRegion)
