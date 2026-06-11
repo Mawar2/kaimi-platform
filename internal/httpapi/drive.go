@@ -12,7 +12,13 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 )
+
+// defaultDriveFolderName is the name of the folder auto-created in the customer's
+// Drive when they connect (WS-C5a), so generated proposal Docs have a tidy home
+// without the user having to pick a destination first.
+const defaultDriveFolderName = "Kaimi Proposals"
 
 // This file implements the WS-C2 customer-Drive connect flow: the endpoints that
 // let a deployment connect the CUSTOMER's own Google Workspace/Drive so generated
@@ -42,6 +48,12 @@ const (
 // token. The default delegates to oauth2.Config.Exchange; tests inject a fake. It
 // mirrors auth.go's exchangeFunc seam.
 type driveExchangeFunc func(ctx context.Context, code, verifier string) (*oauth2.Token, error)
+
+// driveProvisionFunc finds-or-creates a destination folder in the customer's Drive
+// and returns its id. The default delegates to googledocs.EnsureFolder; tests inject
+// a fake so the auto-provision-on-connect path (WS-C5a) runs fully offline. It
+// mirrors the driveExchangeFunc seam above.
+type driveProvisionFunc func(ctx context.Context, ts oauth2.TokenSource, name string) (folderID string, err error)
 
 // DriveOAuthConfig holds the Google OAuth client settings for the customer-Drive
 // connect flow (WS-C2). It is loaded separately from the sign-in OAuthConfig
@@ -73,6 +85,10 @@ type DriveHandler struct {
 
 	// exchange defaults to the real code exchange; tests override it to stay offline.
 	exchange driveExchangeFunc
+
+	// provision defaults to creating a real Drive folder via googledocs.EnsureFolder;
+	// tests override it to stay offline. It backs the auto-provision-on-connect flow.
+	provision driveProvisionFunc
 }
 
 // NewDriveHandler builds the customer-Drive connect handler from its OAuth config
@@ -101,6 +117,9 @@ func newDriveHandler(cfg DriveOAuthConfig, tokens drivetoken.TokenStore, targets
 	h.exchange = func(ctx context.Context, code, verifier string) (*oauth2.Token, error) {
 		return oc.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	}
+	// googledocs.EnsureFolder matches driveProvisionFunc exactly, so it is the seam's
+	// real implementation directly; tests swap in a fake to stay offline.
+	h.provision = googledocs.EnsureFolder
 	return h, nil
 }
 
@@ -178,11 +197,59 @@ func (h *DriveHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WS-C5a: now that the Drive is connected, ensure a default destination folder
+	// exists so generated Docs have a home without the user picking one first. This
+	// runs AFTER the token is already persisted, so it is strictly best-effort: a
+	// provisioning or target-save failure must NOT fail the connect — the user can
+	// still set a target later (WS-C5b). It is also idempotent: if a target is
+	// already set, we never overwrite the user's choice or make a second folder.
+	h.ensureDefaultTarget(r.Context(), tok)
+
 	dest := h.cfg.PostConnectPath
 	if dest == "" {
 		dest = "/"
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// ensureDefaultTarget auto-creates the default "Kaimi Proposals" folder in the
+// customer's Drive and persists it as the target, but ONLY when no target has been
+// set yet (WS-C5a). It is best-effort by contract: the token is already persisted by
+// the time this runs, so any error here is logged as a warning and swallowed — the
+// connect still succeeds and the user can set a target later (WS-C5b). It never logs
+// the token.
+//
+// Idempotency comes from two layers: (1) if a target is already set we return
+// immediately without provisioning, so a reconnect never makes a second folder or
+// clobbers a user's chosen target; (2) googledocs.EnsureFolder itself reuses an
+// existing app-created folder of the same name rather than duplicating it.
+func (h *DriveHandler) ensureDefaultTarget(ctx context.Context, tok *oauth2.Token) {
+	// If a target already exists, do nothing — never overwrite the user's choice.
+	if _, err := h.targets.Load(); err == nil {
+		return
+	} else if !errors.Is(err, drivetoken.ErrNotConnected) {
+		// An I/O/parse error reading the target is not a clean "unset"; do not risk
+		// provisioning a duplicate folder on top of an unreadable target. Log and bail.
+		log.Printf("httpapi: skipping drive folder auto-create; could not read existing target: %v", err)
+		return
+	}
+
+	// Build a refreshing token source from the just-obtained token and provision the
+	// default folder. oauth2.Config.TokenSource auto-refreshes via the refresh token.
+	ts := h.oauth.TokenSource(ctx, tok)
+	folderID, err := h.provision(ctx, ts, defaultDriveFolderName)
+	if err != nil {
+		// Best-effort: do not fail the connect. Do not log the token, only the error.
+		log.Printf("httpapi: best-effort drive folder auto-create failed; connect still succeeds, user can set a target later: %v", err)
+		return
+	}
+
+	if err := h.targets.Save(drivetoken.Target{DriveID: folderID}); err != nil {
+		// Best-effort: the folder exists but we could not persist it as the target.
+		// EnsureFolder will reuse that same folder on a later attempt, so no duplicate.
+		log.Printf("httpapi: drive folder auto-created but persisting it as the target failed; user can set a target later: %v", err)
+		return
+	}
 }
 
 // handleStatus reports whether the customer's Drive is connected and, if a target

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -65,6 +66,102 @@ func newTestDriveHandler(t *testing.T, exchange driveExchangeFunc) (*DriveHandle
 	}
 	return h, tokens, targets
 }
+
+// fixedTokenExchange returns a driveExchangeFunc that always yields tok, ignoring
+// the code/verifier. It is the simplest valid exchange for callback tests whose
+// focus is the post-token auto-provision behavior rather than the exchange itself.
+func fixedTokenExchange(tok *oauth2.Token) driveExchangeFunc {
+	return func(_ context.Context, _, _ string) (*oauth2.Token, error) {
+		return tok, nil
+	}
+}
+
+// validCallbackRequest builds a callback request with matching state cookie + query
+// and a PKCE cookie, so the CSRF/PKCE checks pass and the handler reaches the
+// token-exchange and auto-provision steps.
+func validCallbackRequest() *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/integrations/drive/callback?state=s1&code=auth-code", http.NoBody)
+	req.AddCookie(&http.Cookie{Name: driveStateCookieName, Value: "s1"})
+	req.AddCookie(&http.Cookie{Name: drivePKCECookieName, Value: "verifier-1"})
+	return req
+}
+
+// TestCallbackAutoCreatesTargetWhenUnset verifies WS-C5a: when no target is set, a
+// successful connect provisions the default folder and persists its id as the target.
+func TestCallbackAutoCreatesTargetWhenUnset(t *testing.T) {
+	h, _, targets := newTestDriveHandler(t, fixedTokenExchange(&oauth2.Token{AccessToken: "a", RefreshToken: "r"}))
+	h.provision = func(_ context.Context, _ oauth2.TokenSource, name string) (string, error) {
+		if name != defaultDriveFolderName {
+			t.Errorf("provision got folder name %q, want %q", name, defaultDriveFolderName)
+		}
+		return "folder-xyz", nil
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleCallback(rec, validCallbackRequest())
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302", rec.Code)
+	}
+	got, err := targets.Load()
+	if err != nil {
+		t.Fatalf("target not persisted after auto-create: %v", err)
+	}
+	if got.DriveID != "folder-xyz" {
+		t.Errorf("persisted target = %q, want folder-xyz", got.DriveID)
+	}
+}
+
+// TestCallbackSkipsProvisionWhenTargetAlreadySet verifies idempotency: if a target
+// already exists, the connect must NOT provision (no second folder, no overwrite).
+func TestCallbackSkipsProvisionWhenTargetAlreadySet(t *testing.T) {
+	h, _, targets := newTestDriveHandler(t, fixedTokenExchange(&oauth2.Token{AccessToken: "a", RefreshToken: "r"}))
+	targets.target = &drivetoken.Target{DriveID: "preexisting"}
+	h.provision = func(_ context.Context, _ oauth2.TokenSource, _ string) (string, error) {
+		t.Fatal("provision must not run when a target is already set")
+		return "", nil
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleCallback(rec, validCallbackRequest())
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302", rec.Code)
+	}
+	got, err := targets.Load()
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	if got.DriveID != "preexisting" {
+		t.Errorf("target = %q, want preexisting (unchanged)", got.DriveID)
+	}
+}
+
+// TestCallbackSucceedsWhenProvisionFails verifies the best-effort contract: a
+// provisioning failure must NOT fail the connect. The token is still stored and the
+// response is still a 302; the target simply remains unset (set later via WS-C5b).
+func TestCallbackSucceedsWhenProvisionFails(t *testing.T) {
+	h, tokens, targets := newTestDriveHandler(t, fixedTokenExchange(&oauth2.Token{AccessToken: "a", RefreshToken: "r"}))
+	h.provision = func(_ context.Context, _ oauth2.TokenSource, _ string) (string, error) {
+		return "", errProvisionFailed
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleCallback(rec, validCallbackRequest())
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302 despite provision failure", rec.Code)
+	}
+	if _, err := tokens.Load(); err != nil {
+		t.Errorf("token should still be stored after provision failure: %v", err)
+	}
+	if _, err := targets.Load(); !errors.Is(err, drivetoken.ErrNotConnected) {
+		t.Errorf("target should remain unset after provision failure, got err=%v", err)
+	}
+}
+
+// errProvisionFailed is a sentinel used by the best-effort provision-failure test.
+var errProvisionFailed = errors.New("simulated provision failure")
 
 // TestDriveConnectRedirectsWithMinimalScopesOfflineState verifies the connect
 // endpoint redirects to Google consent carrying: the minimal Drive scopes

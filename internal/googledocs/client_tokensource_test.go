@@ -29,7 +29,7 @@ func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
 func TestNewLiveClientUsesTokenSourceWhenSet(t *testing.T) {
 	ts := &fakeTokenSource{}
 	client, err := NewClient(context.Background(), Config{
-		SharedDriveID: "drive-123",
+		DestinationID: "drive-123",
 		TokenSource:   ts,
 		// Deliberately NO CredentialsJSON and UseADC=false: only the TokenSource
 		// can satisfy authentication, so a successful build proves it was used.
@@ -50,7 +50,7 @@ func TestNewLiveClientUsesTokenSourceWhenSet(t *testing.T) {
 func TestTokenSourceTakesPrecedenceOverCredentials(t *testing.T) {
 	ts := &fakeTokenSource{}
 	client, err := NewClient(context.Background(), Config{
-		SharedDriveID:   "drive-123",
+		DestinationID:   "drive-123",
 		TokenSource:     ts,
 		CredentialsJSON: []byte("this-is-not-valid-credentials-json"),
 	})
@@ -62,15 +62,15 @@ func TestTokenSourceTakesPrecedenceOverCredentials(t *testing.T) {
 	}
 }
 
-// TestTokenSourceRequiresSharedDriveID confirms the existing SharedDriveID
-// requirement still holds on the TokenSource path (the target Drive is where the
-// customer's Docs land).
-func TestTokenSourceRequiresSharedDriveID(t *testing.T) {
+// TestTokenSourceRequiresDestinationID confirms the existing DestinationID
+// requirement still holds on the TokenSource path (the destination folder is where
+// the customer's Docs land).
+func TestTokenSourceRequiresDestinationID(t *testing.T) {
 	_, err := NewClient(context.Background(), Config{
 		TokenSource: &fakeTokenSource{},
 	})
 	if err == nil {
-		t.Fatal("NewClient without SharedDriveID: expected an error, got nil")
+		t.Fatal("NewClient without DestinationID: expected an error, got nil")
 	}
 }
 

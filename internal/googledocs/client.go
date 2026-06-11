@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/docs/v1"
@@ -29,6 +30,9 @@ import (
 )
 
 const docURLPrefix = "https://docs.google.com/document/d/"
+
+// folderMimeType is the Drive MIME type that identifies a folder.
+const folderMimeType = "application/vnd.google-apps.folder"
 
 // Client creates populated Google Docs and returns their location.
 type Client interface {
@@ -81,9 +85,10 @@ type Config struct {
 	// itself is a secret and is NEVER logged anywhere in this package.
 	TokenSource oauth2.TokenSource
 
-	// SharedDriveID is the ID of the Shared Drive (or folder) that Docs are
-	// created in. Required for live mode.
-	SharedDriveID string
+	// DestinationID is the ID of the parent folder OR Shared Drive that Docs are
+	// created in. It is used directly as the created file's Parents[0]. Required for
+	// live mode.
+	DestinationID string
 
 	// UseCached indicates whether to use deterministic fixture data instead of
 	// making real Drive/Docs API calls.
@@ -192,34 +197,22 @@ func (c *cachedClient) CreateDoc(_ context.Context, doc Document) (*CreatedDoc, 
 type liveClient struct {
 	driveSvc      *drive.Service
 	docsSvc       *docs.Service
-	sharedDriveID string
+	destinationID string
 }
 
 // newLiveClient creates a client that creates and populates real Docs via the
 // Drive and Docs APIs. It authenticates with a service-account JSON key
 // (cfg.CredentialsJSON) or Application Default Credentials (cfg.UseADC).
 func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
-	if cfg.SharedDriveID == "" {
-		return nil, fmt.Errorf("shared drive ID is required for live mode")
+	if cfg.DestinationID == "" {
+		return nil, fmt.Errorf("destination folder ID is required for live mode")
 	}
 
-	// Authentication precedence: a per-user OAuth TokenSource wins over a
-	// service-account key, which wins over ADC. The TokenSource path is the WS-C2
-	// customer-Drive seam: when set, the services authenticate as the customer's
-	// own Workspace user, so Docs are created in their Drive. option.WithTokenSource
-	// uses the source's token and lets it auto-refresh.
-	var opts []option.ClientOption
-	switch {
-	case cfg.TokenSource != nil:
-		opts = append(opts, option.WithTokenSource(cfg.TokenSource))
-	case cfg.UseADC:
-		// No credential option is added — the Google client libraries resolve ADC
-		// automatically (env var → gcloud → metadata server).
-	default:
-		if len(cfg.CredentialsJSON) == 0 {
-			return nil, fmt.Errorf("credentials are required for live mode (set TokenSource, CredentialsJSON, or enable UseADC)")
-		}
-		opts = append(opts, option.WithCredentialsJSON(cfg.CredentialsJSON)) //nolint:staticcheck // TODO(phase-1): migrate to option.WithCredentials
+	opts := authClientOptions(cfg)
+	if len(opts) == 0 && !cfg.UseADC {
+		// authClientOptions returns no options only when no credential source was
+		// configured (TokenSource/CredentialsJSON absent and UseADC false).
+		return nil, fmt.Errorf("credentials are required for live mode (set TokenSource, CredentialsJSON, or enable UseADC)")
 	}
 
 	driveSvc, err := drive.NewService(ctx, opts...)
@@ -235,8 +228,94 @@ func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
 	return &liveClient{
 		driveSvc:      driveSvc,
 		docsSvc:       docsSvc,
-		sharedDriveID: cfg.SharedDriveID,
+		destinationID: cfg.DestinationID,
 	}, nil
+}
+
+// authClientOptions resolves the Google API client options from a Config's
+// credential fields. Authentication precedence: a per-user OAuth TokenSource wins
+// over a service-account key, which wins over ADC. The TokenSource path is the
+// WS-C2 customer-Drive seam: when set, the services authenticate as the customer's
+// own Workspace user, so Docs are created in their Drive. option.WithTokenSource
+// uses the source's token and lets it auto-refresh.
+//
+// It returns nil (no options) for the ADC case AND for the no-credential case;
+// callers distinguish the two via cfg.UseADC, since ADC adds no explicit option (the
+// Google libraries resolve it automatically: env var → gcloud → metadata server).
+func authClientOptions(cfg Config) []option.ClientOption {
+	switch {
+	case cfg.TokenSource != nil:
+		return []option.ClientOption{option.WithTokenSource(cfg.TokenSource)}
+	case cfg.UseADC:
+		return nil
+	case len(cfg.CredentialsJSON) > 0:
+		return []option.ClientOption{option.WithCredentialsJSON(cfg.CredentialsJSON)} //nolint:staticcheck // TODO(phase-1): migrate to option.WithCredentials
+	default:
+		return nil
+	}
+}
+
+// EnsureFolder finds or creates a Drive folder with the given name, authenticating
+// as the user behind ts, and returns its folder id. It is idempotent under the
+// drive.file scope: a Drive Files.List restricted to that scope returns ONLY files
+// the app itself created, so a prior call's "Kaimi Proposals" folder is found and
+// reused rather than duplicated. This backs the WS-C5a auto-provision-on-connect
+// flow, which calls it once after the customer connects their Drive.
+//
+// It searches for a non-trashed folder of the given name first; if found, returns
+// that id. Otherwise it creates a new folder and returns its id. SupportsAllDrives
+// is set so the same call works whether the user's home is My Drive or a Shared
+// Drive. The token behind ts is a secret and is never logged here.
+func EnsureFolder(ctx context.Context, ts oauth2.TokenSource, name string) (folderID string, err error) {
+	if ts == nil {
+		return "", fmt.Errorf("a token source is required to ensure a Drive folder")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("folder name is required")
+	}
+	// Guard the name against query injection. Drive's query language delimits string
+	// literals with single quotes; a name containing one would break the query (and is
+	// not a value we ever pass for the literal "Kaimi Proposals"), so reject it rather
+	// than risk a malformed/injected query.
+	if strings.Contains(name, "'") {
+		return "", fmt.Errorf("folder name must not contain a single quote: %q", name)
+	}
+
+	driveSvc, err := drive.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return "", fmt.Errorf("failed to create Drive service: %w", err)
+	}
+
+	// Search first so we reuse an existing app-created folder instead of making a
+	// duplicate. Under drive.file the list is already scoped to app-created files.
+	query := fmt.Sprintf("mimeType='%s' and name='%s' and trashed=false", folderMimeType, name)
+	list, err := driveSvc.Files.List().
+		Q(query).
+		Spaces("drive").
+		Fields("files(id,name)").
+		SupportsAllDrives(true).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to search for existing folder %q: %w", name, err)
+	}
+	if len(list.Files) > 0 {
+		return list.Files[0].Id, nil
+	}
+
+	created, err := driveSvc.Files.Create(&drive.File{
+		Name:     name,
+		MimeType: folderMimeType,
+	}).
+		SupportsAllDrives(true).
+		Fields("id").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to create folder %q: %w", name, err)
+	}
+	return created.Id, nil
 }
 
 // CreateDoc creates a Google Doc inside the configured Shared Drive and populates
@@ -253,7 +332,7 @@ func (l *liveClient) CreateDoc(ctx context.Context, doc Document) (*CreatedDoc, 
 	file := &drive.File{
 		Name:     doc.Title,
 		MimeType: "application/vnd.google-apps.document",
-		Parents:  []string{l.sharedDriveID},
+		Parents:  []string{l.destinationID},
 	}
 
 	created, err := l.driveSvc.Files.Create(file).
