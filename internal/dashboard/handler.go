@@ -279,12 +279,20 @@ const listContentTmpl = `{{define "content"}}
     <div class="day"><span>Earlier</span><span class="ln"></span></div>
     {{range .EarlierRows}}{{template "orow" .}}{{end}}
     {{end}}
-    {{if .Empty}}
+    {{if and .Empty (not .FirstRun)}}
+    {{if .Filtered}}
     <div class="empty2">
       <div class="g">` + iconSearch + `</div>
       <h3>Nothing here right now</h3>
       <p>No opportunities match this filter. The next hunt runs tonight at 02:00.</p>
     </div>
+    {{else}}
+    <div class="empty2">
+      <div class="g">` + iconSearch + `</div>
+      <h3>No opportunities yet</h3>
+      <p>The pipeline runs on a schedule and the next hunt lands here automatically — the first results show up after tonight&#39;s 02:00 SAM.gov run.</p>
+    </div>
+    {{end}}
     {{end}}
   </div>
 </div>
@@ -544,8 +552,16 @@ type OverviewData struct {
 	TodayRows   []TriageRow
 	EarlierRows []TriageRow
 	Empty       bool
+	// Filtered is true when an active recommendation filter is in effect. It lets
+	// the empty state distinguish a genuinely-empty queue ("No opportunities yet")
+	// from a non-empty queue that simply has no rows under the current filter
+	// ("Nothing here right now") — WS-C4.
+	Filtered bool
 	// FirstRun is true when no company profile has been configured yet (WS-C3): the
 	// Triage screen then surfaces a prominent "Complete onboarding" entry point.
+	// When FirstRun is true the empty-state panel is suppressed so a brand-new
+	// deployment shows the single onboarding message rather than two conflicting
+	// empty states (WS-C4).
 	FirstRun bool
 }
 
@@ -662,8 +678,15 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data.Empty = len(rows) == 0
+	// Filtered drives which empty-state copy the Triage shows: when a
+	// recommendation filter is active the empty state reads "Nothing here right
+	// now" (the queue has rows, none match); otherwise it reads the friendly
+	// first-run "No opportunities yet" (WS-C4).
+	data.Filtered = opts.Recommendation != ""
 	// WS-C3 first-run entry point: if no company profile is configured, surface a
 	// prominent link to onboarding so a brand-new deployment is not a dead end.
+	// The template suppresses the "no opportunities" empty state in this case so
+	// the operator sees one message, not two conflicting ones (WS-C4).
 	data.FirstRun = h.firstRunRedirect()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
