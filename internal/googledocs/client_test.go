@@ -13,8 +13,8 @@ func TestConfig_Defaults(t *testing.T) {
 	if len(cfg.CredentialsJSON) != 0 {
 		t.Errorf("Expected empty CredentialsJSON, got %q", cfg.CredentialsJSON)
 	}
-	if cfg.SharedDriveID != "" {
-		t.Errorf("Expected empty SharedDriveID, got %q", cfg.SharedDriveID)
+	if cfg.DestinationID != "" {
+		t.Errorf("Expected empty DestinationID, got %q", cfg.DestinationID)
 	}
 	if cfg.UseCached {
 		t.Error("Expected UseCached to be false")
@@ -41,7 +41,7 @@ func TestNewClient_CachedMode(t *testing.T) {
 func TestNewClient_LiveModeNoCredentials(t *testing.T) {
 	cfg := Config{
 		UseCached:     false,
-		SharedDriveID: "shared-drive-id",
+		DestinationID: "destination-id",
 	}
 
 	_, err := NewClient(context.Background(), cfg)
@@ -50,22 +50,22 @@ func TestNewClient_LiveModeNoCredentials(t *testing.T) {
 	}
 }
 
-// TestNewClient_ADCMode_NoSharedDrive verifies that ADC mode still requires a
-// SharedDriveID — ADC only changes how credentials are resolved, not other validation.
-func TestNewClient_ADCMode_NoSharedDrive(t *testing.T) {
+// TestNewClient_ADCMode_NoDestination verifies that ADC mode still requires a
+// DestinationID — ADC only changes how credentials are resolved, not other validation.
+func TestNewClient_ADCMode_NoDestination(t *testing.T) {
 	cfg := Config{
 		UseADC: true,
 	}
 
 	_, err := NewClient(context.Background(), cfg)
 	if err == nil {
-		t.Fatal("Expected error when creating ADC client without a SharedDriveID")
+		t.Fatal("Expected error when creating ADC client without a DestinationID")
 	}
 }
 
-// TestNewClient_LiveModeNoSharedDrive verifies that creating a live client without
-// a configured Shared Drive ID fails with a clear error.
-func TestNewClient_LiveModeNoSharedDrive(t *testing.T) {
+// TestNewClient_LiveModeNoDestination verifies that creating a live client without
+// a configured destination folder ID fails with a clear error.
+func TestNewClient_LiveModeNoDestination(t *testing.T) {
 	cfg := Config{
 		UseCached:       false,
 		CredentialsJSON: []byte(`{"type": "service_account"}`),
@@ -73,7 +73,7 @@ func TestNewClient_LiveModeNoSharedDrive(t *testing.T) {
 
 	_, err := NewClient(context.Background(), cfg)
 	if err == nil {
-		t.Fatal("Expected error when creating live client without a Shared Drive ID")
+		t.Fatal("Expected error when creating live client without a destination folder ID")
 	}
 }
 

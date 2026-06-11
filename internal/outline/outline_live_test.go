@@ -28,7 +28,7 @@ func TestLive_OutlineAgent_CreatesGoogleDoc(t *testing.T) {
 		t.Skip("GOOGLE_DRIVE_SHARED_DRIVE_ID not set — skipping live test")
 	}
 
-	cfg := googledocs.Config{SharedDriveID: driveID}
+	cfg := googledocs.Config{DestinationID: driveID}
 
 	credsRaw := os.Getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
 	if credsRaw != "" {

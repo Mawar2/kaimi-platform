@@ -17,7 +17,7 @@ import (
 // parent to create files under.
 type Target struct {
 	// DriveID is the Shared Drive or folder id new Docs are created in. It maps
-	// directly to googledocs.Config.SharedDriveID.
+	// directly to googledocs.Config.DestinationID.
 	DriveID string `json:"drive_id"`
 }
 

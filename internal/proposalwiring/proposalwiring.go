@@ -266,6 +266,6 @@ func resolveDocsClient(ctx context.Context, opts Options) (googledocs.Client, er
 	log.Printf("Customer Drive: LIVE — proposal Docs will be created in the customer's Drive (target %s)", target.DriveID)
 	return googledocs.NewClient(ctx, googledocs.Config{
 		TokenSource:   ts,
-		SharedDriveID: target.DriveID,
+		DestinationID: target.DriveID,
 	})
 }
