@@ -70,7 +70,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 
 	// One company profile feeds both the Hunter/Scorer and the Writer's grounding
 	// (WS-A3). The Writer consumes the flattened scorer view, derived from the
-	// single profile via ToScorerProfile rather than a separate hand-maintained
+	// single profile via scorer.FromProfile rather than a separate hand-maintained
 	// scorer JSON.
 	scorerProfile := &scorer.CapabilityProfile{}
 	if cfg.Profile.WriterPath != "" {
@@ -78,7 +78,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 		if err != nil {
 			return nil, fmt.Errorf("load profile: %w", err)
 		}
-		derived := companyProfile.ToScorerProfile()
+		derived := scorer.FromProfile(companyProfile)
 		scorerProfile = &derived
 	}
 

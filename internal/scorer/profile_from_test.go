@@ -1,4 +1,4 @@
-package profile
+package scorer
 
 import (
 	"encoding/json"
@@ -6,25 +6,25 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Mawar2/Kaimi/internal/scorer"
+	"github.com/Mawar2/Kaimi/internal/profile"
 )
 
-// TestToScorerProfile_GoldenParity is the WS-A3 parity guard. It proves the
-// single company profile (config/profile.json) derives a scorer.CapabilityProfile
-// that is semantically identical to the hand-maintained scorer view the Scorer
+// TestFromProfile_GoldenParity is the WS-A3 parity guard. It proves the single
+// company profile (config/profile.json) derives a scorer.CapabilityProfile that
+// is semantically identical to the hand-maintained scorer view the Scorer
 // consumed before unification (config/bluemeta_scorer_profile.json).
 //
 // Before WS-A3 the Scorer loaded config/bluemeta_scorer_profile.json directly and
 // the Hunter loaded config/profile.json — two files kept in sync by hand. This
 // test pins the derivation so that ONE file can feed both without changing the
 // Scorer's inputs.
-func TestToScorerProfile_GoldenParity(t *testing.T) {
-	p, err := LoadProfile("../../config/profile.json")
+func TestFromProfile_GoldenParity(t *testing.T) {
+	p, err := profile.LoadProfile("../../config/profile.json")
 	if err != nil {
 		t.Fatalf("LoadProfile(config/profile.json) failed: %v", err)
 	}
 
-	got := p.ToScorerProfile()
+	got := FromProfile(p)
 
 	// The golden file is the exact scorer view that was hand-maintained and
 	// consumed by the Scorer/Writer before unification.
@@ -32,7 +32,7 @@ func TestToScorerProfile_GoldenParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden scorer profile: %v", err)
 	}
-	var want scorer.CapabilityProfile
+	var want CapabilityProfile
 	if err := json.Unmarshal(data, &want); err != nil {
 		t.Fatalf("parse golden scorer profile: %v", err)
 	}
@@ -42,17 +42,17 @@ func TestToScorerProfile_GoldenParity(t *testing.T) {
 	}
 }
 
-// TestToScorerProfile_FieldMapping documents the field-by-field mapping so a
+// TestFromProfile_FieldMapping documents the field-by-field mapping so a
 // regression in any single field is reported precisely rather than as one opaque
 // DeepEqual failure.
-func TestToScorerProfile_FieldMapping(t *testing.T) {
-	p := &CapabilityProfile{
-		NAICSCodes: []NAICSCode{
-			{Code: "541519", Tier: TierPrimary},
-			{Code: "518210", Tier: TierSecondary},
+func TestFromProfile_FieldMapping(t *testing.T) {
+	p := &profile.CapabilityProfile{
+		NAICSCodes: []profile.NAICSCode{
+			{Code: "541519", Tier: profile.TierPrimary},
+			{Code: "518210", Tier: profile.TierSecondary},
 		},
-		SetAside: SetAsideStatus{SDB: true},
-		Scoring: ScoringHints{
+		SetAside: profile.SetAsideStatus{SDB: true},
+		Scoring: profile.ScoringHints{
 			PrimaryNAICS:        []string{"541519"},
 			SecondaryNAICS:      []string{"518210", "519290"},
 			CompetencyTags:      []string{"AI/ML", "cloud"},
@@ -61,7 +61,7 @@ func TestToScorerProfile_FieldMapping(t *testing.T) {
 		},
 	}
 
-	got := p.ToScorerProfile()
+	got := FromProfile(p)
 
 	if !reflect.DeepEqual(got.PrimaryNAICS, []string{"541519"}) {
 		t.Errorf("PrimaryNAICS = %v", got.PrimaryNAICS)

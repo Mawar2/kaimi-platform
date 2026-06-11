@@ -1,5 +1,7 @@
 package scorer
 
+import "github.com/Mawar2/Kaimi/internal/profile"
+
 // CapabilityProfile describes a company's capabilities used for bid/no-bid scoring.
 //
 // This is distinct from the eligibility profile in internal/profile: the eligibility
@@ -35,4 +37,28 @@ type CapabilityProfile struct {
 	// when SDBStatus is true (e.g., "SDB", "SBA").
 	// Case-insensitive comparison against the opportunity's SetAsideCode.
 	QualifyingSetAsides []string `json:"qualifying_set_asides"`
+}
+
+// FromProfile projects the single company profile (profile.CapabilityProfile)
+// into the flattened view the Scorer consumes (CapabilityProfile).
+//
+// This is the unification point for WS-A3: the Hunter eligibility gate and the
+// Scorer now read ONE profile file; the Scorer's input is derived here rather
+// than loaded from a second hand-maintained JSON. The projection is pinned by a
+// golden-file parity test against the pre-unification scorer profile.
+//
+// The dependency points the correct way: the scorer engine imports the
+// foundation profile package, not the reverse. SDBStatus is derived from the
+// authoritative eligibility flag (SetAside.SDB) so the Scorer's SDB signal can
+// never drift from the company's actual certification. The remaining
+// scoring-only signals come from p.Scoring (see profile.ScoringHints).
+func FromProfile(p *profile.CapabilityProfile) CapabilityProfile {
+	return CapabilityProfile{
+		PrimaryNAICS:        p.Scoring.PrimaryNAICS,
+		SecondaryNAICS:      p.Scoring.SecondaryNAICS,
+		CompetencyTags:      p.Scoring.CompetencyTags,
+		PastPerformance:     p.Scoring.PastPerformance,
+		SDBStatus:           p.SetAside.SDB,
+		QualifyingSetAsides: p.Scoring.QualifyingSetAsides,
+	}
 }

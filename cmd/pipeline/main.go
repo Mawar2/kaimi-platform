@@ -15,7 +15,7 @@
 //   - STORE_PATH:            store directory            (default: ./queue)
 //   - ELIGIBILITY_PROFILE_PATH: company profile JSON/YAML (default: config/profile.json)
 //     — one profile feeds both the Hunter gate and the Scorer (WS-A3); the Scorer
-//     view is derived from it via profile.ToScorerProfile.
+//     view is derived from it via scorer.FromProfile.
 //   - NAICS_CODES:           comma-separated overrides   (default: profile's codes)
 //   - SAM_API_KEY:           required for live mode
 //   - GCP_PROJECT_ID:        required for live mode
@@ -70,13 +70,13 @@ func run() error {
 
 	// One profile feeds both the Hunter gate and the Scorer (WS-A3). The Hunter
 	// uses the structured eligibility facts (NAICS tiers, set-aside flags) directly;
-	// the Scorer consumes the flattened, weighted view derived via ToScorerProfile.
+	// the Scorer consumes the flattened, weighted view derived via scorer.FromProfile.
 	companyProfile, err := profile.LoadProfile(cfg.Profile.EligibilityPath)
 	if err != nil {
 		return fmt.Errorf("failed to load company profile: %w", err)
 	}
 	eligibilityProfile := companyProfile
-	scoringProfile := companyProfile.ToScorerProfile()
+	scoringProfile := scorer.FromProfile(companyProfile)
 
 	opportunityStore, err := store.NewJSONStore(cfg.Store.Path)
 	if err != nil {
@@ -154,9 +154,14 @@ func parseConfig() (config.Config, error) {
 	storePath := flag.String("store-path", getEnv("STORE_PATH", "./queue"), "Store directory path")
 	// One company profile (profile.CapabilityProfile) now feeds both the Hunter
 	// eligibility gate and the Scorer (the Scorer view is derived via
-	// ToScorerProfile), replacing the previously separate scoring-profile JSON.
+	// scorer.FromProfile), replacing the previously separate scoring-profile JSON.
 	// The env var is ELIGIBILITY_PROFILE_PATH (resolved by config.Load).
 	profilePath := flag.String("profile", getEnv("ELIGIBILITY_PROFILE_PATH", "config/profile.json"), "Company profile JSON/YAML path (feeds Hunter gate + Scorer)")
+	// --eligibility-profile is a deprecated alias of --profile kept for backward
+	// compatibility. Before WS-A3 there were two profile flags (--profile for the
+	// scorer view, --eligibility-profile for the Hunter gate); they are now one
+	// file. Both flags set the single profile path; --profile wins if both are set.
+	eligibilityProfilePath := flag.String("eligibility-profile", "", "DEPRECATED alias of --profile (the profiles are unified; both set the one company profile path)")
 	naics := flag.String("naics", getEnv("NAICS_CODES", ""), "Comma-separated NAICS codes (default: profile's codes)")
 	project := flag.String("project", getEnv("GCP_PROJECT_ID", ""), "GCP project ID (required for live mode)")
 	region := flag.String("region", getEnv("GCP_REGION", "us-east4"), "GCP region")
@@ -167,10 +172,16 @@ func parseConfig() (config.Config, error) {
 	// Only forward flags the operator explicitly set so config.Load's precedence
 	// (flag > env > file > default) holds; unset flags fall through to env/file.
 	set := setFlags()
+	// --profile and its deprecated alias --eligibility-profile both set the single
+	// company profile path; --profile wins when both are provided.
+	profileFlag := pick(set, "profile", profilePath)
+	if profileFlag == nil {
+		profileFlag = pick(set, "eligibility-profile", eligibilityProfilePath)
+	}
 	f := &config.Flags{
 		Mode:                   pick(set, "mode", mode),
 		StorePath:              pick(set, "store-path", storePath),
-		EligibilityProfilePath: pick(set, "profile", profilePath),
+		EligibilityProfilePath: profileFlag,
 		NAICSCodes:             pick(set, "naics", naics),
 		ProjectID:              pick(set, "project", project),
 		Region:                 pick(set, "region", region),

@@ -33,7 +33,6 @@ func TestLoad_Defaults(t *testing.T) {
 	}{
 		{"Mode", cfg.Mode, "cached"},
 		{"Store.Path", cfg.Store.Path, "./queue"},
-		{"Profile.ScoringPath", cfg.Profile.ScoringPath, "./test/fixtures/capability_profile.json"},
 		{"Profile.EligibilityPath", cfg.Profile.EligibilityPath, "config/profile.json"},
 		{"Profile.WriterPath", cfg.Profile.WriterPath, "config/profile.json"},
 		{"GCP.Region", cfg.GCP.Region, "us-east4"},
@@ -96,6 +95,38 @@ func TestLoad_EnvOverridesDefault(t *testing.T) {
 	if cfg.Server.Port != 9999 {
 		t.Errorf("Server.Port = %d, want 9999", cfg.Server.Port)
 	}
+}
+
+// TestLoad_ProfilePathAlias documents the WS-A3 consolidation: one company
+// profile feeds both the Hunter gate and the Scorer. ELIGIBILITY_PROFILE_PATH is
+// the canonical env var, and the legacy PROFILE_PATH (which formerly set the now-
+// removed separate scoring profile) is honored as a backward-compatible alias so
+// existing deployments/scripts do not silently lose their profile path.
+func TestLoad_ProfilePathAlias(t *testing.T) {
+	t.Run("PROFILE_PATH alias sets the single profile", func(t *testing.T) {
+		clearKaimiEnv(t)
+		setEnv(t, "PROFILE_PATH", "/legacy/profile.json")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() unexpected error: %v", err)
+		}
+		if cfg.Profile.EligibilityPath != "/legacy/profile.json" {
+			t.Errorf("EligibilityPath = %q, want /legacy/profile.json (PROFILE_PATH alias)", cfg.Profile.EligibilityPath)
+		}
+	})
+
+	t.Run("ELIGIBILITY_PROFILE_PATH wins over the PROFILE_PATH alias", func(t *testing.T) {
+		clearKaimiEnv(t)
+		setEnv(t, "PROFILE_PATH", "/legacy/profile.json")
+		setEnv(t, "ELIGIBILITY_PROFILE_PATH", "/canonical/profile.json")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() unexpected error: %v", err)
+		}
+		if cfg.Profile.EligibilityPath != "/canonical/profile.json" {
+			t.Errorf("EligibilityPath = %q, want /canonical/profile.json (canonical var wins)", cfg.Profile.EligibilityPath)
+		}
+	})
 }
 
 func TestLoad_FlagOverridesEnv(t *testing.T) {

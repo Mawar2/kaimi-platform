@@ -1,14 +1,14 @@
 package profile
 
-import "github.com/Mawar2/Kaimi/internal/scorer"
-
 // ScoringHints carries the curated, weighted signals the Scorer consumes that
-// are NOT mechanically derivable from the eligibility facts above.
+// are NOT mechanically derivable from the eligibility facts in CapabilityProfile.
 //
 // Before WS-A3 these lived in a separate hand-maintained file
 // (config/bluemeta_scorer_profile.json) that had to be kept in sync with the
 // eligibility profile by hand. They are folded into the single CapabilityProfile
-// so one file feeds both the Hunter gate and the Scorer.
+// so one file feeds both the Hunter gate and the Scorer. The Scorer derives its
+// flattened view from this profile via scorer.FromProfile (which imports this
+// package — the foundation profile package does NOT depend on the scorer engine).
 //
 // Why they are not derived from the eligibility fields:
 //   - CompetencyTags are lowercase keyword expansions (e.g. "machine learning",
@@ -42,26 +42,4 @@ type ScoringHints struct {
 	// QualifyingSetAsides are the set-aside codes that activate the SDB signal
 	// when the company is an SDB (see SetAsideStatus.SDB).
 	QualifyingSetAsides []string `json:"qualifying_set_asides" yaml:"qualifying_set_asides"`
-}
-
-// ToScorerProfile projects the single company profile into the flattened view the
-// Scorer consumes (scorer.CapabilityProfile).
-//
-// This is the unification point for WS-A3: the Hunter eligibility gate and the
-// Scorer now read ONE profile file; the Scorer's input is derived here rather than
-// loaded from a second hand-maintained JSON. The projection is pinned by a
-// golden-file parity test against the pre-unification scorer profile.
-//
-// SDBStatus is derived from the authoritative eligibility flag (SetAside.SDB) so
-// the Scorer's SDB signal can never drift from the company's actual certification.
-// The remaining scoring-only signals come from Scoring (see ScoringHints).
-func (p *CapabilityProfile) ToScorerProfile() scorer.CapabilityProfile {
-	return scorer.CapabilityProfile{
-		PrimaryNAICS:        p.Scoring.PrimaryNAICS,
-		SecondaryNAICS:      p.Scoring.SecondaryNAICS,
-		CompetencyTags:      p.Scoring.CompetencyTags,
-		PastPerformance:     p.Scoring.PastPerformance,
-		SDBStatus:           p.SetAside.SDB,
-		QualifyingSetAsides: p.Scoring.QualifyingSetAsides,
-	}
 }
