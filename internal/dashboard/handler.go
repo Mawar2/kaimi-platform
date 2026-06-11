@@ -44,6 +44,15 @@ type Handler struct {
 	identity     IdentityFunc
 	driveStatus  DriveStatusFunc
 
+	// insecureNoAuth records whether running WITHOUT authentication is an explicit
+	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
+	// cmd/api uses to gate the whole API). It defaults to false so production fails
+	// closed: a state-mutating onboarding POST with no resolvable session is rejected
+	// rather than silently allowed. It is set true ONLY in explicit local dev, where
+	// the onboarding profile write is permitted without a CSRF token (relying on the
+	// SameSite=Lax cookie + same-origin server). See handleOnboardingProfile.
+	insecureNoAuth bool
+
 	// tenantName is the configured customer display name shown in the sidebar
 	// account block (e.g. "Example Federal Co"). It is the only customer-identity
 	// string in the dashboard chrome; the Kaimi product brand (colors, mark,
@@ -71,6 +80,16 @@ func WithProposals(svc *proposal.Service) Option {
 // neutral product label ("Kaimi"); the rest of the brand chrome is unaffected.
 func WithTenantName(name string) Option {
 	return func(h *Handler) { h.tenantName = name }
+}
+
+// WithInsecureNoAuth records whether unauthenticated, state-mutating onboarding
+// POSTs are an EXPLICIT operator opt-in (local dev only). cmd/api passes the same
+// allowInsecure value it uses to gate the API, so production (OAuth on, allowInsecure
+// false) fails closed: an onboarding profile write with no resolvable session is
+// rejected. When true (dev), the write is permitted without a CSRF token, relying on
+// the SameSite=Lax session cookie + same-origin server.
+func WithInsecureNoAuth(allow bool) Option {
+	return func(h *Handler) { h.insecureNoAuth = allow }
 }
 
 // NewHandler initializes a new dashboard handler.

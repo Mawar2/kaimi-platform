@@ -119,18 +119,27 @@ func TestOnboardingNoStore503(t *testing.T) {
 	}
 }
 
-// TestOnboardingPostValidPersistsAndRedirects proves a valid POST persists the
-// profile and redirects (PRG, 303) to /onboarding?saved=1, and that a subsequent GET
-// reflects the saved values.
+// identityOpt wires a fixed authenticated identity + CSRF token for the POST tests.
+func identityOpt(email, csrf string) dashboard.Option {
+	return dashboard.WithIdentity(func(context.Context) (dashboard.Identity, bool) {
+		return dashboard.Identity{Email: email, CSRFToken: csrf}, true
+	})
+}
+
+// TestOnboardingPostValidPersistsAndRedirects proves a valid POST (authenticated +
+// matching CSRF token) persists the profile and redirects (PRG, 303) to
+// /onboarding?saved=1, and that a subsequent GET reflects the saved values.
 func TestOnboardingPostValidPersistsAndRedirects(t *testing.T) {
+	const token = "session-csrf"
 	pstore := &memProfileStore{}
-	h := newOnboardingHandler(t, dashboard.WithProfileStore(pstore))
+	h := newOnboardingHandler(t, dashboard.WithProfileStore(pstore), identityOpt("u@example.com", token))
 
 	form := url.Values{}
 	form.Set("company", "New Co")
 	form.Set("uei", "ZZZ999")
 	form.Set("naics", "541511|Web Programming|primary\n541512")
 	form.Set("sa_small_business", "on")
+	form.Set("csrf_token", token)
 
 	req := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -170,12 +179,14 @@ func TestOnboardingPostValidPersistsAndRedirects(t *testing.T) {
 // TestOnboardingPostInvalidReRendersAndPersistsNothing proves an invalid POST (no
 // NAICS) re-renders the form with an error, returns 400, and persists nothing.
 func TestOnboardingPostInvalidReRendersAndPersistsNothing(t *testing.T) {
+	const token = "session-csrf"
 	pstore := &memProfileStore{}
-	h := newOnboardingHandler(t, dashboard.WithProfileStore(pstore))
+	h := newOnboardingHandler(t, dashboard.WithProfileStore(pstore), identityOpt("u@example.com", token))
 
 	form := url.Values{}
 	form.Set("company", "Has Name But No NAICS")
-	// No naics field → fails profile.Validate.
+	form.Set("csrf_token", token)
+	// No naics field → fails profile.Validate (after passing the auth/CSRF gate).
 
 	req := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -312,52 +323,96 @@ func TestOnboardingShowsSignedInIdentity(t *testing.T) {
 	}
 }
 
-// TestOnboardingCSRFRequired proves that when an identity with a CSRF token is wired,
-// a POST with a missing/bad token is rejected (403) and persists nothing, while the
-// matching token is accepted.
-func TestOnboardingCSRFRequired(t *testing.T) {
-	const token = "good-token"
-	identity := dashboard.WithIdentity(func(context.Context) (dashboard.Identity, bool) {
-		return dashboard.Identity{Email: "u@example.com", CSRFToken: token}, true
-	})
-
-	baseForm := func() url.Values {
-		f := url.Values{}
-		f.Set("company", "CSRF Co")
-		f.Set("naics", "541512")
-		return f
-	}
-
-	// Bad token → 403, nothing persisted.
+// postOnboardingProfile drives a POST /onboarding/profile against a handler wired with
+// the given options, supplying a valid company+NAICS body plus the given CSRF token
+// value (omitted when csrf == ""). It returns the recorder and the store so callers can
+// assert the status and whether anything persisted.
+func postOnboardingProfile(t *testing.T, csrf string, opts ...dashboard.Option) (*httptest.ResponseRecorder, *memProfileStore) {
+	t.Helper()
 	pstore := &memProfileStore{}
-	h := newOnboardingHandler(t, dashboard.WithProfileStore(pstore), identity)
-	form := baseForm()
-	form.Set("csrf_token", "wrong")
+	allOpts := append([]dashboard.Option{dashboard.WithProfileStore(pstore)}, opts...)
+	h := newOnboardingHandler(t, allOpts...)
+
+	form := url.Values{}
+	form.Set("company", "CSRF Co")
+	form.Set("naics", "541512")
+	if csrf != "" {
+		form.Set("csrf_token", csrf)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	return rec, pstore
+}
+
+// TestOnboardingCSRFValidTokenPersists proves an authenticated POST with the matching
+// CSRF token is accepted (303 PRG) and persists the profile.
+func TestOnboardingCSRFValidTokenPersists(t *testing.T) {
+	const token = "good-token"
+	rec, pstore := postOnboardingProfile(t, token, identityOpt("u@example.com", token))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("good-CSRF POST status = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := pstore.Load(); err != nil {
+		t.Errorf("good-CSRF POST did not persist a profile: %v", err)
+	}
+}
+
+// TestOnboardingCSRFWrongTokenRejected proves an authenticated POST with a WRONG CSRF
+// token is rejected (403) and persists nothing.
+func TestOnboardingCSRFWrongTokenRejected(t *testing.T) {
+	rec, pstore := postOnboardingProfile(t, "wrong", identityOpt("u@example.com", "good-token"))
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("bad-CSRF POST status = %d, want 403", rec.Code)
+		t.Fatalf("wrong-CSRF POST status = %d, want 403", rec.Code)
 	}
 	if _, err := pstore.Load(); err == nil {
-		t.Errorf("bad-CSRF POST persisted a profile")
+		t.Errorf("wrong-CSRF POST persisted a profile")
 	}
+}
 
-	// Good token → 303, persisted.
-	pstore2 := &memProfileStore{}
-	h2 := newOnboardingHandler(t, dashboard.WithProfileStore(pstore2), identity)
-	form2 := baseForm()
-	form2.Set("csrf_token", token)
-	req2 := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form2.Encode()))
-	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec2 := httptest.NewRecorder()
-	h2.ServeHTTP(rec2, req2)
-	if rec2.Code != http.StatusSeeOther {
-		t.Fatalf("good-CSRF POST status = %d, want 303; body=%s", rec2.Code, rec2.Body.String())
+// TestOnboardingCSRFMissingTokenRejected proves an authenticated POST with a
+// MISSING/EMPTY CSRF token is rejected (403) and persists nothing. This guards the
+// removed `&& ident.CSRFToken != ""` bypass: an authenticated session must always
+// supply a token.
+func TestOnboardingCSRFMissingTokenRejected(t *testing.T) {
+	rec, pstore := postOnboardingProfile(t, "", identityOpt("u@example.com", "good-token"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("missing-CSRF POST status = %d, want 403", rec.Code)
 	}
-	if _, err := pstore2.Load(); err != nil {
-		t.Errorf("good-CSRF POST did not persist a profile: %v", err)
+	if _, err := pstore.Load(); err == nil {
+		t.Errorf("missing-CSRF POST persisted a profile")
+	}
+}
+
+// TestOnboardingNoIdentityFailsClosed is the key fail-closed test: with no resolvable
+// identity (ok == false) and insecureNoAuth NOT set (production default), a
+// state-mutating POST is rejected (403) and persists NOTHING. The mutation must not
+// fall through to the store just because the upstream session middleware was bypassed.
+func TestOnboardingNoIdentityFailsClosed(t *testing.T) {
+	// No WithIdentity and no WithInsecureNoAuth → resolveIdentity returns ok=false and
+	// insecureNoAuth defaults false.
+	rec, pstore := postOnboardingProfile(t, "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("no-identity POST status = %d, want 403 (fail closed); body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := pstore.Load(); err == nil {
+		t.Errorf("no-identity POST persisted a profile (must fail closed)")
+	}
+}
+
+// TestOnboardingNoIdentityInsecureDevAllowed documents the explicit dev exception:
+// with no identity but WithInsecureNoAuth(true) (the operator's deliberate
+// -insecure-no-auth opt-in), the POST is allowed WITHOUT a CSRF token and persists,
+// relying on SameSite=Lax + same-origin. This path must NEVER be the production
+// default.
+func TestOnboardingNoIdentityInsecureDevAllowed(t *testing.T) {
+	rec, pstore := postOnboardingProfile(t, "", dashboard.WithInsecureNoAuth(true))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("insecure-dev POST status = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := pstore.Load(); err != nil {
+		t.Errorf("insecure-dev POST did not persist a profile: %v", err)
 	}
 }
 

@@ -198,6 +198,12 @@ func run() error {
 		// store the JSON API does, so /onboarding pre-fills + persists the company
 		// profile and the Triage screen surfaces a first-run "Complete onboarding" link.
 		dashboard.WithProfileStore(profileStore),
+		// Fail-closed mutation gate for the onboarding profile write: pass the SAME
+		// allowInsecure opt-in the API/RequireSessionHTML use. In production
+		// (allowInsecure == false) an onboarding POST with no resolvable session is
+		// rejected rather than silently allowed; only an explicit -insecure-no-auth /
+		// KAIMI_INSECURE_NO_AUTH dev run permits the unauthenticated (CSRF-free) write.
+		dashboard.WithInsecureNoAuth(allowInsecure),
 	}
 	// Inject the signed-in identity + per-session CSRF token so the onboarding form
 	// shows who is signed in and is CSRF-protected. The dashboard cannot read the

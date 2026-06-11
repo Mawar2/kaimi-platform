@@ -314,11 +314,13 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 	h.renderOnboarding(w, &data)
 }
 
-// handleOnboardingProfile serves POST /onboarding/profile. It enforces CSRF (when a
-// session is present), parses the form into a CapabilityProfile, validates it with
-// the SHARED profile.Validate, and persists it via the ProfileStore. On a validation
-// failure it re-renders the form with the error and persists NOTHING; on success it
-// follows the PRG pattern, redirecting to /onboarding?saved=1.
+// handleOnboardingProfile serves POST /onboarding/profile. It FAILS CLOSED on auth:
+// this is a state-mutating endpoint, so it does NOT trust upstream middleware alone —
+// it re-checks identity and CSRF here before mutating. It then parses the form into a
+// CapabilityProfile, validates it with the SHARED profile.Validate, and persists it
+// via the ProfileStore. On a validation failure it re-renders the form with the error
+// and persists NOTHING; on success it follows the PRG pattern, redirecting to
+// /onboarding?saved=1.
 func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request) {
 	if h.profileStore == nil {
 		http.Error(w, "onboarding is not available in this deployment", http.StatusServiceUnavailable)
@@ -329,16 +331,10 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// CSRF defense in depth (on top of the SameSite=Lax session cookie): when a
-	// session-derived token is available, the submitted token must match it
-	// (constant-time). When no session/CSRF is active (insecure dev mode), we rely on
-	// SameSite=Lax + same-origin only.
-	if ident, ok := h.resolveIdentity(r); ok && ident.CSRFToken != "" {
-		submitted := r.PostFormValue("csrf_token")
-		if subtle.ConstantTimeCompare([]byte(submitted), []byte(ident.CSRFToken)) != 1 {
-			http.Error(w, "invalid CSRF token", http.StatusForbidden)
-			return
-		}
+	// Fail-closed auth + CSRF gate (defense in depth on top of the upstream HTML
+	// session middleware). NOTHING is mutated until this gate passes.
+	if !h.authorizeMutation(w, r) {
+		return
 	}
 
 	p := parseProfileForm(r)
@@ -361,6 +357,45 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 
 	// PRG: redirect so a refresh does not re-POST the form.
 	http.Redirect(w, r, onboardingPath+"?saved=1", http.StatusSeeOther)
+}
+
+// authorizeMutation is the fail-closed auth + CSRF gate every state-mutating
+// onboarding POST must pass before it touches the store. It writes the rejection
+// response itself and returns false on denial; callers must NOT mutate when it
+// returns false. The endpoint is served behind the C3a HTML session middleware, but
+// a mutation never relies on upstream middleware alone — it re-resolves identity here.
+//
+// The policy:
+//   - Authenticated session present (ok == true): a valid CSRF token is REQUIRED. The
+//     submitted form token must constant-time-equal ident.CSRFToken, and neither may
+//     be empty. An empty submitted token, an empty session token, or a mismatch is a
+//     403 and no mutation. (There is deliberately no "empty session token bypass".)
+//   - No identity (ok == false): FAIL CLOSED by default — reject 403, no mutation.
+//     The ONLY exception is explicit insecure dev mode (h.insecureNoAuth, set from the
+//     same -insecure-no-auth/KAIMI_INSECURE_NO_AUTH opt-in cmd/api uses to gate the
+//     whole API). In that dev-only path there is no session and thus no CSRF token, so
+//     the write is allowed relying on the SameSite=Lax cookie + same-origin server.
+//
+// The CSRF token/secret is never logged.
+func (h *Handler) authorizeMutation(w http.ResponseWriter, r *http.Request) bool {
+	ident, ok := h.resolveIdentity(r)
+	if ok {
+		// Authenticated: require a valid, non-empty CSRF token (constant-time compare).
+		submitted := r.PostFormValue("csrf_token")
+		if ident.CSRFToken == "" || submitted == "" ||
+			subtle.ConstantTimeCompare([]byte(submitted), []byte(ident.CSRFToken)) != 1 {
+			http.Error(w, "invalid CSRF token", http.StatusForbidden)
+			return false
+		}
+		return true
+	}
+	// No identity. Allow ONLY when the operator has explicitly opted into insecure dev
+	// mode; otherwise fail closed.
+	if h.insecureNoAuth {
+		return true
+	}
+	http.Error(w, "authentication required", http.StatusForbidden)
+	return false
 }
 
 // newOnboardingData builds the base view-model with the shell + identity populated.
