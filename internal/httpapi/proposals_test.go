@@ -81,7 +81,9 @@ func seedProposalServer(t *testing.T, fp ProposalService) http.Handler {
 	if f, ok := fp.(*fakeProposals); ok {
 		f.store = s
 	}
-	srv := New(Deps{Dashboard: dashboard.NewService(s), Proposals: fp})
+	// Select/status tests run without OAuth; opt in to the insecure no-auth path so
+	// Routes() builds instead of failing closed (the production default).
+	srv := New(Deps{Dashboard: dashboard.NewService(s), Proposals: fp, AllowInsecureNoAuth: true})
 	return srv.Routes()
 }
 

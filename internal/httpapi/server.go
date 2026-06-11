@@ -33,6 +33,15 @@ type Deps struct {
 	// routes are simply not registered. When present, its session manager also backs
 	// the WS-B5 RequireSession middleware via ParseSession.
 	Auth *AuthHandler
+
+	// AllowInsecureNoAuth is an EXPLICIT, dev-only opt-in to run the /api/v1 API
+	// WITHOUT authentication when no OAuth is configured (Auth == nil). It defaults
+	// to false so the server FAILS CLOSED: a production deploy with a missing or
+	// typo'd OAuth env var will NOT silently serve an open API — Routes() panics
+	// instead. The caller (cmd/api) must deliberately set this true (via
+	// -insecure-no-auth / KAIMI_INSECURE_NO_AUTH) to run open for local UI dev. It
+	// has no effect when Auth is non-nil; OAuth always takes precedence.
+	AllowInsecureNoAuth bool
 }
 
 // Server is the JSON API's HTTP application. It holds its dependencies and builds
@@ -94,17 +103,24 @@ func (s *Server) Routes() http.Handler {
 	// WS-B5 auth seam: wrap ONLY this group with RequireSession so /api/v1/* demands
 	// a valid session, while rootMux's own routes (/healthz, /auth/*) stay public.
 	//
-	// Offline/dev behavior: when OAuth is not configured (Deps.Auth nil) there is no
-	// session manager to verify against, so the wrap is SKIPPED and the API is left
-	// open for credential-less local UI development. This is logged loudly at startup
-	// (a WARNING) so an UNAUTHENTICATED API is never shipped silently. PRODUCTION must
-	// configure OAuth (cmd/api requires OAUTH_*/SESSION_SECRET) so this branch is not
-	// taken and every /api/v1 request is authenticated.
+	// The wrap decision FAILS CLOSED by default. There are exactly three cases:
+	//
+	//   1. Auth configured (Deps.Auth != nil) → always wrap with RequireSession.
+	//      This is the production path; OAuth always takes precedence.
+	//   2. Auth nil AND AllowInsecureNoAuth == true → skip the wrap and log a loud
+	//      WARNING. This is the EXPLICIT local-dev opt-in for credential-less UI work.
+	//   3. Auth nil AND AllowInsecureNoAuth == false → PANIC. We refuse to serve an
+	//      open API by default, so a production deploy with a missing/typo'd OAuth
+	//      env var can never silently come up unauthenticated. A panic at wiring time
+	//      is the desired backstop: the insecure server never starts.
 	var apiHandler http.Handler = apiMux
-	if s.deps.Auth != nil {
+	switch {
+	case s.deps.Auth != nil:
 		apiHandler = s.RequireSession(apiHandler)
-	} else {
-		log.Printf("WARNING: Workspace OAuth not configured; the /api/v1 API is UNAUTHENTICATED (offline/dev mode). Do NOT use this configuration in production.")
+	case s.deps.AllowInsecureNoAuth:
+		log.Printf("WARNING: Workspace OAuth not configured; the /api/v1 API is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
+	default:
+		panic("httpapi: refusing to serve an unauthenticated API: configure Workspace OAuth, or set AllowInsecureNoAuth for local dev only")
 	}
 
 	rootMux := http.NewServeMux()

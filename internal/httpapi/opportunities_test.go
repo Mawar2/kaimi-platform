@@ -71,7 +71,9 @@ func seedTestServer(t *testing.T) (http.Handler, time.Time) {
 		}
 	}
 
-	srv := New(Deps{Dashboard: dashboard.NewService(s)})
+	// Read-endpoint tests run without OAuth; opt in to the insecure no-auth path so
+	// Routes() builds instead of failing closed (the production default).
+	srv := New(Deps{Dashboard: dashboard.NewService(s), AllowInsecureNoAuth: true})
 	return srv.Routes(), now
 }
 

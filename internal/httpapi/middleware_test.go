@@ -208,17 +208,20 @@ func TestRoutesAuthLoginExemptFromSession(t *testing.T) {
 }
 
 // TestRoutesOfflineLeavesAPIOpen proves the documented offline/dev behavior: when
-// Auth is nil (OAuth unconfigured), the API group is NOT wrapped, so requests reach
-// the mux without a session (local UI dev can use the API credential-less).
-// Production must configure OAuth (see cmd/api).
+// Auth is nil (OAuth unconfigured) AND AllowInsecureNoAuth is EXPLICITLY set, the
+// API group is NOT wrapped, so requests reach the mux without a session (local UI
+// dev can use the API credential-less). Production must configure OAuth (see
+// cmd/api). The insecure opt-in is required because the default now fails closed
+// (see TestRoutesFailClosedWithoutAuthOrOptIn).
 //
 // We probe an unregistered /api/v1 subpath so the request reaches the mux without
-// touching any nil dependency: in offline mode that yields the mux's 404 (the
-// request was NOT blocked by auth), whereas with auth configured the same request
-// is 401'd by the middleware before the mux ever sees it (asserted by the companion
-// test below). The single, unambiguous assertion is "offline did NOT 401".
+// touching any nil dependency: in this insecure-opt-in mode that yields the mux's
+// 404 (the request was NOT blocked by auth), whereas with auth configured the same
+// request is 401'd by the middleware before the mux ever sees it (asserted by the
+// companion test below). The single, unambiguous assertion is "did NOT 401".
 func TestRoutesOfflineLeavesAPIOpen(t *testing.T) {
-	srv := New(Deps{}) // Auth nil → offline/dev mode, no RequireSession wrap.
+	// Auth nil + explicit insecure opt-in → no RequireSession wrap, API left open.
+	srv := New(Deps{AllowInsecureNoAuth: true})
 	h := srv.Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/unregistered-probe", http.NoBody)
@@ -226,11 +229,27 @@ func TestRoutesOfflineLeavesAPIOpen(t *testing.T) {
 	h.ServeHTTP(rec, req)
 
 	if rec.Code == http.StatusUnauthorized {
-		t.Fatalf("offline mode 401'd /api/v1; with no OAuth configured the API must stay open for local dev")
+		t.Fatalf("insecure opt-in 401'd /api/v1; with AllowInsecureNoAuth the API must stay open for local dev")
 	}
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("offline /api/v1 probe status = %d, want %d (reached the mux unblocked)", rec.Code, http.StatusNotFound)
+		t.Errorf("insecure /api/v1 probe status = %d, want %d (reached the mux unblocked)", rec.Code, http.StatusNotFound)
 	}
+}
+
+// TestRoutesFailClosedWithoutAuthOrOptIn proves the fail-closed backstop: when Auth
+// is nil AND AllowInsecureNoAuth is false (the default), Routes() PANICS rather than
+// serving an unauthenticated API. This guarantees a production deploy with a missing
+// or typo'd OAuth env var can never silently come up open — the insecure server
+// never starts.
+func TestRoutesFailClosedWithoutAuthOrOptIn(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("Routes() did not panic with Auth nil and AllowInsecureNoAuth false; the unauthenticated API must fail closed")
+		}
+	}()
+
+	srv := New(Deps{}) // Auth nil, AllowInsecureNoAuth false (default) → must panic.
+	_ = srv.Routes()
 }
 
 // TestRoutesConfiguredBlocksUnknownAPIPathBeforeMux is the companion to the offline
