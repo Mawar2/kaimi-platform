@@ -28,7 +28,7 @@
 //	go run ./cmd/pipeline --mode=cached --store-path=/tmp/kaimi_queue
 //
 //	# Live
-//	SAM_API_KEY=... GCP_PROJECT_ID=kaimi-seeker go run ./cmd/pipeline --mode=live
+//	SAM_API_KEY=... GCP_PROJECT_ID=your-gcp-project go run ./cmd/pipeline --mode=live
 package main
 
 import (

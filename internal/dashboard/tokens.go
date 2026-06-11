@@ -24,18 +24,18 @@ import "html/template"
 const designTokensCSS = `
 /* ============================================================
    KAIMI — Design Tokens
-   "the seeker" · a BlueMeta product
+   "the seeker"
    Two modes: light TRIAGE (:root) · dark FOCUS ([data-theme="focus"])
    ============================================================ */
 
 :root {
-  /* ---- Brand ramp (BlueMeta house blue) ---- */
+  /* ---- Brand ramp (Kaimi house blue) ---- */
   --blue-50:  #EEF4FF;
   --blue-100: #DCE6FF;
   --blue-200: #B9CEFF;
   --blue-300: #8DAEFF;
   --blue-400: #5B86F7;
-  --blue-500: #2563EB;   /* BlueMeta primary */
+  --blue-500: #2563EB;   /* brand primary */
   --blue-600: #1D4ED8;
   --blue-700: #1A3FAE;
   --blue-800: #16327F;

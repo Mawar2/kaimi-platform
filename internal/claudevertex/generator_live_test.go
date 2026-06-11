@@ -5,11 +5,11 @@
 // models). Run it explicitly once Anthropic MaaS + quota are enabled on
 // us-east5 (Task 0):
 //
-//	GCP_PROJECT_ID=kaimi-seeker CLAUDE_MODEL=claude-opus-4-8 \
+//	GCP_PROJECT_ID=your-gcp-project CLAUDE_MODEL=claude-opus-4-8 \
 //	  go test -tags live -run TestLive ./internal/claudevertex
 //
 // Requires Application Default Credentials (gcloud auth application-default
-// login) against the kaimi-seeker project.
+// login) against the configured GCP project.
 package claudevertex
 
 import (

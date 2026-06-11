@@ -3,7 +3,7 @@
 // Live test for the gemini-3.5-flash section planner. Excluded from the default
 // `make test` run (which must never hit live models). Run explicitly:
 //
-//	GCP_PROJECT_ID=kaimi-seeker \
+//	GCP_PROJECT_ID=your-gcp-project \
 //	  go test -tags live -run TestLivePlanSections ./internal/outline
 //
 // Note: the Gemini 3.x family is served only from the GLOBAL Vertex endpoint, so

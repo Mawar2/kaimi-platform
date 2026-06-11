@@ -1,10 +1,12 @@
-// Package profile defines BlueMeta Technologies' capability profile for evaluating
-// federal contracting opportunities.
+// Package profile defines the configured company's capability profile for
+// evaluating federal contracting opportunities.
 //
-// The CapabilityProfile encodes what BlueMeta is legally eligible to bid on.
-// Hunter uses this profile to gate out set-asides for programs BlueMeta does not
-// hold, before opportunities reach the Scorer. Load a profile from a JSON or YAML
-// file via LoadProfile; derive NAICS codes for SAM.gov queries via AllNAICSCodes.
+// The CapabilityProfile encodes what the company is legally eligible to bid on.
+// Hunter uses this profile to gate out set-asides for programs the company does
+// not hold, before opportunities reach the Scorer. Load a profile from a JSON or
+// YAML file via LoadProfile; derive NAICS codes for SAM.gov queries via
+// AllNAICSCodes. The profile is deployment data loaded from config — it is not
+// hardcoded here.
 package profile
 
 import (
@@ -20,7 +22,7 @@ import (
 )
 
 // NAICSTier represents the priority tier of a NAICS code.
-// Primary codes are the strongest match for BlueMeta's work; secondary and tertiary
+// Primary codes are the strongest match for the company's work; secondary and tertiary
 // are weaker signals used by the Scorer for fit weighting.
 type NAICSTier string
 
@@ -40,7 +42,7 @@ type NAICSCode struct {
 	Tier        NAICSTier `json:"tier"        yaml:"tier"`
 }
 
-// SetAsideStatus captures which federal set-aside programs BlueMeta holds certifications for.
+// SetAsideStatus captures which federal set-aside programs the company holds certifications for.
 type SetAsideStatus struct {
 	SmallBusiness bool `json:"small_business" yaml:"small_business"`
 	SDB           bool `json:"sdb"            yaml:"sdb"`
@@ -60,7 +62,7 @@ type PastPerformance struct {
 	WhatItProves []string `json:"what_it_proves" yaml:"what_it_proves"`
 }
 
-// CapabilityProfile holds BlueMeta Technologies' certifications, NAICS codes,
+// CapabilityProfile holds the configured company's certifications, NAICS codes,
 // past performance, and competencies for federal contracting evaluation.
 //
 // Hunter uses it to:
@@ -123,7 +125,7 @@ func (p *CapabilityProfile) AllNAICSCodes() []string {
 	return codes
 }
 
-// IsEligible returns true if the opportunity is eligible for BlueMeta to bid on,
+// IsEligible returns true if the opportunity is eligible for the company to bid on,
 // based on its SAM.gov set-aside code.
 //
 // The decision table covers all known set-aside families with conservative passthrough

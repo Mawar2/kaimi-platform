@@ -5,8 +5,11 @@
 //
 // Usage:
 //
-//	echo "Hello from Kaimi!" | go run ./cmd/spike   // non-interactive, single prompt
-//	go run ./cmd/spike                               // interactive (Ctrl+Z to exit on Windows)
+//	GCP_PROJECT_ID=your-gcp-project echo "Hi" | go run ./cmd/spike  // single prompt
+//	GCP_PROJECT_ID=your-gcp-project go run ./cmd/spike              // interactive (Ctrl+Z to exit on Windows)
+//
+// The GCP project is read from $GCP_PROJECT_ID so the probe is not tied to any
+// one deployment; it falls back to the GCP_REGION env var for the location.
 package main
 
 import (
@@ -29,12 +32,24 @@ const (
 	// TODO(phase-1): upgrade to gemini-3-pro once GA on Vertex AI us-east4.
 	modelName = "gemini-2.5-pro"
 
-	projectID = "kaimi-seeker"
-	location  = "us-east4"
+	// defaultLocation is used when $GCP_REGION is unset.
+	defaultLocation = "us-east4"
 )
 
 func main() {
 	ctx := context.Background()
+
+	// Read the deployment target from the environment so the probe is not tied
+	// to any one GCP project. GCP_PROJECT_ID is required; GCP_REGION defaults to
+	// defaultLocation.
+	projectID := os.Getenv("GCP_PROJECT_ID")
+	if projectID == "" {
+		log.Fatal("GCP_PROJECT_ID is required (e.g. GCP_PROJECT_ID=your-gcp-project)")
+	}
+	location := os.Getenv("GCP_REGION")
+	if location == "" {
+		location = defaultLocation
+	}
 
 	// BackendEnterprise = Vertex AI / Gemini Enterprise Agent Platform.
 	// Uses Application Default Credentials — run `gcloud auth application-default login` once.

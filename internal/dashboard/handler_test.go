@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
@@ -508,4 +509,77 @@ func TestSidebarHasSubmittedNav(t *testing.T) {
 	if contains(body, "ActiveNav") {
 		t.Errorf("unrendered template action leaked into output")
 	}
+}
+
+// TestSidebarTenantName verifies the sidebar account block renders the
+// configured tenant display name (and its derived initials) instead of any
+// hardcoded customer identity (WS-A5). An empty/absent name must fall back to
+// the neutral "Kaimi" product label and never render blank.
+func TestSidebarTenantName(t *testing.T) {
+	render := func(opts ...dashboard.Option) string {
+		s, err := store.NewJSONStore(t.TempDir())
+		if err != nil {
+			t.Fatalf("store: %v", err)
+		}
+		now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+		if err := s.Save(context.Background(), &opportunity.Opportunity{
+			ID: "o1", Title: "Sample", Agency: "GSA", UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		h := dashboard.NewHandler(dashboard.NewService(s), opts...)
+		h.Now = func() time.Time { return now }
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("GET", "/", http.NoBody))
+		return rr.Body.String()
+	}
+
+	t.Run("configured name renders", func(t *testing.T) {
+		body := render(dashboard.WithTenantName("Acme Federal Co"))
+		if !contains(body, "Acme Federal Co") {
+			t.Errorf("sidebar must render the configured tenant name; got:\n%s", body[:min(1200, len(body))])
+		}
+		// Initials derive from the first two words.
+		if !contains(body, `class="av">AF<`) {
+			t.Errorf("sidebar avatar must show derived initials AF; got:\n%s", body[:min(1200, len(body))])
+		}
+		// The old hardcoded customer identity must be gone.
+		if contains(body, "BlueMeta") {
+			t.Errorf("sidebar must not hardcode BlueMeta; got:\n%s", body[:min(1200, len(body))])
+		}
+	})
+
+	t.Run("multibyte name renders rune-safe initials", func(t *testing.T) {
+		// Accented, multibyte display name: byte-slicing the first rune would
+		// split "É" mid-codepoint and emit U+FFFD. Initials must be the first
+		// rune of each of the first two words, upper-cased ("ÉF"), and valid
+		// UTF-8 with no replacement character.
+		body := render(dashboard.WithTenantName("Équipe Fédérale"))
+		if !contains(body, "Équipe Fédérale") {
+			t.Errorf("sidebar must render the multibyte tenant name; got:\n%s", body[:min(1200, len(body))])
+		}
+		if !contains(body, `class="av">ÉF<`) {
+			t.Errorf("sidebar avatar must show rune-safe initials ÉF; got:\n%s", body[:min(1200, len(body))])
+		}
+		if !utf8.ValidString(body) {
+			t.Error("rendered sidebar must be valid UTF-8 (rune-safe initials)")
+		}
+		if contains(body, "�") {
+			t.Errorf("sidebar must not contain the U+FFFD replacement char; got:\n%s", body[:min(1200, len(body))])
+		}
+	})
+
+	t.Run("empty name falls back to product label", func(t *testing.T) {
+		body := render() // no WithTenantName
+		if !contains(body, "Kaimi") {
+			t.Errorf("empty tenant must fall back to the Kaimi product label; got:\n%s", body[:min(1200, len(body))])
+		}
+		if contains(body, "BlueMeta") {
+			t.Errorf("sidebar must not hardcode BlueMeta; got:\n%s", body[:min(1200, len(body))])
+		}
+		// Must never render a blank account name.
+		if contains(body, `<b></b>`) {
+			t.Errorf("sidebar account name must never render blank; got:\n%s", body[:min(1200, len(body))])
+		}
+	})
 }

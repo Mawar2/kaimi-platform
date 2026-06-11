@@ -249,7 +249,9 @@ func run() error {
 		return fmt.Errorf("failed to wire proposal service: %w", err)
 	}
 
-	mux := newMux(dashboard.NewHandler(dashboard.NewService(s), dashboard.WithProposals(proposals)))
+	mux := newMux(dashboard.NewHandler(dashboard.NewService(s),
+		dashboard.WithProposals(proposals),
+		dashboard.WithTenantName(cfg.Tenant.DisplayName)))
 
 	addr := net.JoinHostPort(*host, fmt.Sprintf("%d", *port))
 	httpSrv := &http.Server{

@@ -445,7 +445,7 @@ jobs:
     - name: Commit and push fixes
       run: |
         git config user.name "Kaimi Auto-Fix Bot"
-        git config user.email "bot@kaimi-seeker.iam.gserviceaccount.com"
+        git config user.email "bot@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
 
         # Check if there are changes to commit
         if git diff --quiet; then
@@ -553,7 +553,7 @@ jobs:
       github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://console.cloud.google.com/run?project=kaimi-seeker
+      url: https://console.cloud.google.com/run?project=${{ secrets.GCP_PROJECT_ID }}
 
     steps:
     - name: Checkout code
@@ -573,8 +573,8 @@ jobs:
       run: |
         gcloud auth configure-docker us-east4-docker.pkg.dev
 
-    # One-time infrastructure (Artifact Registry repo "kaimi", GCS bucket
-    # kaimi-seeker-queue, the kaimi-pipeline Cloud Run Job with its GCS volume
+    # One-time infrastructure (Artifact Registry repo "kaimi", the queue GCS
+    # bucket, the kaimi-pipeline Cloud Run Job with its GCS volume
     # mount + Secret Manager wiring, and the Cloud Scheduler trigger) is
     # provisioned by scripts/setup-gcp.ps1 / setup-gcp.sh (issue #122).
     # This job only builds the new image and points the existing job at it.

@@ -112,7 +112,7 @@ func runWithConfig(config *Config) error {
 	fetchDuration := time.Since(startTime)
 	fmt.Printf("Fetched %d opportunities in %v\n", len(opportunities), fetchDuration)
 
-	// Apply eligibility gate: drop set-asides for programs BlueMeta doesn't hold.
+	// Apply eligibility gate: drop set-asides for programs the company doesn't hold.
 	fmt.Println("Applying eligibility gate...")
 	eligible, filtered := filterEligible(opportunities)
 	fmt.Printf("Eligibility gate: %d eligible, %d dropped (ineligible set-aside)\n", len(eligible), filtered)
@@ -206,7 +206,7 @@ func filterEligible(opportunities []*opportunity.Opportunity) (eligible []*oppor
 	return eligible, dropped
 }
 
-// isEligible returns true if the given SAM.gov set-aside code is eligible for BlueMeta.
+// isEligible returns true if the given SAM.gov set-aside code is eligible for the company.
 // The switch covers all known set-aside families; unrecognized codes pass through
 // conservatively to avoid false negatives.
 func isEligible(code string) bool {
