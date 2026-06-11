@@ -79,28 +79,44 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 		}
 	}
 
-	w := writer.New()
+	// The live agents share one Vertex AI region. The Gemini 3.x family —
+	// gemini-3.1-pro-preview (drafting) and gemini-3.5-flash (outline structure) —
+	// is served only from the global endpoint, so that is the default.
+	region := envOr("GCP_REGION", "global")
+
+	ol := outline.New(docsClient) // deterministic section planner (offline default)
+	w := writer.New()             // stub writer (offline default)
 	if liveWriter {
 		projectID := envOr("GCP_PROJECT_ID", "")
 		if projectID == "" {
-			return nil, fmt.Errorf("-live-writer requires GCP_PROJECT_ID")
+			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
 		}
+		// Outline plans the section structure with gemini-3.5-flash; the Writer
+		// persona "Thomas" drafts the prose with gemini-3.1-pro-preview while the
+		// Claude/Opus 4.8 Vertex quota is pending (swap GEMINI_MODEL when it lands).
+		planner, err := outline.NewGeminiSectionPlanner(context.Background(),
+			projectID, region, envOr("OUTLINE_MODEL", "gemini-3.5-flash"))
+		if err != nil {
+			return nil, fmt.Errorf("gemini outline planner: %w", err)
+		}
+		ol = outline.NewWithPlanner(docsClient, planner)
+
 		gen, err := writer.NewGeminiGenerator(context.Background(),
-			projectID, envOr("GCP_REGION", "us-east4"), envOr("GEMINI_MODEL", "gemini-2.5-pro"))
+			projectID, region, envOr("GEMINI_MODEL", "gemini-3.1-pro-preview"))
 		if err != nil {
 			return nil, fmt.Errorf("gemini generator: %w", err)
 		}
 		w = writer.NewWithGenerator(gen)
-		log.Printf("Technical Writer: LIVE Gemini drafting enabled (project %s)", projectID)
+		log.Printf("Outline: LIVE gemini-3.5-flash planner; Technical Writer %q: LIVE gemini-3.1-pro-preview drafting (project %s)", "Thomas", projectID)
 	} else {
-		log.Printf("Technical Writer: stub mode (pass -live-writer for Gemini drafting)")
+		log.Printf("Outline + Technical Writer: OFFLINE stub mode (-offline) — live Gemini agents are the default")
 	}
 
 	review := finalreview.New()
 	if liveReview {
 		projectID := envOr("GCP_PROJECT_ID", "")
 		if projectID == "" {
-			return nil, fmt.Errorf("-live-review requires GCP_PROJECT_ID")
+			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
 		}
 		// The reviewer model is configured INDEPENDENTLY of the Writer's GEMINI_MODEL.
 		// The Final Review verifier bake-off found gemini-2.5-pro is the best Gemini
@@ -117,7 +133,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 		review = finalreview.NewWithComplianceChecker(checker)
 		log.Printf("Final Review: LIVE Gemini compliance pass enabled (project %s, model %s)", projectID, reviewModel)
 	} else {
-		log.Printf("Final Review: deterministic checks only (pass -live-review for Gemini compliance)")
+		log.Printf("Final Review: OFFLINE deterministic checks only (-offline) — live Gemini compliance is the default")
 	}
 
 	// Document ingestion is opt-in via -live-ingest. A true nil interface (not a
@@ -148,7 +164,7 @@ func newProposalService(s store.Store, basePath string, liveWriter, liveReview, 
 	return proposal.NewService(&proposal.Deps{
 		Opportunities: s,
 		Documents:     docs,
-		Outline:       outline.New(docsClient),
+		Outline:       ol,
 		Writer:        w,
 		Review:        review,
 		Profile:       profile,
@@ -167,9 +183,10 @@ func run() error {
 	port := flag.Int("port", 8900, "Port to serve on (honors $PORT when set, e.g. Cloud Run)")
 	host := flag.String("host", envOr("HOST", "127.0.0.1"), "Interface to bind; use 0.0.0.0 in containers/Cloud Run")
 	storePath := flag.String("store", "", "Path to the JSON store directory")
-	liveWriter := flag.Bool("live-writer", false, "Draft with the real Gemini writer (Vertex AI ADC; needs GCP_PROJECT_ID)")
-	liveReview := flag.Bool("live-review", false, "Run the Gemini compliance pass in Final Review (Vertex AI ADC; needs GCP_PROJECT_ID)")
+	liveWriter := flag.Bool("live-writer", true, "Draft with the live Gemini writer (default true; -offline disables; Vertex AI ADC; needs GCP_PROJECT_ID)")
+	liveReview := flag.Bool("live-review", true, "Run the live Gemini compliance pass in Final Review (default true; -offline disables; Vertex AI ADC; needs GCP_PROJECT_ID)")
 	liveIngest := flag.Bool("live-ingest", false, "Ingest solicitation documents (GCS + Document AI; needs GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, DOCUMENTAI_PROCESSOR_ID)")
+	offline := flag.Bool("offline", false, "Force all agents to stub/deterministic mode for credential-less UI development (no GCP calls)")
 	profilePath := flag.String("profile", "config/bluemeta_scorer_profile.json", "Capability profile JSON for grounding the writer (BlueMeta's real profile by default)")
 	flag.Parse()
 
@@ -181,6 +198,13 @@ func run() error {
 		}
 	}
 
+	// Live agents are the default; -offline forces the credential-less stub path
+	// (Outline deterministic, Writer stub, Final Review deterministic checks only).
+	lw, lr := *liveWriter, *liveReview
+	if *offline {
+		lw, lr = false, false
+	}
+
 	if *storePath == "" {
 		return fmt.Errorf("--store path is required")
 	}
@@ -190,7 +214,7 @@ func run() error {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	proposals, err := newProposalService(s, *storePath, *liveWriter, *liveReview, *liveIngest, *profilePath)
+	proposals, err := newProposalService(s, *storePath, lw, lr, *liveIngest, *profilePath)
 	if err != nil {
 		return fmt.Errorf("failed to wire proposal service: %w", err)
 	}

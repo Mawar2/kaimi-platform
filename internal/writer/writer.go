@@ -29,6 +29,11 @@ import (
 
 const agentName = "writer"
 
+// writerPersona is the Writer's human-facing name, carried in the AgentResult
+// metadata so the dashboard can attribute a draft to its author. The Go package
+// stays "writer"; "Thomas" is only the persona shown to users.
+const writerPersona = "Thomas"
+
 // gapMarker is the placeholder the model is instructed to emit when a section
 // needs a fact that is not present in the grounding inputs — instead of inventing it.
 const gapMarker = "[GAP:"
@@ -250,6 +255,7 @@ func successResult(in Input, sectionCount int, stub string) *agent.Result {
 		Flags: map[string]string{
 			"section_count": fmt.Sprintf("%d", sectionCount),
 			"stub":          stub,
+			"persona":       writerPersona,
 		},
 		CompletedAt: time.Now().UTC(),
 	}
