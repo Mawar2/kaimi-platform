@@ -33,6 +33,15 @@ kaimi-sa-key.json
 gcp-key.json
 service-account*.json
 google-credentials.json
+credentials.json
+oauth*.json
+client_secret*.json
+
+# Local data stores (real solicitation data populated by the pipeline — never
+# commit; the hosted demo pulls live from SAM.gov + GCS).
+design-store/
+*-store/
+/store/
 
 # IDE
 .vscode/
