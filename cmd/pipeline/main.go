@@ -37,29 +37,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 
+	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/pipeline"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
-
-// Config holds the pipeline runner configuration.
-type Config struct {
-	Mode                   string // "cached" or "live"
-	StorePath              string
-	ProfilePath            string // scoring profile (scorer.CapabilityProfile JSON)
-	EligibilityProfilePath string // eligibility profile (profile.CapabilityProfile JSON/YAML)
-	NAICSCodes             []string
-
-	// Live-mode only.
-	SamAPIKey   string
-	ProjectID   string
-	Region      string
-	GeminiModel string
-}
 
 func main() {
 	if err := run(); err != nil {
@@ -69,22 +54,22 @@ func main() {
 }
 
 func run() error {
-	config := parseConfig()
-	if err := validateConfig(&config); err != nil {
+	cfg, err := parseConfig()
+	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	fmt.Println("Kaimi Zone-1 pipeline starting...")
-	fmt.Printf("Mode: %s\n", config.Mode)
-	fmt.Printf("Store path: %s\n", config.StorePath)
-	fmt.Printf("Scoring profile: %s\n", config.ProfilePath)
-	fmt.Printf("Eligibility profile: %s\n", config.EligibilityProfilePath)
+	fmt.Printf("Mode: %s\n", cfg.Mode)
+	fmt.Printf("Store path: %s\n", cfg.Store.Path)
+	fmt.Printf("Scoring profile: %s\n", cfg.Profile.ScoringPath)
+	fmt.Printf("Eligibility profile: %s\n", cfg.Profile.EligibilityPath)
 
 	// Abort gracefully on Ctrl+C rather than killing mid-write.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	scoringProfile, err := loadProfile(config.ProfilePath)
+	scoringProfile, err := loadProfile(cfg.Profile.ScoringPath)
 	if err != nil {
 		return fmt.Errorf("failed to load scoring capability profile: %w", err)
 	}
@@ -92,17 +77,17 @@ func run() error {
 	// Load the eligibility profile used by the Hunter gate to filter set-asides.
 	// This is separate from the scoring profile: it uses profile.CapabilityProfile
 	// (with structured NAICS codes and set-aside flags) rather than scorer.CapabilityProfile.
-	eligibilityProfile, err := profile.LoadProfile(config.EligibilityProfilePath)
+	eligibilityProfile, err := profile.LoadProfile(cfg.Profile.EligibilityPath)
 	if err != nil {
 		return fmt.Errorf("failed to load eligibility profile: %w", err)
 	}
 
-	opportunityStore, err := store.NewJSONStore(config.StorePath)
+	opportunityStore, err := store.NewJSONStore(cfg.Store.Path)
 	if err != nil {
 		return fmt.Errorf("failed to create store: %w", err)
 	}
 
-	samClient, scoreEngine, err := buildBackends(ctx, &config)
+	samClient, scoreEngine, err := buildBackends(ctx, &cfg)
 	if err != nil {
 		return err
 	}
@@ -113,7 +98,7 @@ func run() error {
 		Store:       opportunityStore,
 		Profile:     scoringProfile,
 		Eligibility: eligibilityProfile,
-		NAICSCodes:  config.NAICSCodes,
+		NAICSCodes:  cfg.Profile.NAICSCodes,
 	})
 	if err != nil {
 		return fmt.Errorf("zone-1 run failed: %w", err)
@@ -137,8 +122,8 @@ func run() error {
 
 // buildBackends selects the SAM.gov client and Scorer for the configured mode.
 // cached → fixtures + offline DeterministicScorer; live → SAM.gov + GeminiScorer.
-func buildBackends(ctx context.Context, config *Config) (samgov.Client, scorer.Scorer, error) {
-	switch config.Mode {
+func buildBackends(ctx context.Context, cfg *config.Config) (samgov.Client, scorer.Scorer, error) {
+	switch cfg.Mode {
 	case "cached":
 		samClient, err := samgov.NewClient(samgov.Config{UseCached: true})
 		if err != nil {
@@ -146,17 +131,17 @@ func buildBackends(ctx context.Context, config *Config) (samgov.Client, scorer.S
 		}
 		return samClient, scorer.NewDeterministicScorer(), nil
 	case "live":
-		samClient, err := samgov.NewClient(samgov.Config{APIKey: config.SamAPIKey, UseCached: false})
+		samClient, err := samgov.NewClient(samgov.Config{APIKey: cfg.SAM.APIKey, UseCached: false})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create live SAM.gov client: %w", err)
 		}
-		geminiScorer, err := scorer.NewGeminiScorer(ctx, config.ProjectID, config.Region, config.GeminiModel)
+		geminiScorer, err := scorer.NewGeminiScorer(ctx, cfg.GCP.ProjectID, cfg.GCP.Region, cfg.GCP.ScorerModel)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create Gemini scorer: %w", err)
 		}
 		return samClient, geminiScorer, nil
 	default:
-		return nil, nil, fmt.Errorf("unknown mode %q", config.Mode)
+		return nil, nil, fmt.Errorf("unknown mode %q", cfg.Mode)
 	}
 }
 
@@ -173,7 +158,14 @@ func loadProfile(path string) (*scorer.CapabilityProfile, error) {
 	return &cp, nil
 }
 
-func parseConfig() Config {
+// parseConfig defines the command-line surface and resolves the runner
+// configuration through internal/config. The flag defaults are shown as the
+// env-or-default value so `--help` reflects the effective default, but the flag
+// is only treated as an override when the operator actually set it (detected
+// via flag.Visit); otherwise config.Load applies the canonical env > file >
+// default precedence. The set of flags, env var names, and defaults is
+// unchanged from the previous hand-rolled version.
+func parseConfig() (config.Config, error) {
 	mode := flag.String("mode", getEnv("MODE", "cached"), "Mode: cached or live")
 	storePath := flag.String("store-path", getEnv("STORE_PATH", "./queue"), "Store directory path")
 	profilePath := flag.String("profile", getEnv("PROFILE_PATH", "./test/fixtures/capability_profile.json"), "Scoring capability profile JSON path (scorer.CapabilityProfile)")
@@ -185,51 +177,48 @@ func parseConfig() Config {
 
 	flag.Parse()
 
-	return Config{
-		Mode:                   *mode,
-		StorePath:              *storePath,
-		ProfilePath:            *profilePath,
-		EligibilityProfilePath: *eligibilityProfilePath,
-		NAICSCodes:             splitCSV(*naics),
-		SamAPIKey:              getEnv("SAM_API_KEY", ""),
-		ProjectID:              *project,
-		Region:                 *region,
-		GeminiModel:            *model,
+	// Only forward flags the operator explicitly set so config.Load's precedence
+	// (flag > env > file > default) holds; unset flags fall through to env/file.
+	set := setFlags()
+	f := &config.Flags{
+		Mode:                   pick(set, "mode", mode),
+		StorePath:              pick(set, "store-path", storePath),
+		ScoringProfilePath:     pick(set, "profile", profilePath),
+		EligibilityProfilePath: pick(set, "eligibility-profile", eligibilityProfilePath),
+		NAICSCodes:             pick(set, "naics", naics),
+		ProjectID:              pick(set, "project", project),
+		Region:                 pick(set, "region", region),
+		ScorerModel:            pick(set, "model", model),
 	}
+
+	cfg, err := config.Load(f)
+	if err != nil {
+		return config.Config{}, err
+	}
+	if err := cfg.ValidateMode(); err != nil {
+		return config.Config{}, err
+	}
+	if err := cfg.ValidateLive(); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
 }
 
-func validateConfig(config *Config) error {
-	switch config.Mode {
-	case "cached", "live":
-		// valid
-	default:
-		return fmt.Errorf("mode must be 'cached' or 'live', got: %s", config.Mode)
-	}
+// setFlags returns the names of flags the operator explicitly set on the
+// command line, so unset flags don't shadow env/file values in config.Load.
+func setFlags() map[string]bool {
+	set := map[string]bool{}
+	flag.Visit(func(fl *flag.Flag) { set[fl.Name] = true })
+	return set
+}
 
-	if config.Mode == "live" {
-		if config.SamAPIKey == "" {
-			return fmt.Errorf("SAM_API_KEY is required for live mode")
-		}
-		if config.ProjectID == "" {
-			return fmt.Errorf("GCP_PROJECT_ID is required for live mode")
-		}
+// pick returns the flag's value pointer only when the flag was set; otherwise
+// nil so config.Load falls through to env/file/default.
+func pick(set map[string]bool, name string, val *string) *string {
+	if set[name] {
+		return val
 	}
 	return nil
-}
-
-// splitCSV splits a comma-separated list, trimming whitespace and dropping empties.
-func splitCSV(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // getEnv returns the value of an environment variable or a default value.
