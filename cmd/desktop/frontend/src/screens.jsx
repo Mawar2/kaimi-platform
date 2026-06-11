@@ -10,9 +10,10 @@ const NAVIC = {
   search: <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/><path d="M16 16l4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>,
   sliders: <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h10M18 8h2M4 16h2M10 16h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="16" cy="8" r="2.4" stroke="currentColor" strokeWidth="2"/><circle cx="8" cy="16" r="2.4" stroke="currentColor" strokeWidth="2"/></svg>,
   chev: <svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  archive: <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" strokeWidth="2"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M10 13h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>,
 };
 
-function Sidebar({ route, go, needsCount, queueCount, activeCount }){
+function Sidebar({ route, go, needsCount, queueCount, activeCount, submittedCount }){
   const item = (id, icon, label, extra) => (
     <button key={`${id}${route===id?"-on":""}`} className={`nav-item ${route===id?"on":""}`} onClick={()=>go(id)}>
       {icon}<span>{label}</span>{extra}
@@ -34,6 +35,7 @@ function Sidebar({ route, go, needsCount, queueCount, activeCount }){
       <div className="nav-h">Pipeline</div>
       {item("opps", NAVIC.queue, "Opportunities", <span className="count">{queueCount}</span>)}
       {item("proposals", NAVIC.props, "Proposals", needsCount>0 ? <span className="needs">{needsCount}</span> : <span className="count">{activeCount}</span>)}
+      {submittedCount != null && item("submitted", NAVIC.archive, "Submitted", <span className="count">{submittedCount}</span>)}
 
       <div className="spacer"></div>
       <div className="me">

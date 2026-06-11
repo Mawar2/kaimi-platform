@@ -9,7 +9,8 @@ import { ProposalsScreen } from './proposals.jsx';
 import { WorkspaceScreen } from './workspace.jsx';
 import { OnboardingFlow } from './onboarding.jsx';
 import { DraftEditor } from './editor.jsx';
-import { KAIMI_PROPOSALS, KAIMI_OPPS } from './data.js';
+import { SubmittedScreen } from './submitted.jsx';
+import { KAIMI_PROPOSALS, KAIMI_OPPS, KAIMI_SUBMITTED } from './data.js';
 import { getOpportunities } from './api.js';
 
 function TitleBar({ online, onToggleNet, queuedCount, onboarded, onReplayOnboarding }){
@@ -72,6 +73,18 @@ export default function DesktopApp(){
   const needsCount = proposals.filter(p=>p.status==="human").length;
   const queuedCount = proposals.filter(p=>p.status==="queued").length;
 
+  /* Pursued or in-flight opps leave the queue — they live in Proposals now. */
+  const visibleOpps = opps.filter(o=> !pursued.has(o.id) && !proposals.some(p=>p.oppId===o.id));
+  const activeProposals = proposals.filter(p=>p.status!=="submitted");
+  /* The Submitted archive: live submissions (just now) + history. */
+  const liveSubmitted = proposals.filter(p=>p.status==="submitted").map(p=>({
+    id:"live-"+p.id, title:p.title, agency:p.agency, sol:p.sol||"—", fit:p.fit,
+    value:p.value||"—", valueNum:p.valueNum||0, submitted:"Just now", status:"pending",
+    award:"Confirmation logged · Kaimi is watching for amendments", isNew:true,
+    docs:[ {name:"technical-volume-final.docx", meta:"18 pp"}, {name:"compliance-matrix.xlsx", meta:"24 reqs"}, {name:"solicitation-"+(p.sol||"")+".pdf", meta:"SAM.gov"} ],
+  }));
+  const submittedAll = [...liveSubmitted, ...KAIMI_SUBMITTED];
+
   /* ---- network toggle: reconnecting processes the queue ---- */
   const toggleNet = ()=>{
     const goingOnline = !online;
@@ -99,6 +112,7 @@ export default function DesktopApp(){
     const id = "np-"+o.id;
     setProposals(prev => prev.some(x=>x.id===id) ? prev : [{
       id, title:o.title, agency:o.agency, fit:o.fit,
+      oppId:o.id, sol:o.sol, value:o.value ? o.value.split(" ")[0] : "—", valueNum:o.valueNum||0,
       deadlineLabel:o.deadlineLabel, deadlineLevel:o.deadlineLevel,
       stageIndex:0, status:"progress", agents:1, when:"Noa outlining now"
     }, ...prev]);
@@ -174,14 +188,17 @@ export default function DesktopApp(){
             ) : (
               <div className="app">
                 <Sidebar route={effRoute} go={setRoute} needsCount={needsCount}
-                  queueCount={opps.length} activeCount={proposals.filter(p=>p.status!=="submitted").length} />
+                  queueCount={visibleOpps.length} activeCount={activeProposals.length} submittedCount={submittedAll.length} />
                 <main className="main">
                   <div className="route-fade" key={effRoute + (online?"":"-off")}>
                     {effRoute==="opps" && (
-                      <OpportunitiesScreen opps={opps} onOpen={openOpp} filter={filter} setFilter={setFilter} />
+                      <OpportunitiesScreen opps={visibleOpps} onOpen={openOpp} filter={filter} setFilter={setFilter} />
                     )}
                     {effRoute==="proposals" && (
-                      <ProposalsScreen proposals={proposals} onOpen={openProposal} offline={!online} />
+                      <ProposalsScreen proposals={activeProposals} onOpen={openProposal} offline={!online} />
+                    )}
+                    {effRoute==="submitted" && (
+                      <SubmittedScreen items={submittedAll} />
                     )}
                     {effRoute==="workspace" && (
                       <WorkspaceScreen p={wsProp} onBack={()=>setRoute("proposals")}

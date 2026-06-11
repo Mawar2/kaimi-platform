@@ -135,7 +135,7 @@ function SubmittedState(){
       <div>
         <h3>Submitted to SAM.gov</h3>
         <div className="role">Confirmation logged · the agents stand down on this one.</div>
-        <div className="desc">Kaimi will watch for amendments and Q&amp;A updates on this solicitation and let you know if anything needs attention.</div>
+        <div className="desc">This proposal now lives in your <b>Submitted</b> archive, along with everything the team produced for it. Kaimi will watch for amendments and Q&amp;A updates on this solicitation and let you know if anything needs attention.</div>
       </div>
     </div>
   );
