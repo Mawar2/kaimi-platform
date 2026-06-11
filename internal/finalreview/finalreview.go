@@ -110,11 +110,14 @@ func (a *Agent) Review(ctx context.Context, in Input) (*agent.Result, error) {
 		issues = append(issues, checkPageLimit(in.Draft, in.Outline.FormattingRules)...)
 	}
 
-	// LLM compliance pass (optional). Runs after the deterministic pre-filter and
-	// only when there are solicitation documents to vet against. Any unmet
-	// requirement it finds — or a failure to run the check — becomes an issue,
-	// routing the proposal to needs_human.
-	if a.checker != nil && len(in.Documents) > 0 {
+	// LLM compliance pass (optional). Runs after the deterministic pre-filter
+	// whenever a checker is configured. Grounding depends on what's available:
+	// the full solicitation documents when the ingest stage provided them,
+	// otherwise the opportunity's own summary (description + requirements) — so
+	// the review never silently degrades to string checks alone (issue #264).
+	// Any unmet requirement it finds — or a failure to run the check — becomes
+	// an issue, routing the proposal to needs_human.
+	if a.checker != nil {
 		issues = append(issues, a.runCompliance(ctx, in)...)
 	}
 
