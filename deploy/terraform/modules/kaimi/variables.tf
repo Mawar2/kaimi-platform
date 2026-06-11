@@ -87,18 +87,20 @@ variable "active" {
   default     = true
 }
 
-# --- Cost control: bucket destroy protection ---------------------------------
+# --- Cost control: bucket data protection ------------------------------------
 #
-# `terraform destroy` deletes the GCS buckets, which hold the historical
-# opportunity queue and downloaded solicitations. By default this module guards
-# the buckets so a destroy does NOT silently nuke that data (Terraform refuses
-# the plan). Operators who genuinely want a full teardown set this false first,
-# then destroy. See README "Cost control / spin up & down".
+# `terraform destroy` tries to delete the GCS buckets, which hold the historical
+# opportunity queue and downloaded solicitations. We protect that data with the
+# native GCS rule rather than count/prevent_destroy gymnastics: GCP refuses to
+# delete a NON-EMPTY bucket, so with force_destroy=false (default) a destroy
+# fails SAFELY (409 "Bucket you tried to delete is not empty") on any bucket
+# holding data. A deliberate teardown either empties the buckets first or sets
+# force_destroy=true to accept the data deletion. See README "Cost control".
 
-variable "protect_buckets" {
-  description = "When true (default), the queue and solicitations GCS buckets are protected from `terraform destroy` (lifecycle prevent_destroy) so historical opportunity data is never deleted by accident. Set false ONLY when you intend a full teardown, then run terraform destroy."
+variable "force_destroy" {
+  description = "When false (default), the queue and solicitations GCS buckets are NOT force-deleted: GCP refuses to delete a non-empty bucket, so `terraform destroy` fails safely (409 Bucket not empty) and historical opportunity data is never deleted by accident. Set true ONLY when you intend a full teardown and accept deleting the bucket contents."
   type        = bool
-  default     = true
+  default     = false
 }
 
 # --- Scheduling --------------------------------------------------------------

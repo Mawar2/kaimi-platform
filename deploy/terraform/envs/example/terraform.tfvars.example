@@ -83,10 +83,11 @@ api_image      = "us-east4-docker.pkg.dev/acme-kaimi-prod/kaimi/api:latest"
 # with active=true. No data is lost. See README "Cost control / spin up & down".
 # active = true
 
-# protect_buckets=true (default) guards the queue + solicitations buckets from
-# `terraform destroy` so historical opportunity data is never deleted by accident.
-# Set false ONLY when you intend a genuine full teardown, then run destroy.
-# protect_buckets = true
+# force_destroy=false (default) guards the queue + solicitations buckets: GCP
+# refuses to delete a non-empty bucket, so `terraform destroy` fails safely on a
+# bucket holding historical opportunity data. Set true ONLY for a genuine full
+# teardown that accepts deleting the bucket contents, then run destroy.
+# force_destroy = false
 
 # Resource labels for cost attribution.
 # labels = {

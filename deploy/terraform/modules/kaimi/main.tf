@@ -117,26 +117,18 @@ resource "google_artifact_registry_repository" "kaimi" {
 #    SA gets objectAdmin scoped to each bucket (setup-gcp.sh:222,274), not the
 #    project-wide grant.
 #
-#    DESTROY PROTECTION (cost control): these buckets hold the historical
+#    DATA PROTECTION (cost control): these buckets hold the historical
 #    opportunity queue and downloaded solicitations — the data a customer would
-#    NOT want a `terraform destroy` to silently delete. Terraform's
-#    `lifecycle.prevent_destroy` only accepts a literal (it cannot read a
-#    variable), so the protection is expressed as two mutually-exclusive copies
-#    of each bucket gated by `count` on var.protect_buckets:
-#      - protect_buckets=true  (default) → the *_protected resource exists with
-#        prevent_destroy=true; `terraform destroy` REFUSES to run, guarding data.
-#      - protect_buckets=false           → the *_unprotected resource exists and
-#        can be destroyed for a genuine, intentional teardown.
-#    Downstream references go through locals.queue_bucket_name /
-#    locals.solicitations_bucket_name so the rest of the module is unaffected by
-#    which copy is active. Flipping the flag moves the resource between the two
-#    addresses; because the bucket *name* is identical, switching the default-on
-#    protection on an EXISTING deployment is a no-op for the live bucket (see
-#    README "Cost control"). New deployments are protected out of the box.
+#    NOT want a `terraform destroy` to silently delete. The protection here is
+#    simply `force_destroy = var.force_destroy`, which defaults to false: GCP
+#    REFUSES to delete a non-empty bucket, so `terraform destroy` fails SAFELY
+#    (HTTP 409 "Bucket you tried to delete is not empty") on any bucket holding
+#    historical opportunities — no `count`/`prevent_destroy` gymnastics, no
+#    duplicate resource pairs. A deliberate teardown either empties the buckets
+#    first or runs `terraform destroy -var force_destroy=true`, explicitly
+#    accepting the data deletion. See README "Cost control".
 # -----------------------------------------------------------------------------
-resource "google_storage_bucket" "queue_protected" {
-  count = var.protect_buckets ? 1 : 0
-
+resource "google_storage_bucket" "queue" {
   project                     = var.project_id
   name                        = local.queue_bucket
   location                    = var.region
@@ -144,29 +136,15 @@ resource "google_storage_bucket" "queue_protected" {
   public_access_prevention    = "enforced"
   labels                      = var.labels
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Default false: a non-empty bucket cannot be deleted (409 Bucket not empty),
+  # so `terraform destroy` fails safely and guards the historical queue data. A
+  # deliberate teardown sets force_destroy=true to accept the data loss.
+  force_destroy = var.force_destroy
 
   depends_on = [google_project_service.required]
 }
 
-resource "google_storage_bucket" "queue_unprotected" {
-  count = var.protect_buckets ? 0 : 1
-
-  project                     = var.project_id
-  name                        = local.queue_bucket
-  location                    = var.region
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
-  labels                      = var.labels
-
-  depends_on = [google_project_service.required]
-}
-
-resource "google_storage_bucket" "solicitations_protected" {
-  count = var.protect_buckets ? 1 : 0
-
+resource "google_storage_bucket" "solicitations" {
   project                     = var.project_id
   name                        = local.solicitations_bucket
   location                    = var.region
@@ -174,49 +152,22 @@ resource "google_storage_bucket" "solicitations_protected" {
   public_access_prevention    = "enforced"  # setup-gcp.sh:271 --public-access-prevention
   labels                      = var.labels
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Default false: a non-empty bucket cannot be deleted (409 Bucket not empty),
+  # so `terraform destroy` fails safely and guards the downloaded solicitation
+  # documents. A deliberate teardown sets force_destroy=true to accept the loss.
+  force_destroy = var.force_destroy
 
   depends_on = [google_project_service.required]
-}
-
-resource "google_storage_bucket" "solicitations_unprotected" {
-  count = var.protect_buckets ? 0 : 1
-
-  project                     = var.project_id
-  name                        = local.solicitations_bucket
-  location                    = var.region
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
-  labels                      = var.labels
-
-  depends_on = [google_project_service.required]
-}
-
-# Resolve the active bucket (protected or unprotected copy) once so the rest of
-# the module references a single name regardless of the protect_buckets flag.
-locals {
-  queue_bucket_name = (
-    var.protect_buckets
-    ? google_storage_bucket.queue_protected[0].name
-    : google_storage_bucket.queue_unprotected[0].name
-  )
-  solicitations_bucket_name = (
-    var.protect_buckets
-    ? google_storage_bucket.solicitations_protected[0].name
-    : google_storage_bucket.solicitations_unprotected[0].name
-  )
 }
 
 resource "google_storage_bucket_iam_member" "queue_object_admin" {
-  bucket = local.queue_bucket_name
+  bucket = google_storage_bucket.queue.name
   role   = "roles/storage.objectAdmin" # setup-gcp.sh:224
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
 
 resource "google_storage_bucket_iam_member" "solicitations_object_admin" {
-  bucket = local.solicitations_bucket_name
+  bucket = google_storage_bucket.solicitations.name
   role   = "roles/storage.objectAdmin" # setup-gcp.sh:276
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
@@ -356,7 +307,7 @@ resource "google_cloud_run_v2_job" "pipeline" {
         }
         env {
           name  = "GCS_SOLICITATIONS_BUCKET"
-          value = local.solicitations_bucket_name
+          value = google_storage_bucket.solicitations.name
         }
 
         # SAM_API_KEY sourced from Secret Manager, not an inline value
@@ -382,7 +333,7 @@ resource "google_cloud_run_v2_job" "pipeline" {
       volumes {
         name = "store"
         gcs {
-          bucket    = local.queue_bucket_name
+          bucket    = google_storage_bucket.queue.name
           read_only = false
         }
       }
@@ -443,7 +394,7 @@ resource "google_cloud_run_v2_service" "api" {
     volumes {
       name = "store"
       gcs {
-        bucket    = local.queue_bucket_name
+        bucket    = google_storage_bucket.queue.name
         read_only = false
       }
     }

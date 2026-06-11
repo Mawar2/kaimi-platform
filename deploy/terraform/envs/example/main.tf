@@ -78,8 +78,8 @@ module "kaimi" {
   labels        = var.labels
 
   # --- Cost control (see README "Cost control / spin up & down") ---
-  active          = var.active          # false PAUSES the scheduler (near-$0 idle)
-  protect_buckets = var.protect_buckets # true guards data from terraform destroy
+  active        = var.active        # false PAUSES the scheduler (near-$0 idle)
+  force_destroy = var.force_destroy # true lets terraform destroy delete non-empty data buckets
 }
 
 # Variable declarations for this root module. They simply forward to the kaimi
@@ -159,9 +159,9 @@ variable "active" {
   type    = bool
   default = true
 }
-variable "protect_buckets" {
+variable "force_destroy" {
   type    = bool
-  default = true
+  default = false
 }
 
 # Re-export the module outputs at the root so `terraform output` surfaces them.

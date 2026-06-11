@@ -218,32 +218,40 @@ infrastructure stay in place; resume is instant.
 
 ### 3. DESTROYED — true $0, but DATA IS DELETED
 `terraform destroy` removes all infrastructure and bills nothing — **but it
-deletes the GCS buckets, which hold the historical opportunity queue and the
-downloaded solicitations.** To prevent a surprise data loss, the buckets are
-**protected from destroy by default** (`protect_buckets = true`, via
-`lifecycle { prevent_destroy = true }`). With protection on, `terraform destroy`
-**refuses to run** and tells you which resources are protected.
+tries to delete the GCS buckets, which hold the historical opportunity queue and
+the downloaded solicitations.** To prevent a surprise data loss, the buckets set
+`force_destroy = var.force_destroy`, which **defaults to false**. Because GCP
+**refuses to delete a non-empty bucket**, a `terraform destroy` **fails safely**
+on any bucket that still holds data — the provider returns
+`Error 409: ... Bucket you tried to delete is not empty` and the historical data
+is left intact. No `prevent_destroy` / `count` gymnastics, no resource pairs.
 
-To genuinely tear down and accept the data loss, disable the guard first, then
-destroy:
+To genuinely tear down, either empty the bucket(s) first or pass
+`force_destroy=true` to explicitly accept deleting the queue/solicitations data:
 ```sh
-# (optional) copy out anything you want to keep from the buckets first
-terraform apply   -var protect_buckets=false   # remove the destroy guard
-terraform destroy -var protect_buckets=false   # now the buckets (and data) are deleted
+# Option A — copy out anything you want, empty the buckets, then destroy as-is:
+gsutil -m rm -r gs://acme-kaimi-prod-queue/** gs://acme-kaimi-prod-solicitations/**
+terraform destroy
+
+# Option B — deliberately delete the bucket contents along with the infra:
+terraform destroy -var force_destroy=true   # deletes the queue/solicitations data
 ```
 Enabled APIs are left on by default (`disable_on_destroy = false`) so a shared
 project isn't broken; secret *containers* are destroyed but you may want to copy
-out any versions first. Buckets must be empty to delete.
+out any versions first.
 
-> **Why a documented guard instead of always-on `prevent_destroy`?** Terraform's
-> `prevent_destroy` only accepts a literal, so a real on/off toggle requires the
-> `protect_buckets`-gated bucket pair in `modules/kaimi/main.tf`. Default-on
-> protection is the least-surprising choice: a casual `terraform destroy` can't
-> silently nuke historical opportunities, but a deliberate teardown is one extra
-> flag away.
+> **Why `force_destroy` instead of `prevent_destroy`?** Terraform's
+> `prevent_destroy` only accepts a literal, so a variable-driven on/off toggle is
+> impossible without a brittle dual-resource (`count`) pair — which itself breaks
+> when flipped (it would destroy+recreate the bucket = data loss). Relying on
+> GCP's native "can't delete a non-empty bucket" rule via `force_destroy=false`
+> is simpler and safer: a casual `terraform destroy` can't silently nuke
+> historical opportunities, but a deliberate teardown is one explicit flag (or an
+> empty bucket) away.
 
 ## Teardown
 
-See **DESTROYED** above — `terraform destroy` is gated by `protect_buckets`
-(default true) so it will not delete the data buckets until you pass
-`-var protect_buckets=false`.
+See **DESTROYED** above — `terraform destroy` fails safely on a non-empty data
+bucket by default (`force_destroy = false`). To truly tear down, empty the
+queue/solicitations bucket(s) first, or run `terraform destroy -var force_destroy=true`
+to delete the bucket contents along with the infrastructure (deliberate data loss).
