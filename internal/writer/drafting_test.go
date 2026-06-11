@@ -77,6 +77,30 @@ func TestRun_WithGenerator_GroundedDraft(t *testing.T) {
 	}
 }
 
+func TestRun_WithGenerator_CompanyNameFromProfile(t *testing.T) {
+	gen := &mockGenerator{out: "ok"}
+	a := NewWithGenerator(gen)
+	in := groundedInput()
+	in.Profile.Company = "Example Federal Co"
+
+	if _, _, err := a.Run(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gen.systems) == 0 {
+		t.Fatal("generator was never called")
+	}
+	sys := gen.systems[0]
+
+	// The configured company name must appear in the system instruction; the old
+	// hardcoded "BlueMeta" must never leak in for a differently-configured company.
+	if !strings.Contains(sys, "Example Federal Co") {
+		t.Errorf("system instruction does not include the configured company name; got:\n%s", sys)
+	}
+	if strings.Contains(sys, "BlueMeta") {
+		t.Errorf("system instruction must not hardcode BlueMeta; got:\n%s", sys)
+	}
+}
+
 func TestRun_WithGenerator_PromptIsGroundedAndAntiFabrication(t *testing.T) {
 	gen := &mockGenerator{out: "ok"}
 	a := NewWithGenerator(gen)

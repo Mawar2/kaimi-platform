@@ -38,15 +38,29 @@ const writerPersona = "Thomas"
 // needs a fact that is not present in the grounding inputs — instead of inventing it.
 const gapMarker = "[GAP:"
 
-// systemInstruction carries the critical anti-fabrication rules. It is delivered as
-// a system instruction (not appended to the user prompt) so it is robust against
-// instruction drift when the opportunity text is long or complex.
-const systemInstruction = "You are drafting sections of a U.S. federal proposal for BlueMeta Technologies. " +
-	"CRITICAL RULES: " +
-	"Use ONLY the facts provided in the user message. " +
-	"Do NOT invent past performance, contract numbers, client names, dollar amounts, certifications, dates, or compliance claims. " +
-	"If a section needs a fact that is not provided, do NOT fabricate it — insert a placeholder of the exact form " + gapMarker + " what is missing] and continue. " +
-	"Write only the prose for the requested section: no preamble and no markdown headers."
+// defaultCompany is the generic company phrasing used when the profile does not
+// supply a company name, so the system instruction never falls back to a hardcoded
+// real company.
+const defaultCompany = "the offeror"
+
+// buildSystemInstruction builds the system instruction carrying the critical
+// anti-fabrication rules, addressing the proposal to the configured company. It is
+// delivered as a system instruction (not appended to the user prompt) so it is
+// robust against instruction drift when the opportunity text is long or complex.
+// The company name comes from the Capability Profile, not a literal, so the Writer
+// drafts for whichever company is configured.
+func buildSystemInstruction(company string) string {
+	company = strings.TrimSpace(company)
+	if company == "" {
+		company = defaultCompany
+	}
+	return fmt.Sprintf("You are drafting sections of a U.S. federal proposal for %s. ", company) +
+		"CRITICAL RULES: " +
+		"Use ONLY the facts provided in the user message. " +
+		"Do NOT invent past performance, contract numbers, client names, dollar amounts, certifications, dates, or compliance claims. " +
+		"If a section needs a fact that is not provided, do NOT fabricate it — insert a placeholder of the exact form " + gapMarker + " what is missing] and continue. " +
+		"Write only the prose for the requested section: no preamble and no markdown headers."
+}
 
 // Generator produces prose for a single proposal section from a system instruction
 // (the static anti-fabrication rules) and a grounded user prompt (the per-section
@@ -62,8 +76,9 @@ type Input struct {
 	Opportunity *opportunity.Opportunity
 	// Outline defines the sections and formatting rules for the draft. Required.
 	Outline *outline.Outline
-	// Profile supplies BlueMeta's real facts (past performance, competencies) used
-	// to ground the draft. Required in generation mode; ignored in stub mode.
+	// Profile supplies the configured company's real facts (company name, past
+	// performance, competencies) used to ground the draft. Required in generation
+	// mode; ignored in stub mode.
 	Profile *scorer.CapabilityProfile
 	// Documents maps a solicitation document filename to its extracted text
 	// (populated by the Manager's ingest stage). When present it is additional
@@ -126,6 +141,9 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# Proposal Draft: %s\n", in.Opportunity.Title)
+
+	// Address the proposal to the configured company, not a hardcoded name.
+	systemInstruction := buildSystemInstruction(in.Profile.Company)
 
 	for _, section := range in.Outline.Sections {
 		if err := ctx.Err(); err != nil {

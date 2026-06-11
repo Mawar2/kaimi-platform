@@ -9,6 +9,12 @@ import "github.com/Mawar2/Kaimi/internal/profile"
 // weighted signals for the Scorer's LLM call so Gemini can synthesize a nuanced 0–100
 // score rather than a binary pass/fail.
 type CapabilityProfile struct {
+	// Company is the legal/marketing name of the company the proposal is written
+	// for (e.g., "BlueMeta Technologies"). The Writer uses it to address the
+	// proposal to the correct company instead of a hardcoded name. Optional: an
+	// empty value falls back to a generic phrasing.
+	Company string `json:"company"`
+
 	// PrimaryNAICS are the company's core NAICS codes (highest scoring weight).
 	// An exact match on these codes strongly favors a BID recommendation.
 	PrimaryNAICS []string `json:"primary_naics"`
@@ -54,6 +60,7 @@ type CapabilityProfile struct {
 // scoring-only signals come from p.Scoring (see profile.ScoringHints).
 func FromProfile(p *profile.CapabilityProfile) CapabilityProfile {
 	return CapabilityProfile{
+		Company:             p.Company,
 		PrimaryNAICS:        p.Scoring.PrimaryNAICS,
 		SecondaryNAICS:      p.Scoring.SecondaryNAICS,
 		CompetencyTags:      p.Scoring.CompetencyTags,
