@@ -1,0 +1,15 @@
+# Terraform working files — never commit these.
+# State can contain resolved values; tfvars may contain real (non-secret but
+# customer-specific) inputs. Both stay out of version control.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
