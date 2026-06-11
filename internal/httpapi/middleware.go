@@ -33,6 +33,28 @@ func SessionFromContext(ctx context.Context) (*Session, bool) {
 	return s, ok
 }
 
+// DashboardIdentity resolves the signed-in operator's email and a per-session CSRF
+// token from the verified session in ctx, for the WS-C3 SSR onboarding flow. It is
+// the adapter cmd/api wraps into a dashboard.IdentityFunc so the dashboard package
+// (which must not import httpapi — that would be an import cycle) gets the identity
+// and a CSRF token WITHOUT reaching the private session machinery directly.
+//
+// The CSRF token is HMAC-SHA256(sessionSecret, "csrf:"+subject) over the SAME server
+// HMAC key that signs the session cookie. It is therefore: (a) stable for the life of
+// a session (so a GET-rendered form token still matches on the POST), (b) bound to
+// the specific signed-in subject, and (c) unforgeable without the server secret. The
+// onboarding POST compares the submitted token to this value in constant time.
+//
+// It returns ok=false when no session is present (e.g. insecure dev mode), in which
+// case onboarding renders the signed-out treatment and relies on SameSite=Lax alone.
+func (a *AuthHandler) DashboardIdentity(ctx context.Context) (email, csrfToken string, ok bool) {
+	sess, ok := SessionFromContext(ctx)
+	if !ok || sess == nil {
+		return "", "", false
+	}
+	return sess.Email, a.session.csrfToken(sess.Subject), true
+}
+
 // RequireSession wraps next so every request must carry a valid session cookie. On
 // success it injects the verified Session into the request context (reachable via
 // SessionFromContext) and calls next. On failure — missing, malformed, forged, or
