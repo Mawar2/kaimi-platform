@@ -73,13 +73,18 @@ func run() error {
 	// uses the structured eligibility facts (NAICS tiers, set-aside flags) directly;
 	// the Scorer consumes the flattened, weighted view derived via scorer.FromProfile.
 	//
-	// Resolve the profile at runtime (WS-A6): an existing deployment with a real
-	// profile at the configured path behaves identically to before; a fresh image
-	// with no real profile boots on the generic example template plus an explicit
-	// logged warning. ResolveProfile reports which source was actually used.
-	// TODO(WS-C): the Store/GCS-backed, onboarding-written profile plugs in inside
-	// profile.ResolveProfile (ahead of the local-file check), not here.
-	companyProfile, profileSource, err := profile.ResolveProfile(cfg.Profile.EligibilityPath)
+	// Resolve the profile at runtime (WS-A6 → WS-C1): a tenant-written profile in the
+	// ProfileStore (onboarding via the API, no file edits) takes precedence; otherwise
+	// an existing deployment with a real profile at the configured path behaves
+	// identically to before; a fresh image with neither boots on the generic example
+	// template plus an explicit logged warning. The profile store roots at the SAME
+	// base path as the opportunity store so the pipeline and the API resolve the
+	// identical profile. ResolveProfileWithStore reports which source was actually used.
+	profileStore, err := profile.NewJSONProfileStore(cfg.Store.Path)
+	if err != nil {
+		return fmt.Errorf("failed to create profile store: %w", err)
+	}
+	companyProfile, profileSource, err := profile.ResolveProfileWithStore(profileStore, cfg.Profile.EligibilityPath)
 	if err != nil {
 		return fmt.Errorf("failed to load company profile: %w", err)
 	}

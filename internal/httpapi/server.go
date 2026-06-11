@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
+	"github.com/Mawar2/Kaimi/internal/profile"
 )
 
 // serviceName identifies this binary in health and (later) log output.
@@ -43,6 +44,13 @@ type Deps struct {
 	// has no effect when Auth is non-nil; OAuth always takes precedence.
 	AllowInsecureNoAuth bool
 
+	// ProfileStore persists the tenant's company profile (WS-C1) so onboarding can
+	// configure a deployment at runtime via GET/PUT /api/v1/profile without editing
+	// files. It may be nil for a deployment that does not expose runtime profile
+	// configuration, in which case the /api/v1/profile routes answer 503 Service
+	// Unavailable (mirroring how the action endpoints degrade when Proposals is nil).
+	ProfileStore profile.ProfileStore
+
 	// AllowedOrigins is the CORS allow-list (WS-B6). It is EMPTY by default, in which
 	// case CORS is a no-op and the API is same-origin only (the preferred
 	// deployment). Populate it (from Config.AllowedOrigins / CORS_ALLOWED_ORIGINS)
@@ -63,7 +71,7 @@ type Server struct {
 // New constructs a Server from its dependencies. The dependencies are stored
 // as-is so later tickets' handlers can read through Deps.Dashboard and act through
 // Deps.Proposals without rewiring.
-func New(deps Deps) *Server {
+func New(deps Deps) *Server { //nolint:gocritic // Deps is an established by-value dependency struct constructed at every call site (cmd/api, tests); it crossed the size threshold only as fields accreted across WS-B/WS-C, and switching to a pointer here would churn all callers for no behavioral gain.
 	return &Server{deps: deps}
 }
 
@@ -107,6 +115,11 @@ func (s *Server) Routes() http.Handler {
 	// RequireSession middleware injects, so it is registered inside the protected
 	// group and only ever runs after authentication.
 	apiMux.HandleFunc("GET /api/v1/me", s.handleMe)
+
+	// WS-C1 runtime profile configuration. Both are protected (onboarding is an
+	// authenticated action) and degrade to 503 when no ProfileStore is wired.
+	apiMux.HandleFunc("GET /api/v1/profile", s.handleGetProfile)
+	apiMux.HandleFunc("PUT /api/v1/profile", s.handlePutProfile)
 
 	// WS-B5 auth seam: wrap ONLY this group with RequireSession so /api/v1/* demands
 	// a valid session, while rootMux's own routes (/healthz, /auth/*) stay public.

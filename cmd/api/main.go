@@ -22,6 +22,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -91,6 +92,14 @@ func run() error {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
 
+	// Runtime company-profile store (WS-C1), rooted at the SAME store base path so
+	// the tenant profile persists alongside the opportunity queue. It backs the
+	// GET/PUT /api/v1/profile onboarding endpoints.
+	profileStore, err := profile.NewJSONProfileStore(*storePath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize profile store: %w", err)
+	}
+
 	// Assemble the Zone-2 proposal service through the shared wiring so the API
 	// builds it exactly the way cmd/dashboard does.
 	proposals, err := proposalwiring.New(context.Background(), &cfg, proposalwiring.Options{
@@ -140,6 +149,7 @@ func run() error {
 	srv := httpapi.New(httpapi.Deps{
 		Dashboard:           dashboard.NewService(s),
 		Proposals:           proposals,
+		ProfileStore:        profileStore,
 		Auth:                auth,
 		AllowInsecureNoAuth: allowInsecure,
 		// CORS allow-list from CORS_ALLOWED_ORIGINS (empty by default → same-origin,

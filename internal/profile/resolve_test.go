@@ -154,6 +154,117 @@ func TestResolveProfile_MalformedRealProfileFailsLoud(t *testing.T) {
 	}
 }
 
+// TestResolveProfileWithStore_PrefersStored verifies the WS-C1 seam: when a
+// tenant-written profile exists in the ProfileStore, ResolveProfileWithStore
+// returns THAT profile and reports source "store", ahead of any local file or the
+// example template.
+func TestResolveProfileWithStore_PrefersStored(t *testing.T) {
+	base := t.TempDir()
+	ps, err := profile.NewJSONProfileStore(base)
+	if err != nil {
+		t.Fatalf("NewJSONProfileStore: %v", err)
+	}
+	stored := &profile.CapabilityProfile{
+		Company:    "Stored Tenant Co",
+		NAICSCodes: []profile.NAICSCode{{Code: "541512", Tier: profile.TierPrimary}},
+	}
+	if err := ps.Save(stored); err != nil {
+		t.Fatalf("seed stored profile: %v", err)
+	}
+
+	// Point the file path at a real, DIFFERENT profile to prove the store wins over
+	// the file when both are present.
+	filePath := "../../config/profile.json"
+
+	var p *profile.CapabilityProfile
+	var source string
+	out := captureLog(t, func() {
+		p, source, err = profile.ResolveProfileWithStore(ps, filePath)
+	})
+	if err != nil {
+		t.Fatalf("ResolveProfileWithStore: %v", err)
+	}
+	if source != "store" {
+		t.Errorf("source = %q, want %q", source, "store")
+	}
+	if p == nil || p.Company != "Stored Tenant Co" {
+		t.Errorf("returned profile = %+v, want the stored tenant profile", p)
+	}
+	if strings.Contains(strings.ToLower(out), "example") {
+		t.Errorf("logged an example-template warning when a stored profile exists:\n%s", out)
+	}
+}
+
+// TestResolveProfileWithStore_FallsBackToFile verifies that with an empty
+// ProfileStore the resolver falls through to the configured file path exactly as
+// the original ResolveProfile does — the existing-deployment behavior is unchanged
+// when no stored profile exists.
+func TestResolveProfileWithStore_FallsBackToFile(t *testing.T) {
+	ps, err := profile.NewJSONProfileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSONProfileStore: %v", err)
+	}
+	filePath := "../../config/profile.json"
+
+	p, source, err := profile.ResolveProfileWithStore(ps, filePath)
+	if err != nil {
+		t.Fatalf("ResolveProfileWithStore: %v", err)
+	}
+	if source != filePath {
+		t.Errorf("source = %q, want the file path %q", source, filePath)
+	}
+	if p == nil || p.Company == profile.ExampleCompanyName {
+		t.Errorf("returned profile = %+v, want the real file profile (not the example)", p)
+	}
+}
+
+// TestResolveProfileWithStore_FallsBackToExample verifies that with an empty
+// ProfileStore AND no file at the path, the resolver still reaches the example
+// template + warning — identical to the original ResolveProfile fallback.
+func TestResolveProfileWithStore_FallsBackToExample(t *testing.T) {
+	chdirRepoRoot(t)
+	ps, err := profile.NewJSONProfileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSONProfileStore: %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+
+	var p *profile.CapabilityProfile
+	var source string
+	out := captureLog(t, func() {
+		p, source, err = profile.ResolveProfileWithStore(ps, missing)
+	})
+	if err != nil {
+		t.Fatalf("ResolveProfileWithStore: %v", err)
+	}
+	if source != profile.ExampleProfilePath {
+		t.Errorf("source = %q, want the example path %q", source, profile.ExampleProfilePath)
+	}
+	if p == nil || p.Company != profile.ExampleCompanyName {
+		t.Errorf("returned profile = %+v, want the example template", p)
+	}
+	if !strings.Contains(strings.ToLower(out), "example") {
+		t.Errorf("expected an example-template warning, got:\n%s", out)
+	}
+}
+
+// TestResolveProfileWithStore_NilStore verifies passing a nil ProfileStore is
+// equivalent to the original file-first ResolveProfile, so callers that have no
+// store wired behave unchanged.
+func TestResolveProfileWithStore_NilStore(t *testing.T) {
+	filePath := "../../config/profile.json"
+	p, source, err := profile.ResolveProfileWithStore(nil, filePath)
+	if err != nil {
+		t.Fatalf("ResolveProfileWithStore(nil): %v", err)
+	}
+	if source != filePath {
+		t.Errorf("source = %q, want the file path %q", source, filePath)
+	}
+	if p == nil {
+		t.Fatal("returned a nil profile")
+	}
+}
+
 // TestExampleProfile_LoadsAndDerivesScorer verifies the shipped example template
 // is a valid CapabilityProfile that both LoadProfile and scorer.FromProfile
 // accept, with a non-empty scoring block so the derived Scorer view is usable.
