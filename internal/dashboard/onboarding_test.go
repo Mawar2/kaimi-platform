@@ -7,11 +7,13 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/oauth2"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
+	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -66,6 +68,41 @@ func validProfile() *profile.CapabilityProfile {
 func newOnboardingHandler(t *testing.T, opts ...dashboard.Option) *dashboard.Handler {
 	t.Helper()
 	return dashboard.NewHandler(newEmptyService(t), opts...)
+}
+
+// TestOnboardingShowsPipelineCounts proves the onboarding page's sidebar pipeline
+// bar reflects the real queue (it previously showed all zeros because the onboarding
+// handler never listed the store, unlike every other screen).
+func TestOnboardingShowsPipelineCounts(t *testing.T) {
+	s, err := store.NewJSONStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	now := time.Now()
+	// Three scored opportunities → QueueCount 3 (Hunted/Scored), all others 0.
+	for i, id := range []string{"opp-a", "opp-b", "opp-c"} {
+		if err := s.Save(context.Background(), &opportunity.Opportunity{
+			ID:        id,
+			Title:     "Solicitation " + id,
+			Score:     0.5 + float64(i)*0.1,
+			ScoredAt:  &now,
+			UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+
+	h := dashboard.NewHandler(dashboard.NewService(s), dashboard.WithProfileStore(&memProfileStore{}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	// The Opportunities nav count must show 3 (not 0).
+	if !strings.Contains(rec.Body.String(), `<span class="count">3</span>`) {
+		t.Errorf("onboarding sidebar did not show QueueCount=3; body=%s", rec.Body.String())
+	}
 }
 
 // TestOnboardingGETEmpty proves GET /onboarding renders (200) with an empty profile

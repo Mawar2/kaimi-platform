@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -546,10 +547,29 @@ func (h *Handler) tenantInitials() string {
 type shellData struct {
 	PageTitle      string
 	ActiveNav      string // "opps" highlights the Opportunities nav item
-	QueueCount     int    // total opportunities in the queue
+	QueueCount     int    // un-pursued opportunities in the queue (Hunted/Scored)
 	NeedsCount     int    // opportunities awaiting human review (amber badge)
 	ActiveCount    int    // opportunities selected into proposal work
 	SubmittedCount int    // opportunities submitted to SAM.gov (the archive)
+}
+
+// fillShellCounts populates the sidebar pipeline counts on sd from the unfiltered
+// queue, using the SAME stage grouping as the Opportunities (overview) screen so the
+// bar reads identically on every page — including onboarding, which would otherwise
+// show zeros because it never lists the store. The sidebar is advisory, so any store
+// error leaves the counts at zero rather than failing the page.
+//
+// QueueCount counts only un-pursued opportunities (Hunted/Scored), matching the
+// visible Opportunities list; pursued ones flow into ActiveCount/SubmittedCount.
+func (h *Handler) fillShellCounts(ctx context.Context, sd *shellData) {
+	counts, err := h.svc.CountStages(ctx)
+	if err != nil {
+		return
+	}
+	sd.QueueCount = counts[StageHunted] + counts[StageScored]
+	sd.NeedsCount = counts[StageAwaitingHumanReview]
+	sd.ActiveCount = counts[StageAwaitingHumanReview] + counts[StageSelected] + counts[StageInProposal] + counts[StageFinalized]
+	sd.SubmittedCount = counts[StageSubmitted]
 }
 
 // OverviewData is the view-model for the Triage screen.
@@ -834,21 +854,8 @@ func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 		data.DeadlineLabel, data.DeadlineDays = deadlineDisplay(opp.ResponseDeadline, now)
 	}
 
-	// Shell counts for the sidebar.
-	if all, err := h.svc.List(r.Context(), ListOptions{Now: now}); err == nil {
-		data.QueueCount = len(all)
-		for i := range all {
-			switch all[i].Stage {
-			case StageAwaitingHumanReview:
-				data.NeedsCount++
-				data.ActiveCount++
-			case StageSelected, StageInProposal, StageFinalized:
-				data.ActiveCount++
-			case StageSubmitted:
-				data.SubmittedCount++
-			}
-		}
-	}
+	// Shell counts for the sidebar — same grouping as every other screen.
+	h.fillShellCounts(r.Context(), &data.shellData)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.detailTmpl.Execute(w, data); err != nil {
