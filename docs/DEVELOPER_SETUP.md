@@ -292,6 +292,59 @@ make clean      # Remove build artifacts
 
 ---
 
+## Live OAuth End-to-End Test (WS-B7)
+
+The Workspace OAuth sign-in path has two test layers. The default `go test`
+runs the fast, fully-mocked unit tests (`internal/httpapi/auth_test.go`). A
+second, `live`-tagged test (`internal/httpapi/auth_live_test.go`) exercises the
+pieces that can only be checked against **real Google**. It is **excluded from the
+default `go test` and never runs in CI** — it requires a real Google Workspace
+test account.
+
+**What it verifies automatically** (no browser, no human):
+- The real `AuthHandler` builds a genuine `accounts.google.com` consent URL
+  carrying `client_id`, the configured `redirect_uri`, a CSRF `state`, an S256
+  PKCE `code_challenge`, and the `hd` Workspace hint.
+- If a real Google-issued ID token is supplied, it runs the real
+  `idtoken.Validate` against live Google, then drives the real callback and
+  asserts enforcement: an **in-domain, verified** token mints a session; an
+  **out-of-domain** token is rejected **403** with no session.
+
+**What is manual** (documented, not automated): obtaining the ID token. Full
+3-legged OAuth needs an interactive browser consent, which a Go test cannot
+drive. Complete the consent once with a Workspace **test account** (e.g. via the
+[OAuth 2.0 Playground](https://developers.google.com/oauthplayground) configured
+with this client id and the `openid email profile` scopes), or mint an OIDC ID
+token whose audience equals `OAUTH_CLIENT_ID`. ID tokens expire (~1 hour) — mint
+them just before running.
+
+**Environment:**
+
+```bash
+# Required (mirrors LoadOAuthConfig); missing any → the test skips:
+export OAUTH_CLIENT_ID=...           # also the ID-token audience
+export OAUTH_CLIENT_SECRET=...
+export OAUTH_REDIRECT_URL=https://app.example.com/auth/callback
+export OAUTH_ALLOWED_DOMAIN=yourdomain.com
+export SESSION_SECRET=...            # never commit; from Secret Manager in prod
+
+# Optional — enable the real-token sub-cases (each skips if unset):
+export KAIMI_TEST_ID_TOKEN=...           # in-domain, email-verified account
+export KAIMI_TEST_ID_TOKEN_FOREIGN=...   # account OUTSIDE the allowed domain
+```
+
+**Run:**
+
+```bash
+go test -tags live ./internal/httpapi/...
+```
+
+Never paste real tokens or secrets into docs, commits, or logs — the test logs
+only non-identifying structure (status codes, cookie flags), never the token or
+email.
+
+---
+
 ## Project State
 
 **Built and deployed:**
