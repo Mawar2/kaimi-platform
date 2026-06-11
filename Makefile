@@ -20,6 +20,8 @@ build:
 	go build -v -o bin/hunter ./cmd/hunter
 	@echo "Building Scorer agent..."
 	go build -v -o bin/scorer ./cmd/scorer
+	@echo "Building API server..."
+	go build -v -o bin/api ./cmd/api
 	@echo "Build complete."
 
 # Run all tests
