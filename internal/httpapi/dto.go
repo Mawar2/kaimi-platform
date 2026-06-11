@@ -144,6 +144,20 @@ type HealthResponse struct {
 	Service string `json:"service"`
 }
 
+// MeResponse is the body returned by GET /api/v1/me. It echoes the authenticated
+// caller's identity from the session in context so a client can show who is signed
+// in and which Workspace domain they belong to. It carries no tokens or secrets —
+// only the identity claims the session already holds.
+type MeResponse struct {
+	// Email is the verified Workspace email of the signed-in user.
+	Email string `json:"email"`
+	// Domain is the Google Workspace domain ("hd") the login was restricted to.
+	Domain string `json:"domain"`
+	// Subject is the Google account's stable unique id ("sub"). Useful as a stable
+	// per-user key for the client.
+	Subject string `json:"sub"`
+}
+
 // ErrorResponse is the envelope returned for non-2xx responses so clients can
 // rely on a single error shape across every endpoint.
 type ErrorResponse struct {

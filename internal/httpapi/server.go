@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
@@ -85,8 +86,26 @@ func (s *Server) Routes() http.Handler {
 	apiMux.HandleFunc("POST /api/v1/opportunities/{id}/select", s.handleSelectOpportunity)
 	apiMux.HandleFunc("GET /api/v1/proposals/{id}", s.handleGetProposalStatus)
 
+	// WS-B5 identity endpoint. It reads the caller's identity from the session the
+	// RequireSession middleware injects, so it is registered inside the protected
+	// group and only ever runs after authentication.
+	apiMux.HandleFunc("GET /api/v1/me", s.handleMe)
+
+	// WS-B5 auth seam: wrap ONLY this group with RequireSession so /api/v1/* demands
+	// a valid session, while rootMux's own routes (/healthz, /auth/*) stay public.
+	//
+	// Offline/dev behavior: when OAuth is not configured (Deps.Auth nil) there is no
+	// session manager to verify against, so the wrap is SKIPPED and the API is left
+	// open for credential-less local UI development. This is logged loudly at startup
+	// (a WARNING) so an UNAUTHENTICATED API is never shipped silently. PRODUCTION must
+	// configure OAuth (cmd/api requires OAUTH_*/SESSION_SECRET) so this branch is not
+	// taken and every /api/v1 request is authenticated.
 	var apiHandler http.Handler = apiMux
-	// TODO(WS-B5): apiHandler = authMiddleware(apiHandler) — wrap ONLY this group.
+	if s.deps.Auth != nil {
+		apiHandler = s.RequireSession(apiHandler)
+	} else {
+		log.Printf("WARNING: Workspace OAuth not configured; the /api/v1 API is UNAUTHENTICATED (offline/dev mode). Do NOT use this configuration in production.")
+	}
 
 	rootMux := http.NewServeMux()
 
