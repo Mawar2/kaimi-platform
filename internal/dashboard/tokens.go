@@ -807,6 +807,17 @@ const editorStylesCSS = `
   background:color-mix(in oklab,var(--st-human) 20%,transparent); color:var(--st-human); }
 .ed-flag b{ font:650 13px/1.35 var(--font-sans); color:color-mix(in oklab,var(--st-human) 75%,black); display:block; }
 .ed-flag p{ font:450 12.5px/1.5 var(--font-sans); color:var(--ink-soft); margin:3px 0 0; }
+
+/* Unresolved Writer gaps (issue #269): amber-tint the section editor, give each
+   gap a callout with a jump control, and mark gaps inline in read-only views. */
+.edsec textarea.gap-warn{ border-color:color-mix(in oklab,var(--st-human) 55%,transparent);
+  background:color-mix(in oklab,var(--st-human-bg) 55%,var(--surface)); }
+.edsec textarea.gap-warn:focus{ border-color:var(--st-human); }
+.ed-gap{ align-items:center; }
+.ed-gap > div{ flex:1; }
+.ed-gap .gap-jump{ flex:none; color:color-mix(in oklab,var(--st-human) 75%,black); }
+.gap-mark{ background:var(--st-human-bg); color:color-mix(in oklab,var(--st-human) 75%,black);
+  border:1px solid color-mix(in oklab,var(--st-human) 35%,transparent); border-radius:4px; padding:0 4px; font-weight:600; }
 `
 
 // StyleTag renders the complete Kaimi design system — tokens plus component

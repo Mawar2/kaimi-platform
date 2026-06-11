@@ -265,9 +265,16 @@ const workspaceContentTmpl = `{{define "content"}}
       <section class="edsec">
         <div class="sec-head2"><h3>{{.Heading}}</h3><span class="reqtag">{{.Status}}</span></div>
         <form method="POST" action="/workspace/{{$.Opp.ID}}/section/{{.ID}}" data-autosave>
-          <textarea name="body" rows="7">{{.Body}}</textarea>
+          <textarea name="body" rows="7"{{if gapTexts .Body}} class="gap-warn"{{end}}>{{.Body}}</textarea>
           <noscript><button class="kbtn kbtn--secondary kbtn--sm" style="margin-top:6px">Save section</button></noscript>
         </form>
+        {{range gapTexts .Body}}
+        <div class="ed-flag ed-gap">
+          <span class="ef-ic">` + iconWarn + `</span>
+          <div><b>Unresolved gap</b><p>{{.}}</p></div>
+          <button type="button" class="kbtn kbtn--ghost kbtn--sm gap-jump" data-gap="{{.}}">Find in text</button>
+        </div>
+        {{end}}
       </section>
       {{end}}
       {{else}}
@@ -338,7 +345,7 @@ const workspaceContentTmpl = `{{define "content"}}
   {{range .Doc.Sections}}
   <section class="edsec">
     <div class="sec-head2"><h3>{{.Heading}}</h3><span class="reqtag">{{.Status}}</span></div>
-    {{if .Body}}<div class="draft-body">{{.Body}}</div>{{else}}<div class="draft-pending">Tomás is drafting this section…</div>{{end}}
+    {{if .Body}}<div class="draft-body">{{highlightGaps .Body}}</div>{{else}}<div class="draft-pending">Tomás is drafting this section…</div>{{end}}
   </section>
   {{end}}
   {{end}}
@@ -386,6 +393,21 @@ const workspaceContentTmpl = `{{define "content"}}
           if (chip) { chip.textContent = "Save failed"; chip.classList.remove("saving"); }
         });
       }, 900);
+    });
+  });
+  // Jump-to-gap: select the [GAP: ...] marker inside the section's textarea so
+  // the browser scrolls to it and the human sees exactly what is missing.
+  document.querySelectorAll(".gap-jump").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var area = b.closest("section").querySelector("textarea");
+      if (!area) return;
+      var idx = area.value.indexOf(b.getAttribute("data-gap"));
+      var start = idx < 0 ? area.value.indexOf("[GAP:") : area.value.lastIndexOf("[GAP:", idx);
+      if (start < 0) return;
+      var end = area.value.indexOf("]", start);
+      area.focus();
+      area.setSelectionRange(start, end < 0 ? area.value.length : end + 1);
+      area.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
 </script>

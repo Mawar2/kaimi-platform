@@ -2,9 +2,12 @@ package dashboard
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/document"
+	"github.com/Mawar2/Kaimi/internal/finalreview"
 )
 
 // This file implements the full-page draft editor (the new Kaimi App.html
@@ -30,7 +33,42 @@ type EditorSection struct {
 	Heading string
 	Status  string
 	Body    string
-	Flag    *document.Flag // non-nil when the section carries an open gap flag
+	Flag    *document.Flag // non-nil when the section carries an open review flag
+	Gaps    []string       // missing-fact text of each Writer [GAP: ...] marker in Body
+}
+
+// gapFlagTitle is the Title the proposal service puts on section-anchored
+// unresolved-gap flags (see proposal.flagsFromResult). The editor identifies
+// gap flags by it so their callouts can derive from the live body instead.
+const gapFlagTitle = "Unresolved gap"
+
+// highlightGaps renders a section body for the read-only draft view with every
+// Writer [GAP: ...] marker wrapped in <mark class="gap-mark">. The body is
+// HTML-escaped first; escaping never alters the marker's "[GAP:" / "]"
+// delimiters, so the boundaries survive.
+func highlightGaps(body string) template.HTML {
+	escaped := template.HTMLEscapeString(body)
+	var b strings.Builder
+	for {
+		before, after, found := strings.Cut(escaped, "[GAP:")
+		if !found {
+			b.WriteString(escaped)
+			break
+		}
+		gapText, rest, closed := strings.Cut(after, "]")
+		if !closed {
+			gapText, rest = after, ""
+		}
+		b.WriteString(before)
+		b.WriteString(`<mark class="gap-mark">[GAP:`)
+		b.WriteString(gapText)
+		if closed {
+			b.WriteString("]")
+		}
+		b.WriteString(`</mark>`)
+		escaped = rest
+	}
+	return template.HTML(b.String()) //nolint:gosec // input is escaped above; only our own <mark> wrapper is added
 }
 
 // handleEditor renders the full-page draft editor for a selected proposal.
@@ -55,11 +93,14 @@ func (h *Handler) handleEditor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Index open flags by the section they belong to.
+	// Index open flags by the section they belong to. Unresolved-gap flags are
+	// skipped: the gap callouts derive from the live section body instead, so
+	// they appear before Vera has run and disappear the moment the human fills
+	// the gap — a persisted flag would lag both ways.
 	flagBySection := map[string]*document.Flag{}
 	for i := range doc.Flags {
 		f := &doc.Flags[i]
-		if f.Resolved || f.SectionID == "" {
+		if f.Resolved || f.SectionID == "" || f.Title == gapFlagTitle {
 			continue
 		}
 		if _, seen := flagBySection[f.SectionID]; !seen {
@@ -83,6 +124,7 @@ func (h *Handler) handleEditor(w http.ResponseWriter, r *http.Request) {
 		data.Sections = append(data.Sections, EditorSection{
 			ID: s.ID, Heading: s.Heading, Status: s.Status, Body: s.Body,
 			Flag: flagBySection[s.ID],
+			Gaps: finalreview.GapTexts(s.Body),
 		})
 	}
 
@@ -110,7 +152,7 @@ const editorPageTmpl = `<!DOCTYPE html>
     <div class="ed-rail">
       <div class="er-h">Sections</div>
       {{range .Sections}}
-      <a class="ed-sec{{if .Flag}} warn{{end}}" href="#sec-{{.ID}}">{{.Heading}}</a>
+      <a class="ed-sec{{if or .Flag .Gaps}} warn{{end}}" href="#sec-{{.ID}}"><span class="dot"></span><b>{{.Heading}}</b></a>
       {{end}}
     </div>
     <div class="ed-main">
@@ -128,9 +170,16 @@ const editorPageTmpl = `<!DOCTYPE html>
           <section id="sec-{{.ID}}" class="edsec">
             <div class="sec-head2"><h3>{{.Heading}}</h3>{{if .Status}}<span class="reqtag">{{.Status}}</span>{{end}}</div>
             <form method="POST" action="/workspace/{{$.OppID}}/section/{{.ID}}" data-autosave>
-              <textarea name="body" rows="8">{{.Body}}</textarea>
+              <textarea name="body" rows="8"{{if .Gaps}} class="gap-warn"{{end}}>{{.Body}}</textarea>
               <noscript><button class="kbtn kbtn--secondary kbtn--sm" style="margin-top:6px">Save section</button></noscript>
             </form>
+            {{range .Gaps}}
+            <div class="ed-flag ed-gap">
+              <span class="ef-ic">` + iconWarn + `</span>
+              <div><b>Unresolved gap</b><p>{{.}}</p></div>
+              <button type="button" class="kbtn kbtn--ghost kbtn--sm gap-jump" data-gap="{{.}}">Find in text</button>
+            </div>
+            {{end}}
             {{if .Flag}}
             <div class="ed-flag">
               <span class="ef-ic">` + iconWarn + `</span>
@@ -145,7 +194,7 @@ const editorPageTmpl = `<!DOCTYPE html>
   </div>
 </div>
 <style>
-  .ed-rail .ed-sec{ display:block; text-decoration:none; color:inherit; }
+  .ed-rail .ed-sec{ text-decoration:none; color:inherit; }
   .ed-main .ed-top .kbtn{ color:inherit; }
   .edsec textarea{ width:100%; min-height:120px; font:var(--t-body); color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); padding:12px 14px; resize:vertical; box-sizing:border-box; }
   .edsec textarea:focus{ outline:none; box-shadow:0 0 0 3px var(--ring-focus); border-color:var(--blue-300); }
@@ -169,6 +218,21 @@ const editorPageTmpl = `<!DOCTYPE html>
           .then(function (resp) { if (chip) { chip.textContent = (resp.type==="opaqueredirect"||resp.ok) ? "Saved" : "Save failed"; chip.classList.remove("saving"); } })
           .catch(function () { if (chip) { chip.textContent = "Save failed"; chip.classList.remove("saving"); } });
       }, 900);
+    });
+  });
+  // Jump-to-gap: select the [GAP: ...] marker inside the section's textarea so
+  // the browser scrolls to it and the human sees exactly what is missing.
+  document.querySelectorAll(".gap-jump").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var area = b.closest("section").querySelector("textarea");
+      if (!area) return;
+      var idx = area.value.indexOf(b.getAttribute("data-gap"));
+      var start = idx < 0 ? area.value.indexOf("[GAP:") : area.value.lastIndexOf("[GAP:", idx);
+      if (start < 0) return;
+      var end = area.value.indexOf("]", start);
+      area.focus();
+      area.setSelectionRange(start, end < 0 ? area.value.length : end + 1);
+      area.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
 </script>
