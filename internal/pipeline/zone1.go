@@ -67,7 +67,7 @@ type Zone1Report struct {
 // persists each scored opportunity to the Store.
 //
 // It fetches opportunities for the configured NAICS codes, drops those reserved
-// for set-asides BlueMeta does not hold, and scores+saves the rest. A scoring or
+// for set-asides the company does not hold, and scores+saves the rest. A scoring or
 // save failure on one opportunity is recorded in the report and does not abort
 // the run — only a fetch failure (which yields no work at all) is returned as an
 // error. This single-shot shape is intentional; a scheduler can call RunZone1 on

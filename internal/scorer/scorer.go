@@ -100,7 +100,7 @@ type GeminiScorer struct {
 //
 // Parameters:
 //   - ctx: context for client initialization
-//   - projectID: GCP project ID (e.g., "kaimi-seeker")
+//   - projectID: GCP project ID (e.g., "your-gcp-project")
 //   - location: GCP region (e.g., "us-east4")
 //   - modelName: Gemini model name (e.g., "gemini-2.5-pro")
 func NewGeminiScorer(ctx context.Context, projectID, location, modelName string) (*GeminiScorer, error) {

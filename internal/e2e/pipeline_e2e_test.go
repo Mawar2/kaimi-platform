@@ -91,7 +91,7 @@ func scoringProfile() *scorer.CapabilityProfile {
 // is dropped by the Hunter gate.
 func eligibilityProfile() *profile.CapabilityProfile {
 	return &profile.CapabilityProfile{
-		Company: "BlueMeta Technologies (e2e)",
+		Company: "Example Federal Co (e2e)",
 		NAICSCodes: []profile.NAICSCode{
 			{Code: "541512", Description: "Computer Systems Design Services", Tier: profile.TierPrimary},
 		},

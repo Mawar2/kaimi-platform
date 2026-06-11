@@ -10,7 +10,7 @@
 // Usage:
 //
 //	gcloud auth application-default login
-//	GCP_PROJECT_ID=kaimi-seeker go run ./cmd/eval
+//	GCP_PROJECT_ID=your-gcp-project go run ./cmd/eval
 //
 // Flags (with env fallbacks):
 //

@@ -16,8 +16,8 @@
 // The opportunity below is the Selective Service System Website Modernization
 // solicitation (90MC26R0004, NAICS 541519, Total Small Business Set-Aside,
 // response due 2026-06-30), verified against the SAM.gov public opportunity API.
-// It is an eligible, on-profile match for BlueMeta (primary NAICS 541519; small
-// business + SDB qualifies for the SBA set-aside).
+// It is an eligible, on-profile match for the bundled demo capability profile
+// (primary NAICS 541519; small business + SDB qualifies for the SBA set-aside).
 package main
 
 import (
@@ -32,12 +32,12 @@ import (
 	"github.com/Mawar2/Kaimi/internal/store"
 )
 
-// blueMetaScorerProfile mirrors config/bluemeta_profile.yaml in the scorer's
-// CapabilityProfile shape (the scoring profile is distinct from the eligibility
-// profile in config/profile.json). Competency tags are BlueMeta's real technical
-// areas; the DeterministicScorer matches them case-insensitively against the
-// opportunity title and description.
-func blueMetaScorerProfile() *scorer.CapabilityProfile {
+// demoScorerProfile is a self-contained capability profile in the scorer's
+// CapabilityProfile shape, used only to seed the demo store. Competency tags are
+// realistic federal IT technical areas; the DeterministicScorer matches them
+// case-insensitively against the opportunity title and description. Production
+// deployments load their profile from config instead of hardcoding it here.
+func demoScorerProfile() *scorer.CapabilityProfile {
 	return &scorer.CapabilityProfile{
 		PrimaryNAICS:   []string{"541519", "541512", "541511"},
 		SecondaryNAICS: []string{"518210", "513210", "541715"},
@@ -116,7 +116,7 @@ func main() {
 	}
 
 	opp := selectiveServiceOpportunity(now)
-	profile := blueMetaScorerProfile()
+	profile := demoScorerProfile()
 
 	// Same code path Zone-1 uses in cached mode: score with the real
 	// DeterministicScorer and persist via the Store.

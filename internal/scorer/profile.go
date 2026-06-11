@@ -10,7 +10,7 @@ import "github.com/Mawar2/Kaimi/internal/profile"
 // score rather than a binary pass/fail.
 type CapabilityProfile struct {
 	// Company is the legal/marketing name of the company the proposal is written
-	// for (e.g., "BlueMeta Technologies"). The Writer uses it to address the
+	// for (e.g., "Example Federal Co"). The Writer uses it to address the
 	// proposal to the correct company instead of a hardcoded name. Optional: an
 	// empty value falls back to a generic phrasing.
 	Company string `json:"company"`

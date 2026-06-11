@@ -20,7 +20,7 @@
 //	go run cmd/scorer/main.go --mode=dry-run
 //
 //	# Score live against Vertex AI
-//	GCP_PROJECT_ID=kaimi-seeker go run cmd/scorer/main.go --mode=live
+//	GCP_PROJECT_ID=your-gcp-project go run cmd/scorer/main.go --mode=live
 package main
 
 import (

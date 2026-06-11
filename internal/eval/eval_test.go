@@ -171,13 +171,13 @@ func TestWriterGroundedness_AllGrounded(t *testing.T) {
 	c := WriterCase{
 		Name:          "grounded",
 		SectionPrompt: "Describe the technical approach.",
-		Facts:         []string{"cloud migration", "Zero Trust", "DevSecOps", "BlueMeta Technologies"},
+		Facts:         []string{"cloud migration", "Zero Trust", "DevSecOps", "Example Federal Co"},
 		MustNotFabricate: []string{
 			"contract number",
 		},
 	}
 	// Every significant token below appears in Facts.
-	md := &mockDrafter{text: "BlueMeta Technologies delivers cloud migration. Zero Trust and DevSecOps are core."}
+	md := &mockDrafter{text: "Example Federal Co delivers cloud migration. Zero Trust and DevSecOps are core."}
 
 	rep, err := EvaluateWriter(context.Background(), md, []WriterCase{c})
 	if err != nil {

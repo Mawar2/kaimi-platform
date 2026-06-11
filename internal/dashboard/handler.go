@@ -32,7 +32,19 @@ type Handler struct {
 	editorTmpl    *template.Template
 	notFoundTmpl  *template.Template
 	Now           func() time.Time
+
+	// tenantName is the configured customer display name shown in the sidebar
+	// account block (e.g. "Example Federal Co"). It is the only customer-identity
+	// string in the dashboard chrome; the Kaimi product brand (colors, mark,
+	// wordmark) is fixed. Empty falls back to the neutral product label so the
+	// sidebar never renders blank — see tenantLabel.
+	tenantName string
 }
+
+// defaultTenantLabel is the neutral product label rendered in the sidebar when
+// no tenant display name is configured. The dashboard never renders a blank
+// account name.
+const defaultTenantLabel = "Kaimi"
 
 // Option configures optional Handler capabilities.
 type Option func(*Handler)
@@ -41,6 +53,13 @@ type Option func(*Handler)
 // workspace, gate actions) backed by the shared proposal lifecycle service.
 func WithProposals(svc *proposal.Service) Option {
 	return func(h *Handler) { h.proposals = svc }
+}
+
+// WithTenantName sets the customer display name shown in the sidebar account
+// block. Pass config.Tenant.DisplayName here. An empty name falls back to the
+// neutral product label ("Kaimi"); the rest of the brand chrome is unaffected.
+func WithTenantName(name string) Option {
+	return func(h *Handler) { h.tenantName = name }
 }
 
 // NewHandler initializes a new dashboard handler.
@@ -153,8 +172,8 @@ const shellTmpl = `
       </a>
       <div class="spacer"></div>
       <div class="me">
-        <div class="av">BM</div>
-        <div class="who"><b>BlueMeta BD</b><span>Captures team</span></div>
+        <div class="av">{{tenantInitials}}</div>
+        <div class="who"><b>{{tenantName}}</b><span>Captures team</span></div>
       </div>
     </aside>
     <main class="main">
@@ -380,13 +399,19 @@ func (h *Handler) setupTemplates() {
 		"faviconLink":  FaviconLink,
 		"styleTag":     StyleTag,
 		"headerLockup": HeaderLockup,
-		"fitRing":      FitRing,
-		"recPill":      RecommendationPill,
-		"deadlinePill": DeadlinePill,
-		"metaTag":      MetaTag,
-		"miniPipe":     miniPipe,
-		"wPipe":        wPipe,
-		"propChip":     propChip,
+		// Customer-identity strings for the sidebar account block. Closed over
+		// the handler so the configured tenant name (WS-A1) renders without
+		// threading it through every page view-model; empty falls back to the
+		// neutral product label.
+		"tenantName":     h.tenantLabel,
+		"tenantInitials": h.tenantInitials,
+		"fitRing":        FitRing,
+		"recPill":        RecommendationPill,
+		"deadlinePill":   DeadlinePill,
+		"metaTag":        MetaTag,
+		"miniPipe":       miniPipe,
+		"wPipe":          wPipe,
+		"propChip":       propChip,
 		"orDash": func(s string) string {
 			if s == "" {
 				return "—"
@@ -411,6 +436,34 @@ func (h *Handler) setupTemplates() {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
+}
+
+// tenantLabel returns the configured customer display name, or the neutral
+// product label when none is set. The sidebar account block never renders blank.
+func (h *Handler) tenantLabel() string {
+	if strings.TrimSpace(h.tenantName) == "" {
+		return defaultTenantLabel
+	}
+	return h.tenantName
+}
+
+// tenantInitials derives the two-letter avatar monogram from the tenant label
+// (first letters of the first two words, or the first two letters of a single
+// word), upper-cased. It always returns at least one character.
+func (h *Handler) tenantInitials() string {
+	words := strings.Fields(h.tenantLabel())
+	var initials string
+	switch {
+	case len(words) >= 2:
+		initials = words[0][:1] + words[1][:1]
+	case len(words) == 1 && len(words[0]) >= 2:
+		initials = words[0][:2]
+	case len(words) == 1:
+		initials = words[0]
+	default:
+		initials = defaultTenantLabel[:1]
+	}
+	return strings.ToUpper(initials)
 }
 
 // shellData carries what the app shell (sidebar) needs on every page.

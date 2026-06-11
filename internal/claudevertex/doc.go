@@ -9,8 +9,8 @@
 // client serves both agents.
 //
 // Why Vertex and not the first-party Anthropic API: Kaimi runs entirely on the
-// kaimi-seeker GCP project with Application Default Credentials and keeps the
-// "built on Google" story. Claude on Vertex uses the same ADC and project as
+// configured GCP project (the GCP_PROJECT_ID set for the deployment) with
+// Application Default Credentials and keeps the "built on Google" story. Claude on Vertex uses the same ADC and project as
 // Gemini — no Anthropic API key. Region us-east5 hosts the Anthropic publisher
 // models. This mirrors how scorer/writer call Gemini directly rather than
 // pulling in a full vendor SDK (anti-bloat: minimal dependencies).

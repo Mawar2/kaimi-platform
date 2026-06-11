@@ -49,12 +49,12 @@ func testScoringProfile() *scorer.CapabilityProfile {
 }
 
 // testEligibilityProfile returns a minimal profile.CapabilityProfile for unit tests.
-// The NAICS codes cover the codes used by threeOpps(), and the set-aside flags reflect
-// BlueMeta's actual certifications (small business, SDB; not 8A, SDVOSB, WOSB, HUBZone).
+// The NAICS codes cover the codes used by threeOpps(), and the set-aside flags model a
+// small business that is SDB- but not 8A/SDVOSB/WOSB/HUBZone-certified.
 // IsEligible will therefore pass "" and "SBA" and drop "8A" — matching threeOpps expectations.
 func testEligibilityProfile() *profile.CapabilityProfile {
 	return &profile.CapabilityProfile{
-		Company: "BlueMeta Technologies (test)",
+		Company: "Example Federal Co (test)",
 		NAICSCodes: []profile.NAICSCode{
 			{Code: "541512", Description: "Computer Systems Design Services", Tier: profile.TierPrimary},
 			{Code: "518210", Description: "Computing Infrastructure Providers", Tier: profile.TierSecondary},
@@ -134,7 +134,7 @@ func TestRunZone1_StampsTenantIDOnSavedOpportunities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONStore: %v", err)
 	}
-	const wantTenant = "bluemeta"
+	const wantTenant = "example-co"
 	report, err := RunZone1(context.Background(), &Zone1Deps{
 		Sam:         &mockSam{opps: threeOpps()},
 		Scorer:      scorer.NewDeterministicScorer(),

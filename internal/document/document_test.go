@@ -79,7 +79,7 @@ func TestReplaceSectionsAttributesAgent(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	doc, err := s.ReplaceSections("opp-1", map[string]string{
-		"exec_summary":       "BlueMeta will deliver.",
+		"exec_summary":       "Example Federal Co will deliver.",
 		"technical_approach": "Zero trust pillars.",
 	}, "writer", "Draft v1")
 	if err != nil {
@@ -88,7 +88,7 @@ func TestReplaceSectionsAttributesAgent(t *testing.T) {
 	if doc.Version != 2 {
 		t.Errorf("Version = %d, want 2", doc.Version)
 	}
-	if doc.Sections[0].Body != "BlueMeta will deliver." {
+	if doc.Sections[0].Body != "Example Federal Co will deliver." {
 		t.Errorf("section body not applied")
 	}
 	if doc.Sections[2].Body != "" {

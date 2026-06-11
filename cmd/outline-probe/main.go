@@ -1,4 +1,4 @@
-// outline-probe fetches opportunities matching BlueMeta's capability profile,
+// outline-probe fetches opportunities matching the configured capability profile,
 // downloads attached solicitation PDFs, extracts their text with pdftotext, and
 // runs the Outline agent to show what formatting rules and sections are produced.
 //
@@ -7,7 +7,7 @@
 //	# Cached mode (no API key needed — uses test/fixtures/samgov_response.json)
 //	go run ./cmd/outline-probe
 //
-//	# Live mode: searches SAM.gov using BlueMeta's NAICS codes
+//	# Live mode: searches SAM.gov using the configured profile's NAICS codes
 //	SAM_API_KEY=your-key go run ./cmd/outline-probe --mode=live --limit=3
 //
 //	# Local PDF: extract text from a file on disk and run the outline agent
@@ -77,7 +77,11 @@ func runSAMMode(ctx context.Context, mode string, limit int) error {
 	if err != nil {
 		return fmt.Errorf("load capability profile: %w", err)
 	}
-	fmt.Printf("Capability profile: BlueMeta Technologies\n")
+	company := prof.Company
+	if company == "" {
+		company = "(unnamed company)"
+	}
+	fmt.Printf("Capability profile: %s\n", company)
 	fmt.Printf("NAICS codes: %s\n", strings.Join(prof.AllNAICSCodes(), ", "))
 	fmt.Println(strings.Repeat("=", 60))
 

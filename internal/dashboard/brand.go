@@ -23,7 +23,7 @@ import (
 const (
 	// BrandNavy is the grounding ink navy used for text and the back wave.
 	BrandNavy = "#0A1B3D"
-	// BrandBlue is the BlueMeta blue, the start of the front-wave gradient.
+	// BrandBlue is the Kaimi house blue, the start of the front-wave gradient.
 	BrandBlue = "#2563EB"
 	// BrandCyan is the Kaimi cyan accent — the color of the sun.
 	BrandCyan = "#22D3EE"
