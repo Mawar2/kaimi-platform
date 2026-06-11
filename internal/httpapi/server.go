@@ -63,6 +63,14 @@ func (s *Server) Routes() http.Handler {
 	// register their endpoints here (e.g. "GET /api/v1/opportunities"). WS-B5
 	// wraps the handler derived from it, not rootMux.
 	apiMux := http.NewServeMux()
+
+	// WS-B2 read endpoints. Registered with their full "/api/v1/..." patterns so
+	// the route strings are self-describing at the call site (StripPrefix is
+	// intentionally omitted on the mount below).
+	apiMux.HandleFunc("GET /api/v1/opportunities", s.handleListOpportunities)
+	apiMux.HandleFunc("GET /api/v1/opportunities/{id}", s.handleGetOpportunity)
+	apiMux.HandleFunc("GET /api/v1/stages/counts", s.handleStageCounts)
+
 	var apiHandler http.Handler = apiMux
 	// TODO(WS-B5): apiHandler = authMiddleware(apiHandler) — wrap ONLY this group.
 
