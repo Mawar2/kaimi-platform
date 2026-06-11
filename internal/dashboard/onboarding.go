@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 
@@ -315,7 +316,7 @@ const onboardingContentTmpl = `{{define "content"}}
         {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
         <fieldset class="ob-fs">
           <legend>Change destination</legend>
-          <label class="ob-chk"><input type="radio" name="drive_choice" value="folder" checked> Specific folder</label>
+          <label class="ob-chk"><input type="radio" name="drive_choice" value="folder"{{if not .DriveDest.IsRoot}} checked{{end}}> Specific folder</label>
           <label>Folder id<input name="drive_id" value="{{.DriveDest.FolderID}}" placeholder="Paste a Google Drive folder id"></label>
           <label class="ob-chk"><input type="radio" name="drive_choice" value="root"{{if .DriveDest.IsRoot}} checked{{end}}> My Drive root</label>
         </fieldset>
@@ -497,9 +498,14 @@ func (h *Handler) handleOnboardingDriveTarget(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Resolve the chosen destination id from the radio choice.
-	target := driveTargetRoot
-	if r.PostFormValue("drive_choice") == "folder" {
+	// Resolve the chosen destination from the radio choice. The choice must be
+	// EXACTLY "folder" or "root"; a missing/unrecognized value is rejected rather
+	// than silently defaulting to a destination the operator did not pick.
+	var target string
+	switch r.PostFormValue("drive_choice") {
+	case "root":
+		target = driveTargetRoot
+	case "folder":
 		target = strings.TrimSpace(r.PostFormValue("drive_id"))
 		if target == "" {
 			// Re-render the page with the error; persist nothing. Mirrors the profile
@@ -510,10 +516,17 @@ func (h *Handler) handleOnboardingDriveTarget(w http.ResponseWriter, r *http.Req
 			h.renderOnboarding(w, &data)
 			return
 		}
+	default:
+		// Unrecognized or missing choice: reject; persist nothing.
+		data := h.newOnboardingData(r)
+		data.FormErr = "Choose a destination: a specific folder or My Drive root."
+		w.WriteHeader(http.StatusBadRequest)
+		h.renderOnboarding(w, &data)
+		return
 	}
 
 	if err := h.driveTargetSaver(target); err != nil {
-		fmt.Printf("onboarding drive target save failed: %v\n", err)
+		log.Printf("dashboard: onboarding drive target save failed: %v", err)
 		http.Error(w, "failed to save drive destination", http.StatusInternalServerError)
 		return
 	}

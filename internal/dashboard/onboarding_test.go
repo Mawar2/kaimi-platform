@@ -639,6 +639,27 @@ func TestOnboardingDriveTargetEmptyFolderRejected(t *testing.T) {
 	}
 }
 
+// TestOnboardingDriveTargetUnknownChoiceRejected proves a missing/unrecognized
+// drive_choice is rejected (400) and persists nothing, rather than silently
+// defaulting to a destination the operator did not pick.
+func TestOnboardingDriveTargetUnknownChoiceRejected(t *testing.T) {
+	const token = "drive-csrf"
+	for _, choice := range []string{"", "bogus"} {
+		saver := &driveSaverFunc{}
+		rec := postDriveTarget(t, choice, "", token,
+			dashboard.WithProfileStore(&memProfileStore{}),
+			identityOpt("u@example.com", token),
+			dashboard.WithDriveTargetSaver(saver.save))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("choice=%q: status = %d, want 400; body=%s", choice, rec.Code, rec.Body.String())
+		}
+		if saver.calls != 0 {
+			t.Errorf("choice=%q: saver called %d times, want 0", choice, saver.calls)
+		}
+	}
+}
+
 // TestOnboardingDriveTargetCSRFRejected proves the Drive-destination write fails
 // closed on a wrong CSRF token (403) and persists nothing — the same gate the profile
 // write uses.
