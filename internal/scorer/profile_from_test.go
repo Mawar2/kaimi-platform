@@ -47,6 +47,7 @@ func TestFromProfile_GoldenParity(t *testing.T) {
 // DeepEqual failure.
 func TestFromProfile_FieldMapping(t *testing.T) {
 	p := &profile.CapabilityProfile{
+		Company: "Example Federal Co",
 		NAICSCodes: []profile.NAICSCode{
 			{Code: "541519", Tier: profile.TierPrimary},
 			{Code: "518210", Tier: profile.TierSecondary},
@@ -63,6 +64,9 @@ func TestFromProfile_FieldMapping(t *testing.T) {
 
 	got := FromProfile(p)
 
+	if got.Company != "Example Federal Co" {
+		t.Errorf("Company = %q, want %q", got.Company, "Example Federal Co")
+	}
 	if !reflect.DeepEqual(got.PrimaryNAICS, []string{"541519"}) {
 		t.Errorf("PrimaryNAICS = %v", got.PrimaryNAICS)
 	}

@@ -1,5 +1,6 @@
 {
   "_comment": "BlueMeta Technologies scoring profile (scorer.CapabilityProfile). Derived from config/bluemeta_profile.yaml. This is the REAL company profile the Scorer and Writer ground on — distinct from the generic test/fixtures/capability_profile.json. Keep in sync with config/bluemeta_profile.yaml.",
+  "company": "BlueMeta Technologies",
   "primary_naics": [
     "541519",
     "541512",
