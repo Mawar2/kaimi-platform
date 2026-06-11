@@ -72,6 +72,37 @@ variable "finalreview_model" {
   default     = "gemini-2.5-pro"
 }
 
+# --- Cost control: active / paused -------------------------------------------
+#
+# Kaimi's recurring spend is the Cloud Scheduler firing the pipeline (Gemini /
+# Vertex + SAM.gov calls) on schedule_cron; the Cloud Run Job and Service both
+# scale to zero between runs. Setting active=false PAUSES the scheduler so no
+# pipeline runs fire — stopping the recurring Gemini/SAM cost — while leaving all
+# data and infrastructure in place. Flip it back to true to resume in seconds.
+# This is the cheap-to-idle, trivially-pausable knob (no data loss, no destroy).
+
+variable "active" {
+  description = "When true (default), the pipeline runs on schedule_cron. Set false to PAUSE the Cloud Scheduler job (no pipeline runs → no recurring Gemini/SAM spend); the Cloud Run Service/Job stay scaled to zero. Resume instantly with active=true. No data is lost; this is not a destroy."
+  type        = bool
+  default     = true
+}
+
+# --- Cost control: bucket data protection ------------------------------------
+#
+# `terraform destroy` tries to delete the GCS buckets, which hold the historical
+# opportunity queue and downloaded solicitations. We protect that data with the
+# native GCS rule rather than count/prevent_destroy gymnastics: GCP refuses to
+# delete a NON-EMPTY bucket, so with force_destroy=false (default) a destroy
+# fails SAFELY (409 "Bucket you tried to delete is not empty") on any bucket
+# holding data. A deliberate teardown either empties the buckets first or sets
+# force_destroy=true to accept the data deletion. See README "Cost control".
+
+variable "force_destroy" {
+  description = "When false (default), the queue and solicitations GCS buckets are NOT force-deleted: GCP refuses to delete a non-empty bucket, so `terraform destroy` fails safely (409 Bucket not empty) and historical opportunity data is never deleted by accident. Set true ONLY when you intend a full teardown and accept deleting the bucket contents."
+  type        = bool
+  default     = false
+}
+
 # --- Scheduling --------------------------------------------------------------
 
 variable "schedule_cron" {

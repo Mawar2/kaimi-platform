@@ -171,10 +171,87 @@ the secret-sourced `SAM_API_KEY`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`,
 `DRIVE_OAUTH_CLIENT_SECRET`. `$PORT` is injected by Cloud Run and honored by the
 API binary automatically.
 
-## Teardown
+## Cost control / spin up & down
+
+A deployed Kaimi is cheap to idle. The Cloud Run **Service** and **Job** both
+scale to zero (`min_instance_count = 0`), so there is no always-on instance
+billing — between requests/runs they cost nothing. The only recurring spend is
+the **Cloud Scheduler** firing the pipeline three times a day, where each run
+makes Gemini/Vertex + SAM.gov calls. There are three operating states:
+
+### 1. ACTIVE — normal operation (default)
+The scheduler fires the pipeline on `schedule_cron` (default 07:00/12:00/17:00
+ET). This is the only state with recurring Gemini/SAM cost.
 ```sh
+terraform apply -var active=true     # the default; nothing to do for a fresh deploy
+```
+
+### 2. PAUSED — near-$0 idle, resume in seconds (no data loss)
+Pause the scheduler so **no pipeline runs fire** — the recurring Gemini/Vertex +
+SAM.gov spend stops. The Service/Job remain scaled to zero. A paused deployment
+costs only tiny GCS + Artifact Registry **storage** (cents/month). All data and
+infrastructure stay in place; resume is instant.
+
+- Declarative (recommended — Terraform stays the source of truth):
+  ```sh
+  terraform apply -var active=false   # pause
+  terraform apply -var active=true    # resume
+  ```
+  This sets `paused = !var.active` on the Cloud Scheduler job.
+
+- Operator one-liner (no Terraform run — flips the scheduler directly via gcloud):
+  ```sh
+  # bash / Linux / macOS
+  deploy/scripts/pause.sh  --project acme-kaimi-prod --region us-east4
+  deploy/scripts/resume.sh --project acme-kaimi-prod --region us-east4
+
+  # PowerShell / Windows
+  deploy\scripts\pause.ps1  -Project acme-kaimi-prod -Region us-east4
+  deploy\scripts\resume.ps1 -Project acme-kaimi-prod -Region us-east4
+  ```
+  Project/region/job come from args or `PROJECT`/`REGION`/`JOB` env; the job
+  defaults to `kaimi-pipeline-schedule`. The scripts are idempotent.
+
+  > If you pause with a script, the next `terraform apply` (with the default
+  > `active=true`) will resume the schedule, because Terraform reconciles the
+  > `paused` field. Use `-var active=false` to make the pause stick across applies.
+
+### 3. DESTROYED — true $0, but DATA IS DELETED
+`terraform destroy` removes all infrastructure and bills nothing — **but it
+tries to delete the GCS buckets, which hold the historical opportunity queue and
+the downloaded solicitations.** To prevent a surprise data loss, the buckets set
+`force_destroy = var.force_destroy`, which **defaults to false**. Because GCP
+**refuses to delete a non-empty bucket**, a `terraform destroy` **fails safely**
+on any bucket that still holds data — the provider returns
+`Error 409: ... Bucket you tried to delete is not empty` and the historical data
+is left intact. No `prevent_destroy` / `count` gymnastics, no resource pairs.
+
+To genuinely tear down, either empty the bucket(s) first or pass
+`force_destroy=true` to explicitly accept deleting the queue/solicitations data:
+```sh
+# Option A — copy out anything you want, empty the buckets, then destroy as-is:
+gsutil -m rm -r gs://acme-kaimi-prod-queue/** gs://acme-kaimi-prod-solicitations/**
 terraform destroy
+
+# Option B — deliberately delete the bucket contents along with the infra:
+terraform destroy -var force_destroy=true   # deletes the queue/solicitations data
 ```
 Enabled APIs are left on by default (`disable_on_destroy = false`) so a shared
 project isn't broken; secret *containers* are destroyed but you may want to copy
-out any versions first. Buckets must be empty to delete.
+out any versions first.
+
+> **Why `force_destroy` instead of `prevent_destroy`?** Terraform's
+> `prevent_destroy` only accepts a literal, so a variable-driven on/off toggle is
+> impossible without a brittle dual-resource (`count`) pair — which itself breaks
+> when flipped (it would destroy+recreate the bucket = data loss). Relying on
+> GCP's native "can't delete a non-empty bucket" rule via `force_destroy=false`
+> is simpler and safer: a casual `terraform destroy` can't silently nuke
+> historical opportunities, but a deliberate teardown is one explicit flag (or an
+> empty bucket) away.
+
+## Teardown
+
+See **DESTROYED** above — `terraform destroy` fails safely on a non-empty data
+bucket by default (`force_destroy = false`). To truly tear down, empty the
+queue/solicitations bucket(s) first, or run `terraform destroy -var force_destroy=true`
+to delete the bucket contents along with the infrastructure (deliberate data loss).

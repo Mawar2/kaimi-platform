@@ -116,6 +116,17 @@ resource "google_artifact_registry_repository" "kaimi" {
 #    on the solicitations bucket; we harden both — strictly safer). The runtime
 #    SA gets objectAdmin scoped to each bucket (setup-gcp.sh:222,274), not the
 #    project-wide grant.
+#
+#    DATA PROTECTION (cost control): these buckets hold the historical
+#    opportunity queue and downloaded solicitations — the data a customer would
+#    NOT want a `terraform destroy` to silently delete. The protection here is
+#    simply `force_destroy = var.force_destroy`, which defaults to false: GCP
+#    REFUSES to delete a non-empty bucket, so `terraform destroy` fails SAFELY
+#    (HTTP 409 "Bucket you tried to delete is not empty") on any bucket holding
+#    historical opportunities — no `count`/`prevent_destroy` gymnastics, no
+#    duplicate resource pairs. A deliberate teardown either empties the buckets
+#    first or runs `terraform destroy -var force_destroy=true`, explicitly
+#    accepting the data deletion. See README "Cost control".
 # -----------------------------------------------------------------------------
 resource "google_storage_bucket" "queue" {
   project                     = var.project_id
@@ -125,6 +136,11 @@ resource "google_storage_bucket" "queue" {
   public_access_prevention    = "enforced"
   labels                      = var.labels
 
+  # Default false: a non-empty bucket cannot be deleted (409 Bucket not empty),
+  # so `terraform destroy` fails safely and guards the historical queue data. A
+  # deliberate teardown sets force_destroy=true to accept the data loss.
+  force_destroy = var.force_destroy
+
   depends_on = [google_project_service.required]
 }
 
@@ -132,9 +148,14 @@ resource "google_storage_bucket" "solicitations" {
   project                     = var.project_id
   name                        = local.solicitations_bucket
   location                    = var.region
-  uniform_bucket_level_access = true # setup-gcp.sh:271
-  public_access_prevention    = "enforced" # setup-gcp.sh:271 --public-access-prevention
+  uniform_bucket_level_access = true        # setup-gcp.sh:271
+  public_access_prevention    = "enforced"  # setup-gcp.sh:271 --public-access-prevention
   labels                      = var.labels
+
+  # Default false: a non-empty bucket cannot be deleted (409 Bucket not empty),
+  # so `terraform destroy` fails safely and guards the downloaded solicitation
+  # documents. A deliberate teardown sets force_destroy=true to accept the loss.
+  force_destroy = var.force_destroy
 
   depends_on = [google_project_service.required]
 }
@@ -359,6 +380,15 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account = google_service_account.runtime.email
 
+    # Cost control: scale to zero between requests so there is no always-on
+    # instance billing when the API is idle. min_instance_count=0 means Cloud
+    # Run keeps zero warm instances (accepting a cold start) rather than paying
+    # for a pinned instance. max keeps a small ceiling for a single-tenant API.
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 4
+    }
+
     # Mount the same queue bucket so the API and the pipeline Job share one JSON
     # store (the API reads the opportunity queue the pipeline writes).
     volumes {
@@ -557,6 +587,11 @@ resource "google_cloud_scheduler_job" "pipeline_schedule" {
   name      = local.scheduler_job_name
   schedule  = var.schedule_cron      # setup-gcp.sh:252 "0 7,12,17 * * *"
   time_zone = var.schedule_time_zone # setup-gcp.sh:252 America/New_York
+
+  # Cost control: when active=false the scheduler is PAUSED, so the 3x/day
+  # pipeline never fires and the recurring Gemini/Vertex + SAM.gov spend stops.
+  # All data and infra stay in place; flip active=true to resume in seconds.
+  paused = !var.active
 
   http_target {
     http_method = "POST" # setup-gcp.sh:254

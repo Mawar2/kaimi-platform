@@ -76,6 +76,10 @@ module "kaimi" {
   naics_codes   = var.naics_codes
   schedule_cron = var.schedule_cron
   labels        = var.labels
+
+  # --- Cost control (see README "Cost control / spin up & down") ---
+  active        = var.active        # false PAUSES the scheduler (near-$0 idle)
+  force_destroy = var.force_destroy # true lets terraform destroy delete non-empty data buckets
 }
 
 # Variable declarations for this root module. They simply forward to the kaimi
@@ -149,6 +153,15 @@ variable "schedule_cron" {
 variable "labels" {
   type    = map(string)
   default = {}
+}
+
+variable "active" {
+  type    = bool
+  default = true
+}
+variable "force_destroy" {
+  type    = bool
+  default = false
 }
 
 # Re-export the module outputs at the root so `terraform output` surfaces them.
