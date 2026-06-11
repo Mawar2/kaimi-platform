@@ -58,15 +58,48 @@ type Outline struct {
 	GeneratedAt     time.Time
 }
 
+// SectionPlanner produces the proposal section structure for an opportunity.
+//
+// Two implementations exist: the deterministic planner (default) derives sections
+// from the opportunity and solicitation text with rules and keyword matching; the
+// Gemini planner (gemini-3.5-flash) asks the model to identify the required
+// sections from the solicitation. Formatting-rule extraction is deliberately NOT
+// part of this interface — it stays deterministic (reliable regex) regardless of
+// which planner is used.
+type SectionPlanner interface {
+	// PlanSections returns the ordered proposal sections for the opportunity.
+	// source is the combined opportunity description plus extracted document text.
+	// It must return at least one section or a non-nil error — never an empty,
+	// error-free result (which would yield a silently empty outline).
+	PlanSections(ctx context.Context, opp *opportunity.Opportunity, source string) ([]Section, error)
+}
+
+// deterministicPlanner is the default SectionPlanner: it derives sections from the
+// opportunity and source text with the rule-based buildSections. It never errors.
+type deterministicPlanner struct{}
+
+// PlanSections implements SectionPlanner using the rule-based buildSections.
+func (deterministicPlanner) PlanSections(_ context.Context, opp *opportunity.Opportunity, source string) ([]Section, error) {
+	return buildSections(opp, source), nil
+}
+
 // Agent is the Outline agent.
 type Agent struct {
 	docsClient googledocs.Client
+	planner    SectionPlanner
 }
 
 // New creates a new Outline agent that saves generated outlines to Google Docs
-// via the given client.
+// via the given client. It uses the deterministic section planner — no model call.
 func New(docsClient googledocs.Client) *Agent {
-	return &Agent{docsClient: docsClient}
+	return &Agent{docsClient: docsClient, planner: deterministicPlanner{}}
+}
+
+// NewWithPlanner creates an Outline agent that plans sections with the given
+// SectionPlanner (e.g. the gemini-3.5-flash planner) instead of the deterministic
+// rules. Formatting extraction stays deterministic either way.
+func NewWithPlanner(docsClient googledocs.Client, planner SectionPlanner) *Agent {
+	return &Agent{docsClient: docsClient, planner: planner}
 }
 
 // Run takes a selected Opportunity and produces a structured Outline and a Result.
@@ -88,7 +121,9 @@ func New(docsClient googledocs.Client) *Agent {
 // rules — the real Section L/M instructions live in the RFP documents, not the
 // thin SAM.gov summary. A nil/empty map reproduces the previous behavior exactly.
 //
-// TODO(phase-3): Replace buildSections with a Gemini call once LLM integration lands.
+// The section structure comes from the configured SectionPlanner (deterministic
+// by default, gemini-3.5-flash when constructed with NewWithPlanner); formatting
+// rules are always extracted deterministically.
 func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents map[string]string) (*Outline, *agent.Result, error) {
 	if opp == nil {
 		return nil, &agent.Result{
@@ -98,8 +133,37 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents
 		}, fmt.Errorf("outline agent: opportunity must not be nil")
 	}
 
+	planner := a.planner
+	if planner == nil {
+		// Defensive default for zero-value Agents (e.g. constructed via struct
+		// literal in a test) so Run never dereferences a nil planner.
+		planner = deterministicPlanner{}
+	}
+
 	source := combinedSource(opp, documents)
-	sections := buildSections(opp, source)
+	sections, err := planner.PlanSections(ctx, opp, source)
+	if err != nil {
+		return nil, &agent.Result{
+			AgentName:   agentName,
+			Status:      agent.StatusFailed,
+			NoticeID:    opp.ID,
+			Summary:     fmt.Sprintf("failed to plan sections for %s", opp.ID),
+			Error:       fmt.Sprintf("planning sections: %v", err),
+			CompletedAt: time.Now().UTC(),
+		}, fmt.Errorf("outline agent: plan sections: %w", err)
+	}
+	// A planner that returns no sections without erroring would yield a silently
+	// empty outline; treat it as a failure rather than save an empty Doc.
+	if len(sections) == 0 {
+		return nil, &agent.Result{
+			AgentName:   agentName,
+			Status:      agent.StatusFailed,
+			NoticeID:    opp.ID,
+			Summary:     fmt.Sprintf("planner returned no sections for %s", opp.ID),
+			Error:       "section planner returned zero sections",
+			CompletedAt: time.Now().UTC(),
+		}, fmt.Errorf("outline agent: planner returned zero sections for %s", opp.ID)
+	}
 	formatting := extractFormattingRules(source)
 
 	outline := &Outline{
