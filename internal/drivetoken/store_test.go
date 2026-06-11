@@ -118,6 +118,61 @@ func TestSaveFilePerms0600(t *testing.T) {
 	}
 }
 
+// TestSaveIgnoresStaleLeftoverTmp verifies a pre-existing leftover temp file (from a
+// prior crash, with a different random name) does not break Save. Because Save now
+// uses os.CreateTemp's unique O_EXCL naming, it can never collide with a stale temp,
+// and the final token file is written with owner-only (0600) perms regardless.
+func TestSaveIgnoresStaleLeftoverTmp(t *testing.T) {
+	s, dir := newTestStore(t)
+
+	// Plant a stale leftover temp matching the Save temp pattern but with a
+	// different random suffix than any new temp will get.
+	stale := filepath.Join(dir, "drive_token-stale123.tmp")
+	if err := os.WriteFile(stale, []byte("garbage"), 0o600); err != nil {
+		t.Fatalf("plant stale temp: %v", err)
+	}
+
+	if err := s.Save(&oauth2.Token{AccessToken: "a", RefreshToken: "r"}); err != nil {
+		t.Fatalf("Save with stale temp present: %v", err)
+	}
+
+	// The real token file must exist and round-trip.
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.AccessToken != "a" {
+		t.Errorf("AccessToken = %q, want %q", got.AccessToken, "a")
+	}
+
+	// The final token file must be owner-only. (Skipped on Windows, where Unix
+	// permission bits are not meaningfully enforced.)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(dir, TokenFileName))
+		if err != nil {
+			t.Fatalf("Stat token file: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("token file perms = %o, want 0600", perm)
+		}
+	}
+
+	// Save must not have removed the unrelated stale temp (it owns only its own
+	// uniquely-named temp), and it must not have left its OWN temp behind.
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("Save unexpectedly disturbed the unrelated stale temp: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "drive_token-stale123.tmp" && filepath.Ext(e.Name()) == ".tmp" {
+			t.Errorf("Save left its own temp file behind: %s", e.Name())
+		}
+	}
+}
+
 // TestSaveOverwrites verifies a second Save replaces the first token rather than
 // appending or failing.
 func TestSaveOverwrites(t *testing.T) {

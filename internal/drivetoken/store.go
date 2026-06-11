@@ -104,11 +104,17 @@ func (s *JSONTokenStore) Load() (*oauth2.Token, error) {
 // prior token. It rejects a nil token rather than writing a null document that
 // would later load as an empty, unusable token.
 //
-// The write is atomic: it writes to a temp file in the SAME directory (created with
-// 0o600 so the secret is never briefly world-readable) and then os.Renames it over
-// the destination. os.Rename replaces the destination atomically on both Unix and
-// Windows, so a crash mid-write leaves the old token intact rather than a truncated
-// one. It never logs the token.
+// The write is atomic and race-free: it creates a UNIQUELY-named temp file in the
+// SAME directory via os.CreateTemp (which opens with O_EXCL at mode 0o600), writes
+// the secret into it, and then os.Renames it over the destination. Using
+// os.CreateTemp instead of a fixed "<path>.tmp" name closes a CWE-377 insecure
+// temp-file race: a fixed name lets an attacker pre-create a world-readable file
+// that os.WriteFile would truncate-and-write into WITHOUT fixing its perms, briefly
+// exposing the token. A unique O_EXCL create also can never collide with a stale
+// leftover temp from a prior crash. os.Rename replaces the destination atomically on
+// both Unix and Windows, so a crash mid-write leaves the old token intact rather
+// than a truncated one. On any failure the temp file is removed best-effort and the
+// error is wrapped WITHOUT the token bytes. It never logs the token.
 func (s *JSONTokenStore) Save(tok *oauth2.Token) error {
 	if tok == nil {
 		return fmt.Errorf("drive token cannot be nil")
@@ -122,21 +128,41 @@ func (s *JSONTokenStore) Save(tok *oauth2.Token) error {
 		return fmt.Errorf("marshal drive token: %w", err)
 	}
 
-	// Write to a temp file in the same directory so the rename stays on the same
-	// filesystem (cross-device renames are not atomic and would fail). Create it
-	// with 0o600 directly so the secret is never momentarily readable by others.
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, tokenFilePerm); err != nil {
-		_ = os.Remove(tmpPath) // Best-effort cleanup; the temp file may or may not exist.
-		return fmt.Errorf("write temp drive token file %q: %w", tmpPath, err)
+	// Create the temp file in the same directory as the destination so the rename
+	// stays on one filesystem (cross-device renames are not atomic and would fail).
+	// os.CreateTemp creates a uniquely-named file with O_EXCL at mode 0o600, so the
+	// secret is never momentarily readable by others and there is no pre-create race.
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, "drive_token-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp drive token file in %q: %w", dir, err)
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath) // Best-effort cleanup of the leftover temp file.
-		return fmt.Errorf("rename temp drive token %q to %q: %w", tmpPath, s.path, err)
+	// Capture the name immediately so cleanup works even on a partial failure below.
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName) // Best-effort cleanup of the partial temp file.
+		// Do not include the data; only the path and the I/O error.
+		return fmt.Errorf("write temp drive token file %q: %w", tmpName, err)
 	}
-	// os.WriteFile honors the create perm only when the file does not already exist;
-	// on overwrite the existing mode is kept. Enforce 0o600 explicitly so a token
-	// file that predated this code (or was created with a looser umask) is tightened.
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp drive token file %q: %w", tmpName, err)
+	}
+	// Defense-in-depth: re-assert 0o600 explicitly in case an unusual umask or a
+	// future os.CreateTemp default ever produced a looser mode.
+	if err := os.Chmod(tmpName, tokenFilePerm); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("set temp drive token file permissions %q: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, s.path); err != nil {
+		_ = os.Remove(tmpName) // Best-effort cleanup of the leftover temp file.
+		return fmt.Errorf("rename temp drive token to %q: %w", s.path, err)
+	}
+	// os.Rename preserves the source file's mode, so the destination is already
+	// 0o600. Re-assert it anyway so a token file that predated this code (or was
+	// created with a looser umask before the rename overwrote it) is tightened.
 	if err := os.Chmod(s.path, tokenFilePerm); err != nil {
 		return fmt.Errorf("set drive token file permissions %q: %w", s.path, err)
 	}

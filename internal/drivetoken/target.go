@@ -83,6 +83,12 @@ func (s *JSONTargetStore) Load() (Target, error) {
 
 // Save persists the target atomically (temp file + rename), overwriting any prior
 // one. It rejects a blank Drive id.
+//
+// It uses os.CreateTemp for the same race-safety and consistency as the token store
+// (a uniquely-named O_EXCL temp in the same directory, so no fixed-name pre-create
+// race and no stale-leftover collision). The target id is NOT a secret, so after the
+// rename the file is chmod'd to 0o644 to match the profile store (os.CreateTemp makes
+// it 0o600 by default).
 func (s *JSONTargetStore) Save(t Target) error {
 	if strings.TrimSpace(t.DriveID) == "" {
 		return fmt.Errorf("drive target id cannot be empty")
@@ -96,14 +102,33 @@ func (s *JSONTargetStore) Save(t Target) error {
 		return fmt.Errorf("marshal drive target: %w", err)
 	}
 
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("write temp drive target file %q: %w", tmpPath, err)
+	// Create the temp file in the same directory so the rename stays on one
+	// filesystem and is atomic. os.CreateTemp gives a unique, O_EXCL-created name.
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, "drive_target-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp drive target file in %q: %w", dir, err)
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename temp drive target %q to %q: %w", tmpPath, s.path, err)
+	// Capture the name immediately so cleanup works even on a partial failure below.
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp drive target file %q: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp drive target file %q: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, s.path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename temp drive target to %q: %w", s.path, err)
+	}
+	// The target is not a secret; match the profile store's 0o644 (os.CreateTemp
+	// defaults to 0o600, which the rename carried over to the destination).
+	if err := os.Chmod(s.path, 0o644); err != nil {
+		return fmt.Errorf("set drive target file permissions %q: %w", s.path, err)
 	}
 	return nil
 }
