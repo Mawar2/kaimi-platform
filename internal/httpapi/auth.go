@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -36,9 +37,13 @@ import (
 
 // Temporary per-login cookies. They are short-lived, HttpOnly+Secure, and exist
 // only between /auth/login and /auth/callback to bind the redirect to this client.
+// The __Host- prefix is browser-enforced hardening (requires Secure + Path=/ + no
+// Domain) that defeats subdomain cookie-tossing; setTempCookie/clearTempCookie
+// satisfy those constraints. SameSite=Lax still lets these cookies ride the
+// top-level GET redirect Google sends back to /auth/callback, so the flow works.
 const (
-	stateCookieName = "kaimi_oauth_state"
-	pkceCookieName  = "kaimi_oauth_pkce"
+	stateCookieName = "__Host-kaimi_oauth_state"
+	pkceCookieName  = "__Host-kaimi_oauth_pkce"
 
 	// tempCookieMaxAge bounds how long a login may stay in flight (seconds).
 	tempCookieMaxAge = 600 // 10 minutes
@@ -92,6 +97,14 @@ func NewAuthHandler(cfg *OAuthConfig) (*AuthHandler, error) {
 // manager. The returned handler defaults its seams to the live Google calls; tests
 // replace exchange/verifyIDToken to run offline.
 func newAuthHandler(cfg *OAuthConfig, session *sessionManager) (*AuthHandler, error) {
+	// Normalize the allowed domain once: DNS domains are case-insensitive, so a
+	// configured "Example.com" must accept an hd claim of "example.com" (and vice
+	// versa). We lowercase here and lowercase the hd claim at compare time so the
+	// constant-time check never produces a false 403 over letter case.
+	normalized := *cfg
+	normalized.AllowedDomain = strings.ToLower(cfg.AllowedDomain)
+	cfg = &normalized
+
 	oc := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -143,6 +156,13 @@ func (a *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleCallback completes the OAuth flow and enforces every security check before
 // minting a session. See the file header for the ordered enforcement steps.
 func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// The temp state/pkce cookies have served their purpose the moment this handler
+	// runs; clear them on EVERY exit path so a half-finished or rejected login never
+	// leaves them lingering. We emit the deletions up front (before any validation or
+	// error response is written) so they ride out with whatever status we return.
+	a.clearTempCookie(w, stateCookieName)
+	a.clearTempCookie(w, pkceCookieName)
+
 	// Step 1: CSRF — the state param must match the state cookie (constant-time).
 	stateCookie, err := r.Cookie(stateCookieName)
 	if err != nil {
@@ -159,10 +179,6 @@ func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing pkce verifier", http.StatusBadRequest)
 		return
 	}
-
-	// The temp cookies have served their purpose; clear them regardless of outcome.
-	a.clearTempCookie(w, stateCookieName)
-	a.clearTempCookie(w, pkceCookieName)
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -192,8 +208,11 @@ func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: enforce the Workspace domain and that the email is verified.
+	// Step 4: enforce the Workspace domain and that the email is verified. The hd
+	// claim is lowercased to match the already-lowercased AllowedDomain (DNS domains
+	// are case-insensitive); the compare stays constant-time for consistency.
 	hd, _ := payload.Claims["hd"].(string)
+	hd = strings.ToLower(hd)
 	if hd == "" || subtle.ConstantTimeCompare([]byte(hd), []byte(a.cfg.AllowedDomain)) != 1 {
 		// Wrong/absent Workspace domain — outside the tenant. Never mint a session.
 		http.Error(w, "account is not in the allowed Workspace domain", http.StatusForbidden)
@@ -228,12 +247,14 @@ func (a *AuthHandler) handleLogout(w http.ResponseWriter, _ *http.Request) {
 }
 
 // setTempCookie writes a short-lived, hardened cookie used only between login and
-// callback. HttpOnly+Secure+SameSite=Lax mirror the session cookie's flags.
+// callback. HttpOnly+Secure+SameSite=Lax mirror the session cookie's flags. Path
+// MUST be "/" (not "/auth"): the __Host- prefix the cookie names carry is only
+// honored by browsers when Path=/ and no Domain is set.
 func (a *AuthHandler) setTempCookie(w http.ResponseWriter, name, value string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
-		Path:     "/auth",
+		Path:     "/",
 		MaxAge:   tempCookieMaxAge,
 		HttpOnly: true,
 		Secure:   true,
@@ -241,12 +262,13 @@ func (a *AuthHandler) setTempCookie(w http.ResponseWriter, name, value string) {
 	})
 }
 
-// clearTempCookie expires a temp login cookie.
+// clearTempCookie expires a temp login cookie. Path MUST match the Path used when
+// the cookie was set ("/") so the deletion targets the same __Host- cookie.
 func (a *AuthHandler) clearTempCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
-		Path:     "/auth",
+		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   true,

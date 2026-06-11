@@ -26,8 +26,12 @@ import (
 // recomputes the MAC over the first segment, and compares in constant time. Only
 // after the signature checks out is the payload decoded and the expiry enforced.
 
-// sessionCookieName is the cookie that carries the signed session token.
-const sessionCookieName = "kaimi_session"
+// sessionCookieName is the cookie that carries the signed session token. The
+// __Host- prefix is a browser-enforced hardening: a cookie with this prefix is
+// only accepted when it is Secure, has Path=/, and carries NO Domain attribute,
+// which defeats subdomain cookie-tossing (a sibling/sub domain cannot overwrite
+// it). SetSession/ClearSession below satisfy those constraints.
+const sessionCookieName = "__Host-kaimi_session"
 
 // ErrInvalidSession is returned by ParseSession/verify when a token is missing,
 // malformed, has a bad signature, or is expired. Callers (e.g. the WS-B5

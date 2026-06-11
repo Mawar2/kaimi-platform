@@ -134,6 +134,13 @@ func TestSetSessionCookieFlags(t *testing.T) {
 	if c.Path != "/" {
 		t.Errorf("session cookie Path = %q, want /", c.Path)
 	}
+	// __Host- prefix requires Path=/ and no Domain; assert the prefix + no Domain.
+	if !strings.HasPrefix(c.Name, "__Host-") {
+		t.Errorf("session cookie name %q missing __Host- prefix", c.Name)
+	}
+	if c.Domain != "" {
+		t.Errorf("session cookie Domain = %q, want empty (required by __Host- prefix)", c.Domain)
+	}
 	if c.MaxAge <= 0 {
 		t.Errorf("session cookie MaxAge = %d, want > 0", c.MaxAge)
 	}

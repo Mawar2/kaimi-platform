@@ -117,6 +117,16 @@ func TestLoginRedirectsToGoogleWithStatePKCEAndHD(t *testing.T) {
 		if !ck.HttpOnly || !ck.Secure || ck.SameSite != http.SameSiteLaxMode {
 			t.Errorf("temp cookie %q missing HttpOnly/Secure/SameSite=Lax", ck.Name)
 		}
+		// __Host- prefix requires Path=/ (and no Domain) to be honored by browsers.
+		if ck.Path != "/" {
+			t.Errorf("temp cookie %q Path = %q, want / (required by __Host- prefix)", ck.Name, ck.Path)
+		}
+		if ck.Domain != "" {
+			t.Errorf("temp cookie %q Domain = %q, want empty (required by __Host- prefix)", ck.Name, ck.Domain)
+		}
+		if !strings.HasPrefix(ck.Name, "__Host-") {
+			t.Errorf("temp cookie name %q missing __Host- prefix", ck.Name)
+		}
 	}
 	// The state cookie value must match the state in the URL.
 	if stateCk.Value != q.Get("state") {
@@ -233,6 +243,68 @@ func TestCallbackStateMismatchBadRequest(t *testing.T) {
 	}
 	if c := sessionCookie(rec); c != nil {
 		t.Error("state mismatch set a session cookie, want none")
+	}
+}
+
+// TestCallbackCaseInsensitiveDomainAllowed verifies the hd/domain compare is
+// case-insensitive: an hd claim of "Example.com" against AllowedDomain "example.com"
+// is ALLOWED (DNS domains are case-insensitive) and must not produce a false 403.
+func TestCallbackCaseInsensitiveDomainAllowed(t *testing.T) {
+	verify := func(_ context.Context, raw, aud string) (*idtoken.Payload, error) {
+		// Mixed-case hd claim; AllowedDomain in newTestAuth is lowercase "example.com".
+		return fakePayload("Example.Com", true), nil
+	}
+	ah := newTestAuth(t, okExchange, verify)
+
+	rec := httptest.NewRecorder()
+	ah.handleCallback(rec, callbackRequest("the-state", "the-code"))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("case-insensitive domain status = %d, want 302 (allowed); body=%s", rec.Code, rec.Body.String())
+	}
+	c := sessionCookie(rec)
+	if c == nil {
+		t.Fatal("case-insensitive domain set no session cookie, want one")
+	}
+}
+
+// clearedTempCookie returns the most recent Set-Cookie for name that is a deletion
+// (MaxAge < 0 and empty value), or nil if no such deletion was written.
+func clearedTempCookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	var found *http.Cookie
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == name && ck.MaxAge < 0 && ck.Value == "" {
+			found = ck
+		}
+	}
+	return found
+}
+
+// TestCallbackStateMismatchClearsTempCookies verifies that on the state-mismatch
+// error path (an early return), the temp state + pkce cookies are still cleared —
+// the deletion Set-Cookie headers (MaxAge<0, Path=/, __Host- names) are present.
+func TestCallbackStateMismatchClearsTempCookies(t *testing.T) {
+	ah := newTestAuth(t, okExchange, func(_ context.Context, _, _ string) (*idtoken.Payload, error) {
+		return fakePayload("example.com", true), nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=attacker-state&code=c", http.NoBody)
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: "real-state"})
+	req.AddCookie(&http.Cookie{Name: pkceCookieName, Value: "v"})
+	rec := httptest.NewRecorder()
+	ah.handleCallback(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("state-mismatch status = %d, want 400", rec.Code)
+	}
+	for _, name := range []string{stateCookieName, pkceCookieName} {
+		c := clearedTempCookie(rec, name)
+		if c == nil {
+			t.Fatalf("state-mismatch path did not clear temp cookie %q", name)
+		}
+		if c.Path != "/" {
+			t.Errorf("cleared temp cookie %q Path = %q, want / (must match set Path)", name, c.Path)
+		}
 	}
 }
 
