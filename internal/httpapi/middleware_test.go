@@ -72,9 +72,13 @@ func TestRequireSessionTamperedCookieReturns401(t *testing.T) {
 	h := srv.RequireSession(okHandler(&ran, nil))
 
 	good := mintCookie(t, auth, Session{Subject: "1", Email: "a@example.com", Domain: "example.com"})
-	// Flip the last byte of the signature so the MAC no longer matches.
+	// Flip the FIRST character of the cookie (the payload's first base64 char) so the
+	// signed bytes are guaranteed to change and the MAC no longer matches. Flipping the
+	// LAST char is unreliable: a base64 string's final char carries "don't-care"
+	// trailing bits, so A<->B there can decode to the same bytes — which made this test
+	// flaky (occasionally a 200 instead of 401).
 	v := good.Value
-	tampered := v[:len(v)-1] + flipChar(v[len(v)-1])
+	tampered := flipChar(v[0]) + v[1:]
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/opportunities", http.NoBody)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tampered})
