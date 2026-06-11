@@ -13,6 +13,13 @@ import (
 // layers report missing values the same way.
 var ErrMissingRequired = errors.New("required configuration value is missing")
 
+// ErrInvalidConfig is the sentinel wrapped by LoadConfig when a configuration
+// value is present but malformed (e.g. a port that is not an integer). It is
+// distinct from ErrMissingRequired: that sentinel means a required value is
+// absent, whereas this one means a supplied value could not be parsed. Callers
+// can test for it with errors.Is.
+var ErrInvalidConfig = errors.New("invalid configuration value")
+
 // Config holds the HTTP/server layer's settings for the JSON API binary. It is
 // deliberately separate from the app-wide config.Config (which carries the
 // tenant, GCP, store, and agent inputs): this struct owns only what the HTTP
@@ -51,7 +58,8 @@ const (
 // 127.0.0.1). The port comes from $PORT if set (the platform-injected variable),
 // otherwise API_PORT, otherwise the built-in default; whichever variable supplies
 // the port must parse as an integer, and a non-integer value is reported as an
-// error naming the offending variable and wrapping ErrMissingRequired.
+// error naming the offending variable and wrapping ErrInvalidConfig (the value is
+// present but malformed, not absent).
 //
 // LoadConfig never reads flags directly: cmd/api parses flags and may override
 // the returned Config's fields, keeping flag wiring in the binary and env/default
@@ -71,13 +79,13 @@ func LoadConfig() (Config, error) {
 	if v := os.Getenv(envPort); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("%s must be an integer, got %q: %w", envPort, v, ErrMissingRequired)
+			return Config{}, fmt.Errorf("%s must be an integer, got %q: %w", envPort, v, ErrInvalidConfig)
 		}
 		cfg.Port = n
 	} else if v := os.Getenv(envAPIPort); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("%s must be an integer, got %q: %w", envAPIPort, v, ErrMissingRequired)
+			return Config{}, fmt.Errorf("%s must be an integer, got %q: %w", envAPIPort, v, ErrInvalidConfig)
 		}
 		cfg.Port = n
 	}

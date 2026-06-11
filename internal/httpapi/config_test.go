@@ -60,7 +60,9 @@ func TestLoadConfigPORTWinsOverAPIPORT(t *testing.T) {
 }
 
 // TestLoadConfigPortParseError verifies a non-integer port is reported as an error
-// that names the offending variable and wraps the ErrMissingRequired sentinel.
+// that names the offending variable and wraps ErrInvalidConfig (the value is
+// present but malformed) — NOT ErrMissingRequired, which is reserved for absent
+// required values.
 func TestLoadConfigPortParseError(t *testing.T) {
 	t.Setenv(envAPIHost, "")
 	t.Setenv(envAPIPort, "")
@@ -70,8 +72,11 @@ func TestLoadConfigPortParseError(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadConfig: want error for non-integer PORT, got nil")
 	}
-	if !errors.Is(err, ErrMissingRequired) {
-		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("error = %v, want wrap of ErrInvalidConfig", err)
+	}
+	if errors.Is(err, ErrMissingRequired) {
+		t.Errorf("error = %v, should NOT wrap ErrMissingRequired (value is present but invalid)", err)
 	}
 	if got := err.Error(); !strings.Contains(got, envPort) {
 		t.Errorf("error %q should name the offending variable %q", got, envPort)
