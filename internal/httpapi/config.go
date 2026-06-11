@@ -38,6 +38,15 @@ type Config struct {
 	// container platforms) takes precedence over API_PORT and the built-in
 	// default, mirroring cmd/dashboard's port precedence.
 	Port int
+
+	// AllowedOrigins is the explicit CORS allow-list, parsed from the comma-separated
+	// CORS_ALLOWED_ORIGINS env var. It is EMPTY by default: the preferred deployment
+	// is same-origin (SPA and API behind one host), in which case the CORS middleware
+	// is a no-op. Set it only when a browser front end is served from a DIFFERENT
+	// origin than the API. Each entry must be a full scheme+host(+port) origin, e.g.
+	// "https://app.example.com" — never "*", since the API uses credentialed
+	// (cookie) auth and the CORS spec forbids "*" with credentials.
+	AllowedOrigins []string
 }
 
 // OAuthConfig holds the Google Workspace OAuth2/OIDC settings for sign-in (WS-B4).
@@ -130,9 +139,10 @@ const (
 	defaultAPIHost = "127.0.0.1"
 	defaultAPIPort = 8901
 
-	envAPIHost = "API_HOST"
-	envAPIPort = "API_PORT"
-	envPort    = "PORT"
+	envAPIHost     = "API_HOST"
+	envAPIPort     = "API_PORT"
+	envPort        = "PORT"
+	envCORSOrigins = "CORS_ALLOWED_ORIGINS"
 )
 
 // LoadConfig resolves the API server Config from the environment, applying the
@@ -171,6 +181,10 @@ func LoadConfig() (Config, error) {
 		}
 		cfg.Port = n
 	}
+
+	// CORS allow-list: empty unless CORS_ALLOWED_ORIGINS is set. parseCORSOrigins
+	// trims and drops blanks so a trailing comma never yields a "" origin.
+	cfg.AllowedOrigins = parseCORSOrigins(os.Getenv(envCORSOrigins))
 
 	return cfg, nil
 }

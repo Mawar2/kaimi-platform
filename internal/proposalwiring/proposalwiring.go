@@ -104,7 +104,7 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	if opts.LiveWriter {
 		projectID := cfg.GCP.ProjectID
 		if projectID == "" {
-			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
+			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (use offline mode for credential-less UI dev)")
 		}
 		// Outline plans the section structure with gemini-3.5-flash; the Writer
 		// persona "Thomas" drafts the prose with gemini-3.1-pro-preview while the
@@ -124,14 +124,14 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		w = writer.NewWithGenerator(gen)
 		log.Printf("Outline: LIVE gemini-3.5-flash planner; Technical Writer %q: LIVE gemini-3.1-pro-preview drafting (project %s)", "Thomas", projectID)
 	} else {
-		log.Printf("Outline + Technical Writer: OFFLINE stub mode (-offline) — live Gemini agents are the default")
+		log.Printf("Outline + Technical Writer: OFFLINE stub mode — live Gemini agents are the default")
 	}
 
 	review := finalreview.New()
 	if opts.LiveReview {
 		projectID := cfg.GCP.ProjectID
 		if projectID == "" {
-			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (or pass -offline for credential-less UI dev)")
+			return nil, fmt.Errorf("live agents require GCP_PROJECT_ID (use offline mode for credential-less UI dev)")
 		}
 		// The reviewer model is configured INDEPENDENTLY of the Writer's GEMINI_MODEL.
 		// The Final Review verifier bake-off found gemini-2.5-pro is the best Gemini
@@ -150,18 +150,18 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		review = finalreview.NewWithComplianceChecker(checker)
 		log.Printf("Final Review: LIVE Gemini compliance pass enabled (project %s, model %s)", projectID, reviewModel)
 	} else {
-		log.Printf("Final Review: OFFLINE deterministic checks only (-offline) — live Gemini compliance is the default")
+		log.Printf("Final Review: OFFLINE deterministic checks only — live Gemini compliance is the default")
 	}
 
-	// Document ingestion is opt-in via -live-ingest. A true nil interface (not a
-	// typed-nil) is essential so proposal.Service's `Ingest == nil` check skips it.
+	// Document ingestion is opt-in via the live-ingest option. A true nil interface
+	// (not a typed-nil) is essential so proposal.Service's `Ingest == nil` check skips it.
 	var ingestor proposal.Ingestor
 	if opts.LiveIngest {
 		projectID := cfg.GCP.ProjectID
 		bucket := cfg.Ingest.GCSBucket
 		processorID := cfg.Ingest.DocumentAIProcessor
 		if projectID == "" || bucket == "" || processorID == "" {
-			return nil, fmt.Errorf("-live-ingest requires GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, and DOCUMENTAI_PROCESSOR_ID")
+			return nil, fmt.Errorf("live ingestion requires GCP_PROJECT_ID, GCS_SOLICITATIONS_BUCKET, and DOCUMENTAI_PROCESSOR_ID (set the live-ingest option)")
 		}
 		gcs, _, err := ingest.NewGCSStore(ctx, bucket)
 		if err != nil {
@@ -174,7 +174,7 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		ingestor = ingest.New(ingest.NewHTTPFetcher(nil, 0), gcs, ingest.NewRoutingExtractor(docAI))
 		log.Printf("Document ingestion: LIVE (bucket %s, Document AI processor %s)", bucket, processorID)
 	} else {
-		log.Printf("Document ingestion: off (pass -live-ingest to fetch + extract solicitation documents)")
+		log.Printf("Document ingestion: off (enable the live-ingest option to fetch + extract solicitation documents)")
 	}
 
 	return proposal.NewService(&proposal.Deps{
