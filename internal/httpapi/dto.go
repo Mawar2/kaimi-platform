@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
+	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
@@ -73,6 +74,36 @@ type listResponse struct {
 // (string) → count map under a single "counts" key.
 type stageCountsResponse struct {
 	Counts map[string]int `json:"counts"`
+}
+
+// SelectResponse is the body returned by POST /api/v1/opportunities/{id}/select.
+// It echoes the id and reports the resulting proposal status so the caller learns
+// the new pipeline state (e.g. "outline:in_progress") without a follow-up read.
+type SelectResponse struct {
+	// ID is the selected opportunity's id.
+	ID string `json:"id"`
+	// Selected is always true on a 202 response (the select succeeded).
+	Selected bool `json:"selected"`
+	// Status is the resulting ProposalStatus. It may be empty if the post-select
+	// read-back failed; the 202 status code is the authoritative success signal.
+	Status string `json:"status,omitempty"`
+}
+
+// ProposalStatusDTO is the body returned by GET /api/v1/proposals/{id}. It
+// composes the opportunity's read-layer view (derived pipeline stage + persisted
+// status + coarse display state) with the drafted document, if any. The document
+// is omitted entirely for an opportunity with no draft yet.
+type ProposalStatusDTO struct {
+	// Stage is the derived pipeline stage string (dashboard.DeriveStage).
+	Stage string `json:"stage"`
+	// State is the coarse display state (proposal.DisplayState): progress, human,
+	// done, submitted, or failed.
+	State string `json:"state"`
+	// Status is the raw persisted ProposalStatus ("{stage}:{status}" vocabulary).
+	// Empty when the opportunity has not been selected yet.
+	Status string `json:"status,omitempty"`
+	// Document is the drafted proposal document, omitted when none exists yet.
+	Document *document.Document `json:"document,omitempty"`
 }
 
 // toOpportunityDTO flattens a dashboard.OpportunityRow into the wire DTO,
