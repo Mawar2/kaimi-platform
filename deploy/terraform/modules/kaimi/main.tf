@@ -422,6 +422,13 @@ resource "google_cloud_run_v2_service" "api" {
   # required.
   ingress = "INGRESS_TRAFFIC_ALL"
 
+  # Stateless service (all durable data lives in the GCS buckets, which carry
+  # their own force_destroy guard). Set deletion_protection=false so terraform
+  # can replace a failed revision and so `terraform destroy` works for the WS-E3
+  # spin-down/teardown story; google_cloud_run_v2_service otherwise defaults this
+  # to true, which would block both.
+  deletion_protection = false
+
   template {
     service_account = google_service_account.runtime.email
 
