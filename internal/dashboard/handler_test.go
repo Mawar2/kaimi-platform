@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
@@ -545,6 +546,26 @@ func TestSidebarTenantName(t *testing.T) {
 		// The old hardcoded customer identity must be gone.
 		if contains(body, "BlueMeta") {
 			t.Errorf("sidebar must not hardcode BlueMeta; got:\n%s", body[:min(1200, len(body))])
+		}
+	})
+
+	t.Run("multibyte name renders rune-safe initials", func(t *testing.T) {
+		// Accented, multibyte display name: byte-slicing the first rune would
+		// split "É" mid-codepoint and emit U+FFFD. Initials must be the first
+		// rune of each of the first two words, upper-cased ("ÉF"), and valid
+		// UTF-8 with no replacement character.
+		body := render(dashboard.WithTenantName("Équipe Fédérale"))
+		if !contains(body, "Équipe Fédérale") {
+			t.Errorf("sidebar must render the multibyte tenant name; got:\n%s", body[:min(1200, len(body))])
+		}
+		if !contains(body, `class="av">ÉF<`) {
+			t.Errorf("sidebar avatar must show rune-safe initials ÉF; got:\n%s", body[:min(1200, len(body))])
+		}
+		if !utf8.ValidString(body) {
+			t.Error("rendered sidebar must be valid UTF-8 (rune-safe initials)")
+		}
+		if contains(body, "�") {
+			t.Errorf("sidebar must not contain the U+FFFD replacement char; got:\n%s", body[:min(1200, len(body))])
 		}
 	})
 

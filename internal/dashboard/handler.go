@@ -450,18 +450,26 @@ func (h *Handler) tenantLabel() string {
 // tenantInitials derives the two-letter avatar monogram from the tenant label
 // (first letters of the first two words, or the first two letters of a single
 // word), upper-cased. It always returns at least one character.
+//
+// Slicing is rune-based, not byte-based: display names with multibyte
+// characters (accents, CJK) must produce valid UTF-8 initials rather than a
+// split byte that renders as the U+FFFD replacement character in the browser.
 func (h *Handler) tenantInitials() string {
 	words := strings.Fields(h.tenantLabel())
 	var initials string
 	switch {
 	case len(words) >= 2:
-		initials = words[0][:1] + words[1][:1]
-	case len(words) == 1 && len(words[0]) >= 2:
-		initials = words[0][:2]
+		r0, r1 := []rune(words[0]), []rune(words[1])
+		initials = string(r0[0]) + string(r1[0])
 	case len(words) == 1:
-		initials = words[0]
+		r := []rune(words[0])
+		if len(r) >= 2 {
+			initials = string(r[:2])
+		} else {
+			initials = string(r)
+		}
 	default:
-		initials = defaultTenantLabel[:1]
+		initials = defaultTenantLabel[:1] // ASCII constant, byte-slice safe
 	}
 	return strings.ToUpper(initials)
 }
