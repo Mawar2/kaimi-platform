@@ -11,7 +11,9 @@ import (
 // answers 200 with the expected JSON body and content type, using nil deps to
 // prove the probe touches neither the store nor the agents.
 func TestRoutesHealthzReturnsOK(t *testing.T) {
-	srv := New(Deps{})
+	// No OAuth in this skeleton test; opt in to the insecure no-auth path so
+	// Routes() builds instead of failing closed (the production default).
+	srv := New(Deps{AllowInsecureNoAuth: true})
 	h := srv.Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
@@ -42,7 +44,7 @@ func TestRoutesHealthzReturnsOK(t *testing.T) {
 // and that the mux's 405 is rewritten into the API's JSON error envelope by the
 // jsonErrorResponder wrapper (not stdlib's text/plain "Method Not Allowed").
 func TestRoutesHealthzRejectsNonGET(t *testing.T) {
-	srv := New(Deps{})
+	srv := New(Deps{AllowInsecureNoAuth: true})
 	h := srv.Routes()
 
 	req := httptest.NewRequest(http.MethodPost, "/healthz", http.NoBody)
@@ -70,7 +72,7 @@ func TestRoutesHealthzRejectsNonGET(t *testing.T) {
 // "404 page not found"), so the skeleton does not silently swallow paths later
 // tickets will add and clients always get a single error shape.
 func TestRoutesUnknownPathReturns404(t *testing.T) {
-	srv := New(Deps{})
+	srv := New(Deps{AllowInsecureNoAuth: true})
 	h := srv.Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", http.NoBody)

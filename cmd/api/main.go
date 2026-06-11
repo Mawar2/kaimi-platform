@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -44,6 +45,7 @@ func run() error {
 	profilePath := flag.String("profile", "config/profile.json", "Company profile JSON/YAML for grounding the writer")
 	host := flag.String("host", "", "Interface to bind; use 0.0.0.0 in containers/Cloud Run (overrides API_HOST)")
 	port := flag.Int("port", 0, "Port to serve on (overrides API_PORT; $PORT still wins for Cloud Run)")
+	insecureNoAuth := flag.Bool("insecure-no-auth", false, "DEV-ONLY / INSECURE: serve the /api/v1 API WITHOUT authentication when OAuth is not configured. Without this flag the server REFUSES to start unconfigured (fail closed). Also honored via KAIMI_INSECURE_NO_AUTH=true. NEVER set in production.")
 	flag.Parse()
 
 	// The HTTP/server layer config (bind address) is resolved independently of the
@@ -122,10 +124,24 @@ func run() error {
 		log.Printf("Workspace OAuth disabled (no OAUTH_* config); /auth/* routes omitted")
 	}
 
+	// Decide whether running WITHOUT auth is permitted. This is the fail-closed gate:
+	// an unconfigured server only starts when the operator EXPLICITLY opts in to the
+	// insecure path, either with -insecure-no-auth or KAIMI_INSECURE_NO_AUTH=true.
+	// When OAuth is configured this is irrelevant (OAuth always wins in Routes()).
+	// A malformed env value (anything strconv.ParseBool rejects) is treated as false
+	// so a typo'd env var stays on the safe, fail-closed side.
+	envInsecure, _ := strconv.ParseBool(os.Getenv("KAIMI_INSECURE_NO_AUTH"))
+	allowInsecure := *insecureNoAuth || envInsecure
+	if !oauthEnabled && !allowInsecure {
+		log.Fatal("Workspace OAuth is not configured and -insecure-no-auth was not set: refusing to start an unauthenticated API. " +
+			"Configure OAUTH_*/SESSION_SECRET for production, or pass -insecure-no-auth (or KAIMI_INSECURE_NO_AUTH=true) for local dev only.")
+	}
+
 	srv := httpapi.New(httpapi.Deps{
-		Dashboard: dashboard.NewService(s),
-		Proposals: proposals,
-		Auth:      auth,
+		Dashboard:           dashboard.NewService(s),
+		Proposals:           proposals,
+		Auth:                auth,
+		AllowInsecureNoAuth: allowInsecure,
 	})
 
 	addr := net.JoinHostPort(apiCfg.Host, fmt.Sprintf("%d", apiCfg.Port))
