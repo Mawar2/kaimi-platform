@@ -119,6 +119,19 @@ func (m *sessionManager) mac(payload string) []byte {
 	return h.Sum(nil)
 }
 
+// csrfToken derives a stable per-session CSRF token bound to the session subject:
+// base64url(HMAC-SHA256(secret, "csrf:"+subject)). It uses the SAME server HMAC key
+// as session signing, so the token is unforgeable without the secret and stable for
+// the life of a subject's session (a GET-rendered form token still matches on POST).
+// The "csrf:" domain-separation prefix ensures this MAC can never collide with a
+// session-payload MAC computed by mac(). It backs the WS-C3 onboarding form's CSRF
+// defense-in-depth on top of the SameSite=Lax session cookie.
+func (m *sessionManager) csrfToken(subject string) string {
+	h := hmac.New(sha256.New, m.secret)
+	_, _ = h.Write([]byte("csrf:" + subject))
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
 // SetSession mints a session token for the given claims (stamping Expiry from the
 // manager's TTL) and writes it as a hardened cookie: HttpOnly, Secure,
 // SameSite=Lax, Path=/, with a Max-Age matching the TTL. The middleware (WS-B5)

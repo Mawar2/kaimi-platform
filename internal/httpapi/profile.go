@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/profile"
 )
@@ -66,8 +64,10 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if msg := validateProfile(&p); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
+	// Validation is shared with the WS-C3 SSR onboarding form via profile.Validate,
+	// so the JSON API and the HTML form can never diverge on what counts as valid.
+	if err := profile.Validate(&p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -78,28 +78,4 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Echo the stored profile so the client confirms exactly what was persisted.
 	writeJSON(w, http.StatusOK, &p)
-}
-
-// validateProfile enforces the minimal invariants a usable company profile must
-// satisfy before it can ground the Hunter/Scorer/Writer. It returns an empty string
-// when the profile is valid, or a human-readable reason for the 400 otherwise.
-//
-// Minimal rules (kept deliberately small — richer validation belongs with the
-// onboarding UI in WS-C3):
-//   - Company name is required (the Writer addresses the proposal to it).
-//   - At least one NAICS code is required, and every NAICS code string must be
-//     non-blank (an empty code yields no SAM.gov query and breaks eligibility).
-func validateProfile(p *profile.CapabilityProfile) string {
-	if strings.TrimSpace(p.Company) == "" {
-		return "profile is missing a company name"
-	}
-	if len(p.NAICSCodes) == 0 {
-		return "profile must include at least one NAICS code"
-	}
-	for i, nc := range p.NAICSCodes {
-		if strings.TrimSpace(nc.Code) == "" {
-			return "NAICS code entries must have a non-empty code (index " + strconv.Itoa(i) + ")"
-		}
-	}
-	return ""
 }

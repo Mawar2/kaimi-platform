@@ -191,9 +191,49 @@ func run() error {
 	// the post-login redirect default ("/") lands here. WithProposals enables the
 	// Zone-2 surfaces (select/workspace/gate); WithTenantName sets the sidebar label.
 	dashboardSvc := dashboard.NewService(s)
-	dashboardHTML := dashboard.NewHandler(dashboardSvc,
+	dashboardOpts := []dashboard.Option{
 		dashboard.WithProposals(proposals),
-		dashboard.WithTenantName(cfg.Tenant.DisplayName))
+		dashboard.WithTenantName(cfg.Tenant.DisplayName),
+		// WS-C3 onboarding: the in-product setup flow reuses the same runtime profile
+		// store the JSON API does, so /onboarding pre-fills + persists the company
+		// profile and the Triage screen surfaces a first-run "Complete onboarding" link.
+		dashboard.WithProfileStore(profileStore),
+		// Fail-closed mutation gate for the onboarding profile write: pass the SAME
+		// allowInsecure opt-in the API/RequireSessionHTML use. In production
+		// (allowInsecure == false) an onboarding POST with no resolvable session is
+		// rejected rather than silently allowed; only an explicit -insecure-no-auth /
+		// KAIMI_INSECURE_NO_AUTH dev run permits the unauthenticated (CSRF-free) write.
+		dashboard.WithInsecureNoAuth(allowInsecure),
+	}
+	// Inject the signed-in identity + per-session CSRF token so the onboarding form
+	// shows who is signed in and is CSRF-protected. The dashboard cannot read the
+	// httpapi session directly (import cycle), so cmd/api adapts AuthHandler's
+	// DashboardIdentity into a dashboard.IdentityFunc here. With OAuth disabled
+	// (offline/dev), no identity is wired and onboarding relies on SameSite=Lax alone.
+	if auth != nil {
+		dashboardOpts = append(dashboardOpts, dashboard.WithIdentity(
+			func(ctx context.Context) (dashboard.Identity, bool) {
+				email, csrf, ok := auth.DashboardIdentity(ctx)
+				return dashboard.Identity{Email: email, CSRFToken: csrf}, ok
+			}))
+	}
+	// Show the WS-C2 Drive connection state on the onboarding page when customer-Drive
+	// connect is configured. Read straight from the drivetoken stores (no httpapi/
+	// dashboard cycle); when Drive connect is disabled the page shows the
+	// "not available in this deployment" treatment.
+	if driveEnabled {
+		driveTokenStore, err := drivetoken.NewJSONTokenStore(*storePath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize drive token store for onboarding: %w", err)
+		}
+		driveTargetStore, err := drivetoken.NewJSONTargetStore(*storePath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize drive target store for onboarding: %w", err)
+		}
+		dashboardOpts = append(dashboardOpts, dashboard.WithDriveStatus(
+			dashboard.DriveStatusFromStores(driveTokenStore, driveTargetStore)))
+	}
+	dashboardHTML := dashboard.NewHandler(dashboardSvc, dashboardOpts...)
 
 	srv := httpapi.New(httpapi.Deps{
 		Dashboard:           dashboardSvc,

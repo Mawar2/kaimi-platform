@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposal"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -21,17 +22,36 @@ import (
 // kaimi/app.css, GitHub issue #150): an app shell with sidebar, the Triage
 // opportunities screen, and the drawer-style opportunity detail.
 type Handler struct {
-	svc           *Service
-	proposals     *proposal.Service // nil = read-only deployment
-	mux           *http.ServeMux
-	listTmpl      *template.Template
-	detailTmpl    *template.Template
-	proposalsTmpl *template.Template
-	workspaceTmpl *template.Template
-	submittedTmpl *template.Template
-	editorTmpl    *template.Template
-	notFoundTmpl  *template.Template
-	Now           func() time.Time
+	svc            *Service
+	proposals      *proposal.Service // nil = read-only deployment
+	mux            *http.ServeMux
+	listTmpl       *template.Template
+	detailTmpl     *template.Template
+	proposalsTmpl  *template.Template
+	workspaceTmpl  *template.Template
+	submittedTmpl  *template.Template
+	editorTmpl     *template.Template
+	onboardingTmpl *template.Template
+	notFoundTmpl   *template.Template
+	Now            func() time.Time
+
+	// WS-C3 onboarding collaborators. All optional: onboarding routes answer 503
+	// when profileStore is nil; identity/driveStatus degrade to signed-out / "not
+	// configured" treatments when nil. They are injected via the WithProfileStore /
+	// WithIdentity / WithDriveStatus options so the dashboard package never imports
+	// internal/httpapi (which would be an import cycle).
+	profileStore profile.ProfileStore
+	identity     IdentityFunc
+	driveStatus  DriveStatusFunc
+
+	// insecureNoAuth records whether running WITHOUT authentication is an explicit
+	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
+	// cmd/api uses to gate the whole API). It defaults to false so production fails
+	// closed: a state-mutating onboarding POST with no resolvable session is rejected
+	// rather than silently allowed. It is set true ONLY in explicit local dev, where
+	// the onboarding profile write is permitted without a CSRF token (relying on the
+	// SameSite=Lax cookie + same-origin server). See handleOnboardingProfile.
+	insecureNoAuth bool
 
 	// tenantName is the configured customer display name shown in the sidebar
 	// account block (e.g. "Example Federal Co"). It is the only customer-identity
@@ -60,6 +80,16 @@ func WithProposals(svc *proposal.Service) Option {
 // neutral product label ("Kaimi"); the rest of the brand chrome is unaffected.
 func WithTenantName(name string) Option {
 	return func(h *Handler) { h.tenantName = name }
+}
+
+// WithInsecureNoAuth records whether unauthenticated, state-mutating onboarding
+// POSTs are an EXPLICIT operator opt-in (local dev only). cmd/api passes the same
+// allowInsecure value it uses to gate the API, so production (OAuth on, allowInsecure
+// false) fails closed: an onboarding profile write with no resolvable session is
+// rejected. When true (dev), the write is permitted without a CSRF token, relying on
+// the SameSite=Lax session cookie + same-origin server.
+func WithInsecureNoAuth(allow bool) Option {
+	return func(h *Handler) { h.insecureNoAuth = allow }
 }
 
 // NewHandler initializes a new dashboard handler.
@@ -91,6 +121,10 @@ func (h *Handler) setupRoutes() {
 	h.mux.HandleFunc("/submitted/{id}/outcome", postOnly(h.handleOutcome))
 	h.mux.HandleFunc("GET /workspace/{id}", h.handleWorkspace)
 	h.mux.HandleFunc("GET /editor/{id}", h.handleEditor)
+	// WS-C3 onboarding: the in-product setup flow. GET renders the checklist; the
+	// profile POST is method-guarded so a stray GET 405s instead of falling through.
+	h.mux.HandleFunc("GET /onboarding", h.handleOnboarding)
+	h.mux.HandleFunc("/onboarding/profile", postOnly(h.handleOnboardingProfile))
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
 	h.mux.HandleFunc("/workspace/{id}/approve", postOnly(h.handleAction("approve")))
 	h.mux.HandleFunc("/workspace/{id}/changes", postOnly(h.handleAction("changes")))
@@ -189,6 +223,19 @@ const shellTmpl = `
 // day-grouped opportunity row cards, and the designed empty state.
 const listContentTmpl = `{{define "content"}}
 <div class="page">
+  {{if .FirstRun}}
+  <a class="firstrun" href="/onboarding">
+    ` + iconWarn + `
+    <span><b>Finish setting up Kaimi.</b> Configure your company profile so hunting and scoring match your business.</span>
+    <span class="firstrun-cta">Complete onboarding ` + iconChev + `</span>
+  </a>
+  <style>
+    .firstrun { display:flex; align-items:center; gap:12px; padding:14px 16px; margin-bottom:18px; border:1px solid var(--primary,#0b5fff); border-radius:10px; background:var(--surface-2); color:inherit; text-decoration:none; }
+    .firstrun svg { width:20px; height:20px; flex:0 0 auto; }
+    .firstrun-cta { margin-left:auto; display:inline-flex; align-items:center; gap:4px; color:var(--primary,#0b5fff); font-weight:700; white-space:nowrap; }
+    .firstrun-cta svg { width:16px; height:16px; }
+  </style>
+  {{end}}
   <div class="page-head">
     <div class="eyebrow">Triage</div>
     <h1>Opportunities</h1>
@@ -431,6 +478,7 @@ func (h *Handler) setupTemplates() {
 		template.New("submitted").Funcs(funcMap).Parse(shellTmpl)).Parse(submittedContentTmpl))
 	// The editor is a standalone full-page surface — no app shell.
 	h.editorTmpl = template.Must(template.New("editor").Funcs(funcMap).Parse(editorPageTmpl))
+	h.onboardingTmpl = onboardingTemplate(funcMap)
 	h.notFoundTmpl = template.Must(template.New("notfound").Funcs(funcMap).Parse(notFoundTmplStr))
 }
 
@@ -496,6 +544,9 @@ type OverviewData struct {
 	TodayRows   []TriageRow
 	EarlierRows []TriageRow
 	Empty       bool
+	// FirstRun is true when no company profile has been configured yet (WS-C3): the
+	// Triage screen then surfaces a prominent "Complete onboarding" entry point.
+	FirstRun bool
 }
 
 // TriageRow is the view-model for one opportunity row card.
@@ -611,6 +662,9 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data.Empty = len(rows) == 0
+	// WS-C3 first-run entry point: if no company profile is configured, surface a
+	// prominent link to onboarding so a brand-new deployment is not a dead end.
+	data.FirstRun = h.firstRunRedirect()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.listTmpl.Execute(w, data); err != nil {
