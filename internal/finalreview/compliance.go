@@ -6,18 +6,23 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
 // complianceSystemInstruction is delivered as a system instruction (not in the
 // user prompt) so the compliance discipline resists drift on long solicitation
 // text. It pins the reviewer to grounded analysis and a strict output shape.
-const complianceSystemInstruction = "You are a U.S. federal proposal compliance reviewer. " +
-	"Compare the PROPOSAL DRAFT against the SOLICITATION DOCUMENTS provided in the user message. " +
+const complianceSystemInstruction = "You are Vera, Kaimi's U.S. federal proposal compliance reviewer. " +
+	"Compare the PROPOSAL DRAFT against the SOLICITATION MATERIALS provided in the user message — either " +
+	"full solicitation documents, or a solicitation summary when full documents are unavailable. " +
 	"Identify every mandatory requirement the solicitation imposes — the 'shall', 'must', and 'will' " +
-	"instructions in Section L (instructions), Section M (evaluation criteria), and the SOW/PWS deliverables. " +
-	"For each, decide whether the draft addresses it. " +
-	"CRITICAL: Use ONLY the requirements that actually appear in the provided documents — do NOT invent, " +
-	"assume, or import requirements from general knowledge. If the documents state no mandatory requirements, " +
+	"instructions in Section L (instructions), Section M (evaluation criteria), and the SOW/PWS deliverables, " +
+	"or the stated mandatory requirements of a summary. " +
+	"For each, decide whether the draft addresses it. A requirement is addressed when the draft substantively " +
+	"covers it in its own words; do not demand verbatim phrasing. " +
+	"CRITICAL: Use ONLY the requirements that actually appear in the provided materials — do NOT invent, " +
+	"assume, or import requirements from general knowledge. If the materials state no mandatory requirements, " +
 	"return an empty findings array. " +
 	"Respond with ONLY a JSON object of the form " +
 	`{"findings":[{"requirement":"<short text>","source":"<e.g. Section L>","addressed":true|false,"note":"<where addressed, or what is missing>"}]} ` +
@@ -50,7 +55,15 @@ type complianceResponse struct {
 // transient model problem never crashes the pipeline or lets a draft through
 // unchecked.
 func (a *Agent) runCompliance(ctx context.Context, in Input) []string {
-	prompt := buildCompliancePrompt(in.Draft, in.Documents)
+	// Ground on the full solicitation documents when the ingest stage provided
+	// them; otherwise fall back to the opportunity's own summary so the LLM pass
+	// still runs in deployments without document ingestion (issue #264).
+	var prompt string
+	if len(in.Documents) > 0 {
+		prompt = buildCompliancePrompt(in.Draft, in.Documents)
+	} else {
+		prompt = buildOpportunityCompliancePrompt(in.Draft, in.Opportunity)
+	}
 
 	raw, err := a.checker.CheckCompliance(ctx, complianceSystemInstruction, prompt)
 	if err != nil {
@@ -97,6 +110,41 @@ func buildCompliancePrompt(draft string, documents map[string]string) string {
 			continue
 		}
 		fmt.Fprintf(&sb, "### %s\n%s\n\n", name, text)
+	}
+
+	return sb.String()
+}
+
+// buildOpportunityCompliancePrompt assembles the fallback user prompt for
+// deployments without document ingestion: the draft followed by a solicitation
+// summary built from the opportunity's own fields. The summary is clearly
+// labeled so the model knows it is not seeing full solicitation documents.
+func buildOpportunityCompliancePrompt(draft string, opp *opportunity.Opportunity) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Proposal draft to evaluate\n")
+	sb.WriteString(draft)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("## Solicitation summary (the only source of mandatory requirements; full documents unavailable)\n")
+	fmt.Fprintf(&sb, "Title: %s\n", opp.Title)
+	fmt.Fprintf(&sb, "Agency: %s\n", opp.Agency)
+	if opp.SolicitationNum != "" {
+		fmt.Fprintf(&sb, "Solicitation number: %s\n", opp.SolicitationNum)
+	}
+	if opp.NAICSCode != "" {
+		fmt.Fprintf(&sb, "NAICS: %s %s\n", opp.NAICSCode, opp.NAICSDescription)
+	}
+	if opp.SetAsideCode != "" {
+		fmt.Fprintf(&sb, "Set-aside: %s\n", opp.SetAsideCode)
+	}
+	fmt.Fprintf(&sb, "\nDescription:\n%s\n", strings.TrimSpace(opp.Description))
+
+	if len(opp.Requirements) > 0 {
+		sb.WriteString("\nMandatory requirements:\n")
+		for _, req := range opp.Requirements {
+			fmt.Fprintf(&sb, "- %s\n", req)
+		}
 	}
 
 	return sb.String()
