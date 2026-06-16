@@ -23,7 +23,11 @@ func seedTestServer(t *testing.T) (http.Handler, time.Time) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	// Seed dates are RELATIVE to the real clock because the server computes derived
+	// fields like DeadlineSoon from time.Now() (no clock is injected on this path). A
+	// hardcoded date rots: once the real date passes the seeded "soon" deadline,
+	// deadline_soon flips to false and TestListRowFields fails for no real reason.
+	now := time.Now().UTC()
 	scored := now.Add(-24 * time.Hour)
 
 	opps := []*opportunity.Opportunity{
