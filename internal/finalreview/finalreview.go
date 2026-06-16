@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
@@ -150,19 +151,86 @@ func checkDeadline(opp *opportunity.Opportunity) error {
 	return nil
 }
 
-// checkMustHave scans the draft for each keyword in requirements.
-// Any keyword absent from the draft is reported as a must_have issue.
+// checkMustHave verifies each must-have requirement is addressed in the draft.
+// Any requirement the matcher cannot confirm is reported as a must_have issue.
+// Matching is term-overlap (RequirementAddressed), not verbatim: a verbatim
+// full-phrase check falsely flagged paraphrases — the tester-reported gate
+// block in issue #262 — because drafts restate requirements in their own words.
 func checkMustHave(draft string, requirements []string) []string {
 	draftLower := strings.ToLower(draft)
 	var issues []string
 	for _, req := range requirements {
-		if !strings.Contains(draftLower, strings.ToLower(req)) {
+		if !RequirementAddressed(draftLower, req) {
 			issues = append(issues, fmt.Sprintf(
 				"[must_have] requirement %q not addressed in draft", req,
 			))
 		}
 	}
 	return issues
+}
+
+// requirementStopwords are common words dropped before term matching so the
+// signal comes from the requirement's meaningful terms, not filler.
+var requirementStopwords = map[string]bool{
+	"the": true, "and": true, "for": true, "with": true, "must": true,
+	"shall": true, "will": true, "have": true, "from": true, "that": true,
+	"this": true, "any": true, "all": true, "are": true, "per": true,
+	"including": true, "provide": true, "required": true,
+}
+
+// RequirementAddressed reports whether the draft plausibly addresses a
+// requirement. A verbatim full-phrase match falsely flags paraphrases as
+// missing; instead this scores the overlap of the requirement's significant
+// terms against the draft, comparing stems so "authorization" is satisfied by
+// "authorized". A requirement counts as addressed when at least two-thirds of
+// its significant terms appear — lenient enough to tolerate a synonym swap,
+// strict enough not to match on noise. The draft must already be lowercased.
+//
+// This is the single source of truth for must-have matching: the Final Review
+// must_have check and the gate's criteria grid (zone2view) both use it, so the
+// two can never disagree (issue #262).
+func RequirementAddressed(draftLower, requirement string) bool {
+	terms := significantRequirementTerms(requirement)
+	if len(terms) == 0 {
+		// No meaningful terms (e.g. a requirement of only stopwords): fall back
+		// to the whole-phrase check rather than claiming a spurious match.
+		return strings.Contains(draftLower, strings.ToLower(strings.TrimSpace(requirement)))
+	}
+	hits := 0
+	for _, term := range terms {
+		if strings.Contains(draftLower, stemTerm(term)) {
+			hits++
+		}
+	}
+	return hits*3 >= len(terms)*2
+}
+
+// significantRequirementTerms splits a requirement into lowercased, meaningful
+// terms: alphanumeric runs of length >= 3 that are not stopwords.
+func significantRequirementTerms(requirement string) []string {
+	var terms []string
+	for _, field := range strings.FieldsFunc(strings.ToLower(requirement), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}) {
+		if len(field) < 3 || requirementStopwords[field] {
+			continue
+		}
+		terms = append(terms, field)
+	}
+	return terms
+}
+
+// stemTerm trims a few common English suffixes so inflected forms match a shared
+// stem ("authorization"/"authorized" -> "author", "modernization"/"modernize"
+// -> "modern"). Longest suffixes are checked first; the length guard keeps short
+// words intact.
+func stemTerm(term string) string {
+	for _, suf := range []string{"ization", "isation", "ation", "izing", "ized", "izes", "ing", "ed", "es", "s"} {
+		if len(term) > len(suf)+2 && strings.HasSuffix(term, suf) {
+			return term[:len(term)-len(suf)]
+		}
+	}
+	return term
 }
 
 // checkRequiredSections verifies every Required section from the outline has
