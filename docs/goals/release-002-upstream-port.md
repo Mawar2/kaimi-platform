@@ -20,6 +20,9 @@ A change is **NOT complete** until ALL of the following pass and are cited as ev
 - Re-verify the **committed tree** with go tooling every time (IDE diagnostics + builder reports are stale).
 - Each item lands as its **own PR**; agents may merge in this repo (rule relaxed) but only after the gate above is green.
 
+## Parallel workstream (planning, non-blocking) — dynamic license-key provisioning
+A research sub-agent is producing a plan for **how BlueMeta dynamically issues/spins up Kaimi license keys** for the per-customer-isolated commercial model (and whether/how it lives in GCP). Output: `~/.claude/plans/kaimi-licensing-provisioning.md` → to be folded into `docs/goals/licensing-provisioning.md`. Must cover: license-key model (offline-signed JWT vs online validation vs GCP Marketplace Procurement entitlements), where it lives in GCP (central BlueMeta licensing project: issuing service + datastore + KMS signing), how a key threads into the existing Terraform per-customer deploy + onboarding (tenant_id binding, trial/paid, seats/usage, expiry, revocation), and a phased recommendation. Does NOT block the port; informs the commercialization roadmap.
+
 ## Execution model
 - Per item: branch → cherry-pick (clean) OR manual port (conflicting) → verify (go gate) → browser-verify (if UI) → Gemini review → PR → squash-merge → sync `platform-main`.
 - **Sub-agent teams** where useful: a builder agent per port; an `Explore` agent to map conflicts before a careful port; Gemini for independent review; gstack-qa for browser UX. Dispatch in parallel only for independent items.
@@ -53,6 +56,15 @@ A change is **NOT complete** until ALL of the following pass and are cited as ev
 - **#275 / #276 / #280** — gap-bar UX, gate simplification, template tweak (only with #271; strip "demo" framing).
 - **#273** `demo_seed_from_csv` — optional pilot pre-seed tool.
 - DoD: same gate incl. browser UX.
+
+### Phase 4.5 — Onboarding flow/screens validation (REQUIRED for RELEASE 002 — do NOT skip)
+The onboarding experience MUST be present and **validated end-to-end in a browser** before RELEASE 002 — this is the first thing the Ey3 pilot touches. Boot `cmd/api` locally with `-insecure-no-auth` (and separately confirm the auth-gated path), open each screen in a headless browser (gstack-qa), **click through the real flow**, and capture evidence (screenshot/DOM assertion) for each:
+- **Sign-in** (Workspace OAuth) — `/` → 302 `/auth/login`; consent URL carries PKCE + `hd` (auth-gated path).
+- **Company profile** (C1/C3) — `/onboarding`: fill identity/UEI/CAGE/NAICS/competencies/past-performance → save → persists → pre-fills on reload; a saved profile actually drives Hunter eligibility + Scorer.
+- **Drive connect** (C2) — connect flow → token stored → **auto-created "Kaimi Proposals" folder** (C5a) set as target.
+- **Drive destination UI** (C5b/C5d) — shows the folder **name** (not raw id) with Open-in-Drive link; switch to My Drive root / paste id persists.
+- **First-run / empty states** (C4) — pre-hunt screens guide the user; the **"run first hunt" CTA** is present and works.
+- **Validation gates:** every screen renders, every control is live (no dead buttons), layout is streamlined (no AI-slop spacing / broken states), and the flow is completable **without editing any files** (a brand-new tenant can self-serve). Fix any gap found before marking RELEASE 002.
 
 ### Phase 5 — Integration, full UX pass, RELEASE 002
 - Full `go test ./...` + lint clean on merged `platform-main`.
