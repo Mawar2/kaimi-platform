@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -278,7 +279,9 @@ func (l *liveClient) FetchByNAICS(ctx context.Context, naicsCodes []string) ([]*
 // fetchByNAICSCode fetches opportunities for a single NAICS code with pagination.
 func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string) ([]*opportunity.Opportunity, error) {
 	var allOpportunities []*opportunity.Opportunity
-	limit := 100 // SAM.gov default page size
+	// SAM.gov's documented maximum page size. The previous limit=100 cost 10x
+	// the requests against the 1,000 req/day quota for no benefit (issue #268).
+	limit := 1000
 	offset := 0
 
 	for {
@@ -287,9 +290,19 @@ func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string) ([]
 		postedTo := now.Format("01/02/2006")
 		postedFrom := now.AddDate(0, 0, -30).Format("01/02/2006")
 
-		// Build query URL
-		reqURL := fmt.Sprintf("%s/search?naics=%s&limit=%d&offset=%d&postedFrom=%s&postedTo=%s&api_key=%s",
-			l.baseURL, naicsCode, limit, offset, postedFrom, postedTo, l.apiKey)
+		// Build the query with url.Values so param names and escaping stay
+		// honest. The NAICS filter is `ncode` per the Opportunities v2 spec —
+		// the previously-sent `naics` param does not exist, and SAM.gov
+		// silently ignored it, returning the entire unfiltered 30-day corpus
+		// on every Hunter run (issue #268).
+		params := url.Values{}
+		params.Set("ncode", naicsCode)
+		params.Set("limit", strconv.Itoa(limit))
+		params.Set("offset", strconv.Itoa(offset))
+		params.Set("postedFrom", postedFrom)
+		params.Set("postedTo", postedTo)
+		params.Set("api_key", l.apiKey)
+		reqURL := l.baseURL + "/search?" + params.Encode()
 
 		// Make HTTP request
 		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, http.NoBody)

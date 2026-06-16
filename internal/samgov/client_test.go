@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +62,94 @@ func TestLiveClient_FetchErrorRedactsAPIKey(t *testing.T) {
 		_, err := newLeakyClient().FetchByID(context.Background(), "abc123")
 		assertRedacted(t, err)
 	})
+}
+
+// TestLiveClient_SearchQueryContract pins the exact query the live client sends
+// to the SAM.gov Opportunities v2 search endpoint (issue #268). The official
+// spec filters NAICS via `ncode` — there is no `naics` parameter, and SAM.gov
+// silently ignores unknown params, returning the ENTIRE unfiltered 30-day
+// corpus. That bug burned the full 1,000 req/day quota every Hunter run and
+// polluted the queue with out-of-scope opportunities. A regression to the
+// wrong param name (or a tiny page size) must fail CI.
+func TestLiveClient_SearchQueryContract(t *testing.T) {
+	var gotQueries []url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQueries = append(gotQueries, r.URL.Query())
+		// A short (empty) page terminates the pagination loop immediately.
+		_, _ = w.Write([]byte(`{"totalRecords":0,"limit":1000,"offset":0,"opportunitiesData":[]}`))
+	}))
+	defer server.Close()
+
+	client := &liveClient{apiKey: "test-key", baseURL: server.URL, client: server.Client()}
+	if _, err := client.FetchByNAICS(context.Background(), []string{"541512"}); err != nil {
+		t.Fatalf("FetchByNAICS failed: %v", err)
+	}
+	if len(gotQueries) != 1 {
+		t.Fatalf("expected exactly 1 request, got %d", len(gotQueries))
+	}
+	q := gotQueries[0]
+
+	if got := q.Get("ncode"); got != "541512" {
+		t.Errorf("ncode = %q, want %q (the spec's NAICS filter param)", got, "541512")
+	}
+	if q.Has("naics") {
+		t.Errorf("query still sends the unsupported naics param (%q) — SAM.gov ignores it and returns the unfiltered corpus", q.Get("naics"))
+	}
+	if got := q.Get("limit"); got != "1000" {
+		t.Errorf("limit = %q, want %q (spec max; small pages waste the 1,000 req/day quota)", got, "1000")
+	}
+	for _, required := range []string{"postedFrom", "postedTo", "api_key"} {
+		if !q.Has(required) {
+			t.Errorf("query missing required param %q", required)
+		}
+	}
+}
+
+// TestLiveClient_PaginationAdvancesOffset verifies the pagination loop still
+// advances offset by the page size and terminates on a short page (issue #268
+// keeps the loop as defensive code for codes that exceed one max-size page).
+func TestLiveClient_PaginationAdvancesOffset(t *testing.T) {
+	// One minimal record the transform step accepts; repeated to fill a page.
+	const record = `{"noticeId":"n-%d","title":"t","postedDate":"2026-05-20","type":"Solicitation"}`
+
+	var gotOffsets []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		gotOffsets = append(gotOffsets, q.Get("offset"))
+
+		limit, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || limit < 1 {
+			t.Errorf("bad limit param %q", q.Get("limit"))
+			limit = 1
+		}
+		if q.Get("offset") == "0" {
+			// Full page -> the client must request another page.
+			records := make([]string, limit)
+			for i := range records {
+				records[i] = fmt.Sprintf(record, i)
+			}
+			_, _ = fmt.Fprintf(w, `{"totalRecords":%d,"opportunitiesData":[%s]}`, limit+1, strings.Join(records, ","))
+			return
+		}
+		// Second page is short -> the loop must terminate.
+		_, _ = fmt.Fprintf(w, `{"totalRecords":0,"opportunitiesData":[]}`)
+	}))
+	defer server.Close()
+
+	client := &liveClient{apiKey: "test-key", baseURL: server.URL, client: server.Client()}
+	if _, err := client.FetchByNAICS(context.Background(), []string{"541512"}); err != nil {
+		t.Fatalf("FetchByNAICS failed: %v", err)
+	}
+
+	if len(gotOffsets) != 2 {
+		t.Fatalf("expected 2 requests (full page then short page), got %d: %v", len(gotOffsets), gotOffsets)
+	}
+	if gotOffsets[0] != "0" {
+		t.Errorf("first request offset = %q, want \"0\"", gotOffsets[0])
+	}
+	if gotOffsets[1] != "1000" {
+		t.Errorf("second request offset = %q, want \"1000\" (offset must advance by the page size)", gotOffsets[1])
+	}
 }
 
 // TestConfig_Defaults verifies that Config has sensible zero values.
