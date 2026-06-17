@@ -50,6 +50,12 @@ type Session struct {
 	Email string `json:"email"`
 	// Domain is the Google Workspace domain ("hd") the login was restricted to.
 	Domain string `json:"hd"`
+	// KeyID identifies the product key that authorized this session in product-key
+	// gate mode (the canonical KAIMI-XXXX-XXXX-XXXX string). It is empty for a
+	// Workspace-OAuth session. The product-key gate re-validates this key against the
+	// registry on each request so revocation is honored immediately. omitempty keeps
+	// it out of Workspace-session payloads.
+	KeyID string `json:"kid,omitempty"`
 	// Expiry is the absolute expiry as a Unix timestamp (seconds). A token past
 	// this instant is rejected even if its signature is valid.
 	Expiry int64 `json:"exp"`
@@ -135,14 +141,45 @@ func (m *sessionManager) csrfToken(subject string) string {
 // SetSession mints a session token for the given claims (stamping Expiry from the
 // manager's TTL) and writes it as a hardened cookie: HttpOnly, Secure,
 // SameSite=Lax, Path=/, with a Max-Age matching the TTL. The middleware (WS-B5)
-// relies on this being the single place the cookie is written.
+// relies on this (via writeSessionCookie) being the single place the cookie is set.
 func (m *sessionManager) SetSession(w http.ResponseWriter, s Session) {
-	s.Expiry = time.Now().Add(m.ttl).Unix()
+	m.writeSessionCookie(w, s, time.Now().Add(m.ttl))
+}
+
+// SetSessionBounded mints a session whose absolute expiry is the EARLIER of the
+// manager's TTL and hardCap. The product-key gate uses it so a session can never
+// outlive the credential that authorized it: when a key expires in 3 days, a 12-hour
+// session TTL would otherwise let a tester keep working for hours past the key's
+// expiry. Capping the cookie's Max-Age and the signed Expiry to the key's expiry
+// closes that window. If hardCap is already in the past, the cookie is written with a
+// minimal Max-Age and an already-expired Expiry, so verify() rejects it immediately.
+func (m *sessionManager) SetSessionBounded(w http.ResponseWriter, s Session, hardCap time.Time) {
+	exp := time.Now().Add(m.ttl)
+	if hardCap.Before(exp) {
+		exp = hardCap
+	}
+	m.writeSessionCookie(w, s, exp)
+}
+
+// writeSessionCookie stamps the absolute expiry into the claims, signs them, and
+// writes the hardened session cookie with a Max-Age derived from that expiry. It is
+// the single place the session cookie is written, shared by SetSession and
+// SetSessionBounded so the cookie's flags and the signed Expiry never diverge.
+func (m *sessionManager) writeSessionCookie(w http.ResponseWriter, s Session, exp time.Time) {
+	s.Expiry = exp.Unix()
+	// Max-Age tracks the absolute expiry so the browser drops the cookie when the
+	// session (or the bounding key) expires. Floor at 1s: a zero/negative Max-Age is
+	// a delete directive, which would wipe a just-minted cookie; verify() still
+	// rejects the already-expired payload, so the session is dead either way.
+	maxAge := int(time.Until(exp).Seconds())
+	if maxAge < 1 {
+		maxAge = 1
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    m.sign(s),
 		Path:     "/",
-		MaxAge:   int(m.ttl.Seconds()),
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
