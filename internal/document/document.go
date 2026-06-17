@@ -73,6 +73,24 @@ func (d *Document) Markdown() string {
 	return b.String()
 }
 
+// OpenFlagTexts returns the text (title + detail) of every unresolved flag on
+// the document. The gate's criteria grid uses these to defer to the Final
+// Review's findings rather than running an independent matcher that could
+// contradict them.
+func (d *Document) OpenFlagTexts() []string {
+	var out []string
+	for i := range d.Flags {
+		if !d.Flags[i].Resolved {
+			text := d.Flags[i].Title
+			if d.Flags[i].Detail != "" {
+				text += " " + d.Flags[i].Detail
+			}
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
 // Section returns a pointer to the section with the given id, or nil.
 func (d *Document) Section(id string) *Section {
 	for i := range d.Sections {
