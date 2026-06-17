@@ -65,6 +65,14 @@ type GCP struct {
 	WriterModel      string `yaml:"writer_model"`      // GEMINI_MODEL for the dashboard writer, default gemini-3.1-pro-preview
 	OutlineModel     string `yaml:"outline_model"`     // OUTLINE_MODEL, default gemini-3.5-flash
 	FinalReviewModel string `yaml:"finalreview_model"` // FINALREVIEW_MODEL, default gemini-2.5-pro
+
+	// Real-model FALLBACK backends (upstream #245/#266): when a primary agent model
+	// errors on a transient failure, the agent fails over to these real-model backups
+	// (never a stub). Default to gemini-2.5-pro — the validated, broadly-available
+	// model — so a single transient error on a 3.x primary does not kill a proposal.
+	WriterFallbackModel      string `yaml:"writer_fallback_model"`      // WRITER_FALLBACK_MODEL, default gemini-2.5-pro
+	OutlineFallbackModel     string `yaml:"outline_fallback_model"`     // OUTLINE_FALLBACK_MODEL, default gemini-2.5-pro
+	FinalReviewFallbackModel string `yaml:"finalreview_fallback_model"` // FINALREVIEW_FALLBACK_MODEL, default gemini-2.5-pro
 }
 
 // Profile holds paths to the single company profile the agents ground on. Since
@@ -145,10 +153,12 @@ const (
 	defaultWriterModel      = "gemini-3.1-pro-preview"
 	defaultOutlineModel     = "gemini-3.5-flash"
 	defaultFinalReviewModel = "gemini-2.5-pro"
-	defaultDocAILocation    = "us"
-	defaultHost             = "127.0.0.1"
-	defaultPort             = 8900
-	defaultSAMAPIKeyEnv     = "SAM_API_KEY"
+	// defaultFallbackModel is the real-model backup all three agents fail over to.
+	defaultFallbackModel = "gemini-2.5-pro"
+	defaultDocAILocation = "us"
+	defaultHost          = "127.0.0.1"
+	defaultPort          = 8900
+	defaultSAMAPIKeyEnv  = "SAM_API_KEY"
 )
 
 // Load resolves a Config using the precedence flags > env > file > default.
@@ -225,6 +235,9 @@ func applyEnv(cfg *Config) {
 	}
 	envInto(&cfg.GCP.OutlineModel, "OUTLINE_MODEL")
 	envInto(&cfg.GCP.FinalReviewModel, "FINALREVIEW_MODEL")
+	envInto(&cfg.GCP.WriterFallbackModel, "WRITER_FALLBACK_MODEL")
+	envInto(&cfg.GCP.OutlineFallbackModel, "OUTLINE_FALLBACK_MODEL")
+	envInto(&cfg.GCP.FinalReviewFallbackModel, "FINALREVIEW_FALLBACK_MODEL")
 	envInto(&cfg.SAM.APIKey, defaultSAMAPIKeyEnv)
 	envInto(&cfg.Drive.SharedDriveID, "GOOGLE_DRIVE_SHARED_DRIVE_ID")
 	envInto(&cfg.Ingest.GCSBucket, "GCS_SOLICITATIONS_BUCKET")
@@ -276,6 +289,9 @@ func applyDefaults(cfg *Config) {
 	defaultInto(&cfg.GCP.WriterModel, defaultWriterModel)
 	defaultInto(&cfg.GCP.OutlineModel, defaultOutlineModel)
 	defaultInto(&cfg.GCP.FinalReviewModel, defaultFinalReviewModel)
+	defaultInto(&cfg.GCP.WriterFallbackModel, defaultFallbackModel)
+	defaultInto(&cfg.GCP.OutlineFallbackModel, defaultFallbackModel)
+	defaultInto(&cfg.GCP.FinalReviewFallbackModel, defaultFallbackModel)
 	defaultInto(&cfg.Ingest.DocumentAILocation, defaultDocAILocation)
 	defaultInto(&cfg.SAM.APIKeyEnv, defaultSAMAPIKeyEnv)
 	defaultInto(&cfg.Server.Host, defaultHost)
