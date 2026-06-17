@@ -77,3 +77,8 @@ The onboarding experience MUST be present and **validated end-to-end in a browse
 
 ## Progress log (append per iteration)
 - 2026-06-16: Goal created. RELEASE 001 tagged. Phase 1 starting.
+- 2026-06-16: **Phase 1 DONE** — #270 SAM ncode fix merged (9dd63d6), live-verified (ncode→filtered vs naics→25k unfiltered).
+- 2026-06-16: Fixed pre-existing date-rot in TestListRowFields (30851d5) — surfaced by the date rollover; blocked the green-suite gate.
+- 2026-06-16: **Phase 2 DONE** — #263 finalreview term-overlap (41cfa3c), #265 vera-no-docs (a0761cc), #245+#267 real-model failover wired into proposalwiring (7985d2f). Each Gemini/Gemma-reviewed. Gotcha: core cherry-picks conflict on internal/zone2view (skipped desktop #251) → dropped that file. Gemini bridge flaky all session → reviews on Gemma.
+- 2026-06-16: Licensing-provisioning plan folded into docs/goals/licensing-provisioning.md (offline KMS-signed JWT in a dedicated bluemeta-licensing GCP project; Marketplace-ready).
+- 2026-06-16: **NEXT = Phase 3 careful ports** (#261/#271/#255/#248/#257, sub-agent teams + browser UX), then STOP for Malik checkpoint before optional Phase 4.
