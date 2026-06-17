@@ -103,15 +103,32 @@ func Normalize(key string) string {
 // GenerateKey returns a new random KAIMI-XXXX-XXXX-XXXX key drawn from the
 // unambiguous alphabet using crypto/rand. It is the single place key strings are
 // minted, so format and entropy stay consistent.
+//
+// It uses rejection sampling rather than a plain byte%len: because 256 is not a
+// multiple of len(keyAlphabet), a naive modulo would make the first
+// 256%len(keyAlphabet) symbols slightly more likely. These keys are access
+// credentials, so each symbol must be equally probable — we discard the few
+// random bytes above the largest exact multiple of the alphabet length.
 func GenerateKey() (string, error) {
 	n := keyGroups * groupLen
+	// limit is the largest multiple of the alphabet length that fits in a byte;
+	// bytes >= limit are rejected to keep the distribution uniform.
+	limit := 256 - (256 % len(keyAlphabet))
+	out := make([]byte, 0, n)
 	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("product key: read random: %w", err)
-	}
-	out := make([]byte, n)
-	for i, b := range buf {
-		out[i] = keyAlphabet[int(b)%len(keyAlphabet)]
+	for len(out) < n {
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("product key: read random: %w", err)
+		}
+		for _, b := range buf {
+			if int(b) >= limit {
+				continue // would bias toward the start of the alphabet; reject
+			}
+			out = append(out, keyAlphabet[int(b)%len(keyAlphabet)])
+			if len(out) == n {
+				break
+			}
+		}
 	}
 	groups := make([]string, 0, keyGroups+1)
 	groups = append(groups, KeyPrefix)
