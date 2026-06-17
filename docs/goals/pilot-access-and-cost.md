@@ -78,3 +78,5 @@ gets a key. Per-customer isolation preserved (no multi-tenancy). ESCALATE design
 
 ## Progress log
 - 2026-06-17: Goal created from Malik's decisions (own-project-per-tester, product-key gate, Firestore, per-project Billing + budget alert + per-key token metering). RELEASE 002 (parity) ready to cut.
+- 2026-06-17: **P0 done** — RELEASE 002 cut (tags + GitHub releases `release-001`/`release-002`), `bm` dogfood deployment redeployed live (Cloud Run rev `00012-x6b`, image `4de708f`). Phase-3 upstream port complete.
+- 2026-06-17: **P1 done** — `internal/productkey` (KAIMI-XXXX-XXXX-XXXX, crypto/rand + rejection sampling, `Registry` Mint/Lookup/Revoke/List, `Record.Valid`, `Normalize`; Memory + Firestore impls) and `cmd/kaimi-key` admin CLI (mint/revoke/list, magic-link printing). TDD; gate green (build/test/lint/fmt); independent review (Gemma) flagged + fixed modulo bias. Merged via PR #91 → `main` @ `0e25a60`. `cost` deferred to P3.
