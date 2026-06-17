@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposal"
@@ -484,6 +485,10 @@ func (h *Handler) setupTemplates() {
 		"miniPipe":       miniPipe,
 		"wPipe":          wPipe,
 		"propChip":       propChip,
+		// Unresolved Writer gaps (issue #269): per-body gap texts for the
+		// section editors, inline <mark> highlighting for read-only views.
+		"gapTexts":      finalreview.GapTexts,
+		"highlightGaps": highlightGaps,
 		"orDash": func(s string) string {
 			if s == "" {
 				return "—"

@@ -674,3 +674,165 @@ func TestReview_UnspecifiedPageLimit_NoIssue(t *testing.T) {
 		t.Errorf("Status = %q, want %q when page limit is not specified", result.Status, agent.StatusReadyToSubmit)
 	}
 }
+
+// gapDraft is a draft where the Writer left two unresolved [GAP: ...] markers.
+const gapDraft = `
+# Technical Proposal — Enterprise IT Modernization
+
+## Executive Summary
+BlueMeta Technologies brings proven expertise in federal IT modernization...
+
+## Technical Approach
+Our approach follows a phased migration strategy staffed by [GAP: number of cleared staff is not provided] engineers...
+
+## Past Performance
+BlueMeta delivered similar engagements. [GAP: contract number for the DoD engagement]
+`
+
+func TestReview_DraftWithGaps_NeedsHuman(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       gapDraft,
+		Opportunity: fixture(),
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Errorf("Status = %q, want %q when draft contains unresolved gaps", result.Status, agent.StatusNeedsHuman)
+	}
+
+	var gapIssues []string
+	for k, v := range result.Flags {
+		if strings.HasPrefix(k, "issue_") && strings.HasPrefix(v, "[unresolved_gap]") {
+			gapIssues = append(gapIssues, v)
+		}
+	}
+	if len(gapIssues) != 2 {
+		t.Fatalf("found %d [unresolved_gap] issues, want 2; flags: %v", len(gapIssues), result.Flags)
+	}
+	joined := strings.Join(gapIssues, "\n")
+	if !strings.Contains(joined, `section "Technical Approach"`) {
+		t.Errorf("gap issues missing section anchor for Technical Approach:\n%s", joined)
+	}
+	if !strings.Contains(joined, `section "Past Performance"`) {
+		t.Errorf("gap issues missing section anchor for Past Performance:\n%s", joined)
+	}
+	if !strings.Contains(joined, "number of cleared staff is not provided") {
+		t.Errorf("gap issues missing the first gap text:\n%s", joined)
+	}
+	if !strings.Contains(joined, "contract number for the DoD engagement") {
+		t.Errorf("gap issues missing the second gap text:\n%s", joined)
+	}
+}
+
+func TestReview_DraftWithGaps_OtherChecksStillRun(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	opp := fixture()
+	opp.Requirements = []string{"quantum cryptography migration plan"}
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       gapDraft,
+		Opportunity: opp,
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+
+	var sawGap, sawMustHave bool
+	for k, v := range result.Flags {
+		if !strings.HasPrefix(k, "issue_") {
+			continue
+		}
+		if strings.HasPrefix(v, "[unresolved_gap]") {
+			sawGap = true
+		}
+		if strings.HasPrefix(v, "[must_have]") {
+			sawMustHave = true
+		}
+	}
+	if !sawGap || !sawMustHave {
+		t.Errorf("review must complete all checks alongside gaps: sawGap=%v sawMustHave=%v flags=%v",
+			sawGap, sawMustHave, result.Flags)
+	}
+}
+
+func TestReview_GapMarkerRequiresColon(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	// "[GAP" without the colon is not the Writer's marker and must not flag.
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       "## Approach\nWe will bridge the [GAP] in coverage with monitoring.\n",
+		Opportunity: fixture(),
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusReadyToSubmit {
+		t.Errorf("Status = %q, want %q for a draft without real gap markers", result.Status, agent.StatusReadyToSubmit)
+	}
+}
+
+func TestReview_GapBeforeAnyHeading_UnknownSection(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       "[GAP: period of performance dates] then some prose.\n",
+		Opportunity: fixture(),
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	if result.Status != agent.StatusNeedsHuman {
+		t.Fatalf("Status = %q, want %q", result.Status, agent.StatusNeedsHuman)
+	}
+	var found bool
+	for k, v := range result.Flags {
+		if strings.HasPrefix(k, "issue_") && strings.Contains(v, `section "(unknown)"`) &&
+			strings.Contains(v, "period of performance dates") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an [unresolved_gap] issue anchored to (unknown); flags: %v", result.Flags)
+	}
+}
+
+func TestParseGapIssue_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	a := finalreview.New()
+
+	result, err := a.Review(ctx, finalreview.Input{
+		Draft:       "## Staffing Plan\nTeam of [GAP: count of cleared engineers] will deploy.\n",
+		Opportunity: fixture(),
+	})
+	if err != nil {
+		t.Fatalf("Review() returned unexpected error: %v", err)
+	}
+	issue := result.Flags["issue_1"]
+	section, missing, ok := finalreview.ParseGapIssue(issue)
+	if !ok {
+		t.Fatalf("ParseGapIssue(%q) ok = false, want true", issue)
+	}
+	if section != "Staffing Plan" || missing != "count of cleared engineers" {
+		t.Errorf("ParseGapIssue = (%q, %q), want (\"Staffing Plan\", \"count of cleared engineers\")", section, missing)
+	}
+}
+
+func TestParseGapIssue_RejectsOtherIssues(t *testing.T) {
+	for _, issue := range []string{
+		`[must_have] requirement "FedRAMP High" not addressed in draft`,
+		"",
+		"[unresolved_gap] section not-quoted: missing fact",
+	} {
+		if _, _, ok := finalreview.ParseGapIssue(issue); ok {
+			t.Errorf("ParseGapIssue(%q) ok = true, want false", issue)
+		}
+	}
+}

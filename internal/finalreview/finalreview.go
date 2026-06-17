@@ -103,6 +103,7 @@ func (a *Agent) Review(ctx context.Context, in Input) (*agent.Result, error) {
 	var issues []string
 
 	issues = append(issues, checkMustHave(in.Draft, in.Opportunity.Requirements)...)
+	issues = append(issues, checkGaps(in.Draft)...)
 
 	if in.Outline != nil {
 		issues = append(issues, checkRequiredSections(in.Draft, in.Outline.Sections)...)
@@ -142,6 +143,94 @@ func (a *Agent) Review(ctx context.Context, in Input) (*agent.Result, error) {
 		Flags:       flags,
 		CompletedAt: time.Now().UTC(),
 	}, nil
+}
+
+// gapMarker mirrors writer.gapMarker: the placeholder the Writer is instructed
+// to emit instead of fabricating a fact that is missing from its grounding
+// inputs. The two constants must stay in sync (same precedent as internal/eval).
+const gapMarker = "[GAP:"
+
+// unknownSection labels a gap that appears before any "## " heading in the
+// draft, so the issue is still reportable when no section can be attributed.
+const unknownSection = "(unknown)"
+
+// checkGaps reports every unresolved Writer gap marker left in the draft.
+// Each occurrence becomes one issue anchored to the section heading it falls
+// under, so the human can jump straight to it. Gaps are soft issues: they
+// route the proposal to needs_human alongside the other checks, never failed.
+func checkGaps(draft string) []string {
+	var issues []string
+	section := unknownSection
+	for _, line := range strings.Split(draft, "\n") {
+		if heading, ok := strings.CutPrefix(line, "## "); ok {
+			section = strings.TrimSpace(heading)
+			continue
+		}
+		for _, gapText := range GapTexts(line) {
+			issues = append(issues, gapIssue(section, gapText))
+		}
+	}
+	return issues
+}
+
+// GapTexts returns the missing-fact text of every Writer gap marker in text,
+// in order of appearance. checkGaps uses it line by line to attribute gaps to
+// section headings; the dashboard uses it to call out gaps inside a section
+// body. A marker the model left unclosed still counts, using the rest of its
+// line as the text.
+func GapTexts(text string) []string {
+	var gaps []string
+	for _, line := range strings.Split(text, "\n") {
+		rest := line
+		for {
+			_, after, found := strings.Cut(rest, gapMarker)
+			if !found {
+				break
+			}
+			gapText, remainder, closed := strings.Cut(after, "]")
+			if !closed {
+				remainder = ""
+			}
+			gaps = append(gaps, strings.TrimSpace(gapText))
+			rest = remainder
+		}
+	}
+	return gaps
+}
+
+// gapIssuePrefix opens every unresolved-gap issue string. gapIssue and
+// ParseGapIssue are inverses built around it; keep all three in sync.
+const gapIssuePrefix = "[unresolved_gap] section "
+
+// gapIssue formats one unresolved-gap issue for the issues list.
+func gapIssue(section, missing string) string {
+	return fmt.Sprintf("%s%q: missing fact — %q", gapIssuePrefix, section, missing)
+}
+
+// ParseGapIssue decomposes an [unresolved_gap] issue produced by this agent
+// back into the section heading and the missing-fact text. The proposal
+// service uses it to anchor gap flags to document sections without
+// re-parsing the draft. ok is false for any other issue string.
+func ParseGapIssue(issue string) (section, missing string, ok bool) {
+	rest, found := strings.CutPrefix(issue, gapIssuePrefix)
+	if !found {
+		return "", "", false
+	}
+	quoted, err := strconv.QuotedPrefix(rest)
+	if err != nil {
+		return "", "", false
+	}
+	if section, err = strconv.Unquote(quoted); err != nil {
+		return "", "", false
+	}
+	rest, found = strings.CutPrefix(rest[len(quoted):], ": missing fact — ")
+	if !found {
+		return "", "", false
+	}
+	if missing, err = strconv.Unquote(strings.TrimSpace(rest)); err != nil {
+		return "", "", false
+	}
+	return section, missing, true
 }
 
 // checkDeadline returns an error if the opportunity's response deadline has

@@ -506,3 +506,50 @@ func TestWriterDraftsSectionBySection(t *testing.T) {
 		t.Errorf("want %d writer revisions (one per section), got %d", len(doc.Sections), writerRevs)
 	}
 }
+
+func TestGapFlagsAnchorToSections(t *testing.T) {
+	svc, opps := newTestService(t)
+	seedOpp(t, opps)
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+
+	// The human edit satisfies the must-have requirement but leaves a Writer
+	// gap marker in place, so the unresolved gap is the ONLY issue: it alone
+	// must keep the proposal from reaching ready_to_submit.
+	doc, _ := svc.Document("zta-1")
+	secID := doc.Sections[0].ID
+	if _, err := svc.UpdateSection(context.Background(), "zta-1", secID,
+		"We will use FedRAMP High authorized tooling, staffed by [GAP: number of cleared staff] engineers."); err != nil {
+		t.Fatalf("UpdateSection: %v", err)
+	}
+
+	if err := svc.Approve(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	svc.Wait()
+
+	opp, _ := opps.Get(context.Background(), "zta-1")
+	if opp.ProposalStatus != StatusReviewNeedsHuman {
+		t.Fatalf("ProposalStatus = %q, want %q (an unresolved gap must block ready_to_submit)",
+			opp.ProposalStatus, StatusReviewNeedsHuman)
+	}
+
+	doc, _ = svc.Document("zta-1")
+	var gap *document.Flag
+	for i := range doc.Flags {
+		if doc.Flags[i].Title == "Unresolved gap" {
+			gap = &doc.Flags[i]
+		}
+	}
+	if gap == nil {
+		t.Fatalf("no \"Unresolved gap\" flag landed on the document; flags: %+v", doc.Flags)
+	}
+	if gap.SectionID != secID {
+		t.Errorf("gap flag SectionID = %q, want %q (must anchor to the section holding the gap)", gap.SectionID, secID)
+	}
+	if !strings.Contains(gap.Detail, "number of cleared staff") {
+		t.Errorf("gap flag Detail = %q, want the missing-fact text", gap.Detail)
+	}
+}

@@ -487,7 +487,7 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 		}
 		_ = s.setStatus(ctx, oppID, StatusReadyToSubmit)
 	case res.NeedsHuman():
-		flags := flagsFromResult(res.Flags)
+		flags := flagsFromResult(res.Flags, doc)
 		if len(flags) > 0 {
 			_, _ = s.deps.Documents.SetFlags(oppID, flags, "final-review", "Final review issues")
 		}
@@ -581,13 +581,23 @@ func splitDraft(draft string, out *outline.Outline) map[string]string {
 }
 
 // flagsFromResult converts the Final Review agent's issue flags
-// ("issue_1", "issue_2", …) into document flags.
-func flagsFromResult(resultFlags map[string]string) []document.Flag {
+// ("issue_1", "issue_2", …) into document flags. Unresolved-gap issues are
+// anchored to the section holding the gap so the editor can point the human
+// straight at it; every other issue keeps the generic document-level shape.
+func flagsFromResult(resultFlags map[string]string, doc *document.Document) []document.Flag {
 	var flags []document.Flag
 	for i := 1; ; i++ {
 		detail, ok := resultFlags[fmt.Sprintf("issue_%d", i)]
 		if !ok {
 			break
+		}
+		if section, missing, isGap := finalreview.ParseGapIssue(detail); isGap {
+			flags = append(flags, document.Flag{
+				SectionID: sectionIDByHeading(doc, section),
+				Title:     "Unresolved gap",
+				Detail:    missing,
+			})
+			continue
 		}
 		flags = append(flags, document.Flag{
 			Title:  detail,
@@ -595,4 +605,16 @@ func flagsFromResult(resultFlags map[string]string) []document.Flag {
 		})
 	}
 	return flags
+}
+
+// sectionIDByHeading finds the document section whose heading matches the one
+// Vera reported for a gap. Empty when nothing matches (e.g. a gap she could
+// not attribute to a section), which leaves the flag document-level.
+func sectionIDByHeading(doc *document.Document, heading string) string {
+	for i := range doc.Sections {
+		if doc.Sections[i].Heading == heading {
+			return doc.Sections[i].ID
+		}
+	}
+	return ""
 }
