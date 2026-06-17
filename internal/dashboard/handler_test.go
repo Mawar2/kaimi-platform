@@ -260,17 +260,18 @@ func TestHandleDetail(t *testing.T) {
 			"Modernize the agency&#39;s zero trust architecture.",
 			"Strong past performance in cybersecurity.",
 			"FedRAMP High",
-			"82.0%",                        // ScoreDisplay
-			`class="kfit"`,                 // FitRing (design system)
-			"krec--bid",                    // RecommendationPill
-			"kdead--near",                  // DeadlinePill at 9 days
-			`class="ktag"`,                 // MetaTag for NAICS/SOL
-			`id="eligibility-placeholder"`, // Phase 1+ placeholder per ux-spec
-			"All opportunities",            // back link
-			"View solicitation",            // solicitation link
-			"Scored",                       // derived stage
-			`http-equiv="refresh"`,         // live page keeps auto-refresh
-			"the seeker",                   // shared branded layout
+			"82.0%",                               // ScoreDisplay
+			`class="kfit"`,                        // FitRing (design system)
+			"krec--bid",                           // RecommendationPill
+			"kdead--near",                         // DeadlinePill at 9 days
+			`class="ktag"`,                        // MetaTag for NAICS/SOL
+			`id="eligibility-note"`,               // Zone-1 gate note (issue #256)
+			"Passed Zone-1 eligibility screening", // honest copy — the gate IS implemented
+			"All opportunities",                   // back link
+			"View solicitation",                   // solicitation link
+			"Scored",                              // derived stage
+			`http-equiv="refresh"`,                // live page keeps auto-refresh
+			"the seeker",                          // shared branded layout
 		} {
 			if !contains(body, want) {
 				t.Errorf("detail body missing %q", want)
@@ -467,14 +468,14 @@ func TestTriageScreen(t *testing.T) {
 		h.ServeHTTP(rr, httptest.NewRequest("GET", "/opportunity/ztamod-001", http.NoBody))
 		body := rr.Body.String()
 		for _, want := range []string{
-			`class="app"`,                  // detail lives in the shell too
-			`class="dr-top"`,               // drawer-style top block
-			">FIT<",                        // 92px ring sublabel
-			"Why Kaimi scored this",        // reasons section (CSS uppercases)
-			"Must-have requirements",       // checklist section (CSS uppercases)
-			`class="must ok"`,              // checklist item
-			"View solicitation",            // ghost link
-			`id="eligibility-placeholder"`, // ux-spec field retained
+			`class="app"`,            // detail lives in the shell too
+			`class="dr-top"`,         // drawer-style top block
+			">FIT<",                  // 92px ring sublabel
+			"Why Kaimi scored this",  // reasons section (CSS uppercases)
+			"Must-have requirements", // checklist section (CSS uppercases)
+			`class="must ok"`,        // checklist item
+			"View solicitation",      // ghost link
+			`id="eligibility-note"`,  // ux-spec field retained (issue #256 copy)
 		} {
 			if !contains(body, want) {
 				t.Errorf("detail missing %q", want)
