@@ -9,6 +9,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/proposal"
+	"github.com/Mawar2/Kaimi/internal/zone2view"
 )
 
 // This file implements the Zone 2 web surfaces (GitHub issue #156, epic
@@ -19,7 +20,9 @@ import (
 // app-workspace.jsx from the design handoff).
 
 // Stage names of the five-node proposal pipeline, per the design handoff.
-var stageNames = [5]string{"Outline", "Technical Writer", "Human Review", "Final Review", "Submit"}
+// stageNames aliases the shared Zone 2 pipeline vocabulary (internal/zone2view),
+// the single source of truth shared with the desktop app.
+var stageNames = zone2view.StageNames
 
 // agentIdentity is the named-teammate vocabulary from the design handoff.
 // Status copy uses their names — the gate is a warm handoff, not an alarm.
@@ -37,57 +40,6 @@ var agents = map[string]agentIdentity{
 	"outline": {"Noa", "Outline", "N", "linear-gradient(155deg,#5B9BFF,#2563EB)", "#fff"},
 	"writer":  {"Tomás", "Technical Writer", "T", "linear-gradient(155deg,#67E0F4,#0EA5C4)", "#062a33"},
 	"review":  {"Vera", "Final Review", "V", "linear-gradient(155deg,#A99BFF,#7C6BF5)", "#fff"},
-}
-
-// proposalView derives the pipeline position and display state from the
-// persisted ProposalStatus vocabulary.
-func proposalView(status string) (stageIndex int, state string) {
-	switch status {
-	case proposal.StatusOutlineRunning:
-		return 0, "progress"
-	case proposal.StatusWriterRunning:
-		return 1, "progress"
-	case proposal.StatusGate, proposal.StatusReviewNeedsHuman:
-		return 2, "human"
-	case proposal.StatusReviewRunning:
-		return 3, "progress"
-	case proposal.StatusReadyToSubmit:
-		return 4, "done"
-	case proposal.StatusSubmitted:
-		return 4, "submitted"
-	case "outline:failed":
-		return 0, "failed"
-	case "writer:failed":
-		return 1, "failed"
-	case "final-review:failed":
-		return 3, "failed"
-	default:
-		// Selected but no pipeline state yet (or a legacy status).
-		return 0, "progress"
-	}
-}
-
-// statusPhrase is the named-teammate present-tense line for a proposal.
-func statusPhrase(stageIndex int, state string) string {
-	switch state {
-	case "human":
-		return "Paused for your review"
-	case "done":
-		return "Ready to submit"
-	case "submitted":
-		return "Submitted"
-	case "failed":
-		return stageNames[stageIndex] + " hit a problem"
-	}
-	switch stageIndex {
-	case 0:
-		return "Noa outlining now"
-	case 1:
-		return "Tomás drafting now"
-	case 3:
-		return "Vera finalizing"
-	}
-	return stageNames[stageIndex] + " in progress"
 }
 
 // workingAgent maps a pipeline stage to the teammate working it.
@@ -145,18 +97,10 @@ type WorkspaceData struct {
 	DeadlineDays  int
 	Agent         agentIdentity
 	AgentLine     string
-	Criteria      []CritItem
+	Criteria      []zone2view.Criterion
 	OpenFlags     []document.Flag
 	VersionLabel  string
 	AtGate        bool
-}
-
-// CritItem is one check on the gate's criteria grid, derived from the
-// opportunity's must-have requirements against the current draft.
-type CritItem struct {
-	Label string
-	Note  string
-	OK    bool
 }
 
 // agentLines are the working-state description sentences from the handoff.
@@ -210,12 +154,12 @@ func (h *Handler) handleProposals(w http.ResponseWriter, r *http.Request) {
 		if row.Stage == StageHunted || row.Stage == StageScored {
 			continue
 		}
-		stageIndex, state := proposalView(rowStatus(row))
+		stageIndex, state := zone2view.View(rowStatus(row))
 		card := PropCard{
 			ID:         row.ID,
 			Title:      row.Title,
 			Agency:     row.Agency,
-			When:       statusPhrase(stageIndex, state),
+			When:       zone2view.StatusPhrase(stageIndex, state),
 			StageIndex: stageIndex,
 			State:      state,
 			StageLabel: stageLabelFor(stageIndex, state),
@@ -301,13 +245,13 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := h.Now()
-	stageIndex, state := proposalView(opp.ProposalStatus)
+	stageIndex, state := zone2view.View(opp.ProposalStatus)
 	data := WorkspaceData{
 		shellData:  shellData{PageTitle: opp.Title, ActiveNav: "proposals"},
 		Opp:        opp,
 		StageIndex: stageIndex,
 		State:      state,
-		Phrase:     statusPhrase(stageIndex, state),
+		Phrase:     zone2view.StatusPhrase(stageIndex, state),
 		Agent:      workingAgent(stageIndex),
 		AtGate:     state == "human",
 	}
@@ -365,23 +309,13 @@ func versionLabel(doc *document.Document) string {
 	return fmt.Sprintf("v%d · %s", doc.Version, name)
 }
 
-// deriveCriteria checks each must-have requirement against the current
-// draft content — honest, derived state, never fabricated.
-func deriveCriteria(opp *opportunity.Opportunity, doc *document.Document) []CritItem {
-	if len(opp.Requirements) == 0 {
-		return nil
-	}
-	text := strings.ToLower(doc.Markdown())
-	items := make([]CritItem, 0, len(opp.Requirements))
-	for _, req := range opp.Requirements {
-		ok := strings.Contains(text, strings.ToLower(req))
-		item := CritItem{Label: req, OK: ok}
-		if !ok {
-			item.Note = "Not yet addressed in the draft"
-		}
-		items = append(items, item)
-	}
-	return items
+// deriveCriteria checks each must-have requirement against the current draft
+// content — honest, derived state, never fabricated. It delegates to
+// zone2view.DeriveCriteria (the single source of truth shared with the desktop
+// app), which defers to the Final Review's open flags and otherwise uses
+// finalreview.RequirementAddressed rather than a verbatim substring match.
+func deriveCriteria(opp *opportunity.Opportunity, doc *document.Document) []zone2view.Criterion {
+	return zone2view.DeriveCriteria(opp.Requirements, strings.ToLower(doc.Markdown()), doc.OpenFlagTexts())
 }
 
 // handleAction dispatches the gate decisions and submit.
