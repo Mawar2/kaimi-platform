@@ -147,6 +147,14 @@ func (g *ProductKeyGate) handleEntry(w http.ResponseWriter, _ *http.Request) {
 // handleEntrySubmit serves POST /entry — the form submission. It validates the typed
 // key exactly as the magic link does. On success it grants a session and redirects into
 // the app; on failure it re-renders the form with the vague denial (401).
+//
+// This POST is deliberately NOT CSRF-protected: it is a login (it establishes, rather
+// than mutates, a session). The only "login-CSRF" risk is forcing a victim into a
+// session keyed by an attacker's product key — negligible here because a deployment is
+// single-tenant and a key carries no per-user identity, data, or quota; it only opens
+// the door to THIS environment. SameSite=Lax on the resulting session cookie further
+// limits cross-site abuse. TODO(phase-N): add a CSRF token if keys ever map to
+// per-user identities or metered quotas.
 func (g *ProductKeyGate) handleEntrySubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		g.renderEntry(w, http.StatusBadRequest, msgAccessDenied)
