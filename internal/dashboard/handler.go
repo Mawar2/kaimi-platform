@@ -138,6 +138,8 @@ func (h *Handler) setupRoutes() {
 	// editing files. POST-only and CSRF-gated like the profile write; it persists via
 	// the SAME drivetoken target store the JSON PUT endpoint uses (no parallel store).
 	h.mux.HandleFunc("/onboarding/drive/target", postOnly(h.handleOnboardingDriveTarget))
+	// #246 B3: the working draft is downloadable as Markdown from the workspace.
+	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
 	h.mux.HandleFunc("/workspace/{id}/approve", postOnly(h.handleAction("approve")))
 	h.mux.HandleFunc("/workspace/{id}/changes", postOnly(h.handleAction("changes")))
@@ -557,9 +559,10 @@ type shellData struct {
 
 // fillShellCounts populates the sidebar pipeline counts on sd from the unfiltered
 // queue, using the SAME stage grouping as the Opportunities (overview) screen so the
-// bar reads identically on every page — including onboarding, which would otherwise
-// show zeros because it never lists the store. The sidebar is advisory, so any store
-// error leaves the counts at zero rather than failing the page.
+// bar reads identically on every page — including onboarding and the workspace, which
+// would otherwise show zeros because they never list the store (issue #246 B1). The
+// sidebar is advisory, so any store error leaves the counts at zero rather than
+// failing the page.
 //
 // QueueCount counts only un-pursued opportunities (Hunted/Scored), matching the
 // visible Opportunities list; pursued ones flow into ActiveCount/SubmittedCount.

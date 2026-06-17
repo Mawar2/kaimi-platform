@@ -71,3 +71,6 @@ cmd/desktop/frontend/dist/
 
 # Wails frontend-install hash (generated)
 cmd/desktop/frontend/package.json.md5
+
+# gstack local artifacts (browse logs, audit) — never commit
+.gstack/
