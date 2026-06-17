@@ -8,7 +8,28 @@ import (
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
+
+// TestBuildSectionPrompt_IncludesRevisionNote proves a human change request is
+// surfaced to the model on a revision, and absent on a fresh draft (#249 follow-up).
+func TestBuildSectionPrompt_IncludesRevisionNote(t *testing.T) {
+	opp := &opportunity.Opportunity{ID: "x", Title: "T", Agency: "A"}
+	section := outline.Section{Title: "Past Performance"}
+	const note = "Name a teaming partner for past performance at this scale."
+
+	withNote := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, note)
+	if !strings.Contains(withNote, note) {
+		t.Errorf("revision prompt must include the reviewer change request:\n%s", withNote)
+	}
+	if !strings.Contains(withNote, "change request") {
+		t.Errorf("revision prompt should label the change request block")
+	}
+	fresh := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, "")
+	if strings.Contains(fresh, "change request") {
+		t.Errorf("a fresh draft must not carry a change-request block")
+	}
+}
 
 func newValidInput() Input {
 	opp := &opportunity.Opportunity{
