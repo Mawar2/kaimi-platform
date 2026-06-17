@@ -8,6 +8,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
+	"github.com/Mawar2/Kaimi/internal/fallback"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/ingest"
@@ -135,20 +136,35 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		// Outline plans the section structure with gemini-3.5-flash; the Writer
 		// persona "Thomas" drafts the prose with gemini-3.1-pro-preview while the
 		// Claude/Opus 4.8 Vertex quota is pending (swap GEMINI_MODEL when it lands).
+		// Real-model failover (upstream #245/#266): the primary stays exactly as before,
+		// so the happy path is unchanged; a real-model backup only engages when the
+		// primary fails transiently. Outline is the first agent every proposal hits, so a
+		// single transient model error must not kill the chain.
 		planner, err := outline.NewGeminiSectionPlanner(ctx,
 			projectID, region, cfg.GCP.OutlineModel)
 		if err != nil {
-			return nil, fmt.Errorf("gemini outline planner: %w", err)
+			return nil, fmt.Errorf("gemini outline planner (primary %s): %w", cfg.GCP.OutlineModel, err)
 		}
-		ol = outline.NewWithPlanner(docsClient, planner)
+		backupPlanner, err := outline.NewGeminiSectionPlanner(ctx,
+			projectID, region, cfg.GCP.OutlineFallbackModel)
+		if err != nil {
+			return nil, fmt.Errorf("gemini outline planner (backup %s): %w", cfg.GCP.OutlineFallbackModel, err)
+		}
+		ol = outline.NewWithPlanner(docsClient, fallback.NewPlanner(planner, backupPlanner))
 
 		gen, err := writer.NewGeminiGenerator(ctx,
 			projectID, region, cfg.GCP.WriterModel)
 		if err != nil {
-			return nil, fmt.Errorf("gemini generator: %w", err)
+			return nil, fmt.Errorf("gemini generator (primary %s): %w", cfg.GCP.WriterModel, err)
 		}
-		w = writer.NewWithGenerator(gen)
-		log.Printf("Outline: LIVE gemini-3.5-flash planner; Technical Writer %q: LIVE gemini-3.1-pro-preview drafting (project %s)", "Thomas", projectID)
+		backupGen, err := writer.NewGeminiGenerator(ctx,
+			projectID, region, cfg.GCP.WriterFallbackModel)
+		if err != nil {
+			return nil, fmt.Errorf("gemini generator (backup %s): %w", cfg.GCP.WriterFallbackModel, err)
+		}
+		w = writer.NewWithGenerator(fallback.NewGenerator(gen, backupGen))
+		log.Printf("Outline: LIVE planner %s + fallback %s; Technical Writer %q: LIVE drafting %s + fallback %s (project %s)",
+			cfg.GCP.OutlineModel, cfg.GCP.OutlineFallbackModel, "Thomas", cfg.GCP.WriterModel, cfg.GCP.WriterFallbackModel, projectID)
 	} else {
 		log.Printf("Outline + Technical Writer: OFFLINE stub mode — live Gemini agents are the default")
 	}
@@ -171,10 +187,18 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		checker, err := finalreview.NewGeminiComplianceChecker(ctx,
 			projectID, cfg.GCP.Region, reviewModel)
 		if err != nil {
-			return nil, fmt.Errorf("gemini compliance checker: %w", err)
+			return nil, fmt.Errorf("gemini compliance checker (primary %s): %w", reviewModel, err)
 		}
-		review = finalreview.NewWithComplianceChecker(checker)
-		log.Printf("Final Review: LIVE Gemini compliance pass enabled (project %s, model %s)", projectID, reviewModel)
+		// Real-model failover (upstream #245): if the primary reviewer errors, fail over
+		// to a real-model backup; if both fail, Final Review's own needs-human degrade
+		// applies (its deterministic checks still stand). Primary unchanged.
+		backupChecker, err := finalreview.NewGeminiComplianceChecker(ctx,
+			projectID, cfg.GCP.Region, cfg.GCP.FinalReviewFallbackModel)
+		if err != nil {
+			return nil, fmt.Errorf("gemini compliance checker (backup %s): %w", cfg.GCP.FinalReviewFallbackModel, err)
+		}
+		review = finalreview.NewWithComplianceChecker(fallback.NewChecker(checker, backupChecker))
+		log.Printf("Final Review: LIVE Gemini compliance pass + fallback (project %s, primary %s, backup %s)", projectID, reviewModel, cfg.GCP.FinalReviewFallbackModel)
 	} else {
 		log.Printf("Final Review: OFFLINE deterministic checks only — live Gemini compliance is the default")
 	}
