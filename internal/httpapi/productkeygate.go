@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/productkey"
@@ -236,13 +237,36 @@ func (g *ProductKeyGate) RequireProductKeyHTML(next http.Handler) http.Handler {
 // AuthHandler.DashboardIdentity for the OAuth mode). The email is empty — a product-key
 // session carries no Google identity — but the CSRF token is derived from the SAME HMAC
 // key that signs the session, bound to the key id, so it is stable per session and
-// unforgeable. It returns ok=false when no product-key session is present.
-func (g *ProductKeyGate) DashboardIdentity(ctx context.Context) (email, csrfToken string, ok bool) {
+// unforgeable. license is the MASKED product key for the onboarding "License" step (the
+// full key never leaves the session). It returns ok=false when no product-key session
+// is present.
+func (g *ProductKeyGate) DashboardIdentity(ctx context.Context) (email, csrfToken, license string, ok bool) {
 	sess, ok := SessionFromContext(ctx)
 	if !ok || sess == nil || sess.KeyID == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return "", g.session.csrfToken(sess.KeyID), true
+	return "", g.session.csrfToken(sess.KeyID), maskKey(sess.KeyID), true
+}
+
+// maskKey renders a product key for display with only its last group shown, e.g.
+// "KAIMI-7F3A-9C2E-B1D4" → "KAIMI-····-····-B1D4". A key that is not the canonical
+// 4-group shape falls back to showing only its last 4 characters. It NEVER returns the
+// full key, so the onboarding page can confirm "your license is verified" without
+// reprinting the credential.
+func maskKey(key string) string {
+	parts := strings.Split(key, "-")
+	if len(parts) >= 3 && parts[0] == productkey.KeyPrefix { // KAIMI-XXXX-…-XXXX
+		masked := []string{parts[0]}
+		for i := 1; i < len(parts)-1; i++ {
+			masked = append(masked, "····")
+		}
+		return strings.Join(append(masked, parts[len(parts)-1]), "-")
+	}
+	tail := key
+	if len(tail) > 4 {
+		tail = tail[len(tail)-4:]
+	}
+	return "····" + tail
 }
 
 // renderEntry writes the access/entry page with the given status and an optional error

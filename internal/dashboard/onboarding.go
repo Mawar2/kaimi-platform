@@ -12,7 +12,30 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/profile"
+	"github.com/Mawar2/Kaimi/internal/samsecret"
 )
+
+// Onboarding wizard step ids. The flow is a full-screen, client-stepped wizard
+// (Welcome → License → Profile → Connect → Done); the server uses these to resume at
+// the right step after a form POST/redirect (PRG), and the page's inline JS reads the
+// active step to show the matching panel.
+const (
+	stepWelcome = "welcome"
+	stepLicense = "license"
+	stepProfile = "profile"
+	stepConnect = "connect"
+	stepDone    = "done"
+)
+
+// validStep reports whether s is a known wizard step, so a crafted ?step= value
+// cannot push the wizard into an undefined state (it falls back to welcome).
+func validStep(s string) bool {
+	switch s {
+	case stepWelcome, stepLicense, stepProfile, stepConnect, stepDone:
+		return true
+	}
+	return false
+}
 
 // This file implements the WS-C3 in-product onboarding flow: server-rendered pages
 // (html/template, in the dashboard's existing brand) that let a brand-new business
@@ -36,13 +59,19 @@ import (
 // dashboard does not (and cannot, without an import cycle) read the httpapi session
 // directly, so it depends on this small value type instead.
 type Identity struct {
-	// Email is the verified Workspace email of the signed-in operator.
+	// Email is the verified Workspace email of the signed-in operator. Empty in
+	// product-key gate mode (a product-key session carries no Google identity).
 	Email string
 	// CSRFToken is a stable-per-session token cmd/api derives from the session. The
 	// onboarding form embeds it and the POST handler compares it (constant-time) to
 	// the value the same IdentityFunc returns for the request, as CSRF defense in
 	// depth on top of the SameSite=Lax session cookie.
 	CSRFToken string
+	// LicenseKey is a MASKED product key (e.g. "KAIMI-····-····-CBFQ") shown on the
+	// onboarding "License" step in product-key gate mode, so a tester sees their
+	// access is verified. It is empty in Workspace-OAuth mode. cmd/api masks the
+	// session's key id before setting it — the full key is never sent to the template.
+	LicenseKey string
 }
 
 // IdentityFunc resolves the signed-in operator's identity (and CSRF token) from the
@@ -84,6 +113,22 @@ type DriveStatusFunc func() DriveStatus
 // endpoint; the literal "root" sentinel (driveTargetRoot) is a valid value meaning
 // "My Drive root".
 type DriveTargetSaver func(driveID string) error
+
+// SAMKeySaver persists the tenant's SAM.gov API key entered on the onboarding
+// "Connect" step. cmd/api backs it with internal/samsecret over Secret Manager, so
+// the key is written as a new version of the deployment's SAM secret (never to the
+// store, never logged) and the pipeline picks it up on the next hunt. The dashboard
+// takes this function (not the samsecret type) to avoid a hard dependency on the
+// Secret Manager client. nil = the onboarding page shows the "managed by your
+// administrator" note instead of a key field. It returns samsecret.ErrInvalidKey
+// (wrapped) for a malformed key so the handler can re-render with a 400.
+type SAMKeySaver func(ctx context.Context, apiKey string) error
+
+// WithSAMKeySaver wires the SAM.gov key write path (see SAMKeySaver). Without it the
+// onboarding "Connect" step shows the deployment-secret note rather than a key field.
+func WithSAMKeySaver(fn SAMKeySaver) Option {
+	return func(h *Handler) { h.samKeySaver = fn }
+}
 
 // driveTargetRoot is the sentinel target value meaning "create Docs at the root of
 // My Drive" rather than inside a specific folder. It is stored verbatim as the
@@ -192,6 +237,20 @@ type OnboardingData struct {
 	// template stays declarative.
 	DriveDest driveDestView
 
+	// License (product-key gate mode): a masked product key shown on the License step.
+	// Empty in Workspace-OAuth mode (the License step then shows the signed-in account).
+	LicenseKey string
+
+	// SAM.gov key entry. SAMKeyConfigured is true when a write path is wired
+	// (WithSAMKeySaver); when false the Connect step shows the deployment-secret note
+	// instead of a key field. SAMKeySaved drives the success treatment after a save.
+	SAMKeyConfigured bool
+	SAMKeySaved      bool
+
+	// Step is the wizard step to open on load ("welcome".."done"). The server sets it
+	// to resume after a PRG redirect; the page's JS shows the matching panel.
+	Step string
+
 	// State flags.
 	Saved      bool   // PRG success banner (company profile)
 	DriveSaved bool   // PRG success banner (Drive destination)
@@ -234,174 +293,238 @@ func driveDestination(target, name string) driveDestView {
 	}
 }
 
-// onboardingContentTmpl is the onboarding checklist page. All dynamic values render
-// through html/template's contextual auto-escaping; none use template.HTML, so a
-// crafted company name or NAICS description cannot inject markup.
-const onboardingContentTmpl = `{{define "content"}}
-<div class="page">
-  <div class="page-head">
-    <div class="eyebrow">Setup</div>
-    <h1>Onboarding</h1>
-    <p class="lead">Configure this Kaimi deployment for your business. Everything here is stored for your workspace only — no files to edit.</p>
-  </div>
+// onboardingContentTmpl is the full-screen onboarding WIZARD: a guided, multi-step
+// setup (Welcome → License → Profile → Connect → Done) modeled on the design handoff
+// and adapted to the web product and the product-key gate. It is a STANDALONE page
+// (not the dashboard shell) so it fills the screen like the designed flow. Steps are
+// shown one at a time by the inline script; forms POST to the existing handlers and
+// the server resumes the wizard at the right step via PRG (?step=). All dynamic values
+// render through html/template's contextual auto-escaping (no template.HTML), so a
+// crafted company name, NAICS line, or masked key cannot inject markup or script.
+const onboardingContentTmpl = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaimi — Setup</title>
+<style>
+  :root{--bg:#0b1220;--panel:#121a2b;--panel2:#0e1626;--border:#233047;--ink:#e8edf6;--ink3:#93a1bd;--accent:#3b82f6;--ok:#1a7f4b;--okbg:#e7f7ee;--errbg:#2a1620;--errbd:#5b2230;--errfg:#f3b5c2;}
+  *{box-sizing:border-box;}
+  body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  .wz{display:flex;min-height:100vh;}
+  .wz-hero{width:38%;max-width:520px;padding:40px;background:linear-gradient(160deg,#0d1730,#0b1220);border-right:1px solid var(--border);display:flex;flex-direction:column;justify-content:space-between;}
+  .wz-brand{display:flex;align-items:center;gap:12px;}
+  .wz-mark{width:34px;height:34px;border-radius:9px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;}
+  .wz-brand h1{margin:0;font-size:18px;letter-spacing:.3px;}
+  .wz-brand .tag{font-size:11px;color:var(--ink3);letter-spacing:1.5px;text-transform:uppercase;}
+  .wz-hero-copy h2{font-size:30px;line-height:1.15;margin:0 0 12px;}
+  .wz-hero-copy h2 .hl{color:#5aa2ff;}
+  .wz-hero-copy p{color:var(--ink3);font-size:14px;line-height:1.5;max-width:340px;}
+  .wz-foot{color:var(--ink3);font-size:12px;border-top:1px solid var(--border);padding-top:14px;}
+  .wz-main{flex:1;padding:40px 56px;display:flex;flex-direction:column;max-width:760px;}
+  .wz-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .wz-dots{display:flex;gap:8px;}
+  .wz-dots i{width:46px;height:4px;border-radius:2px;background:#2a3650;display:block;transition:background .2s;}
+  .wz-dots i.on{background:var(--accent);}
+  .wz-count{color:var(--ink3);font-size:13px;}
+  .wz-banner{display:flex;align-items:center;gap:8px;padding:11px 13px;border-radius:9px;font-size:13px;margin:14px 0;}
+  .wz-banner svg{width:16px;height:16px;flex:0 0 auto;}
+  .wz-banner--ok{background:var(--okbg);color:var(--ok);}
+  .wz-banner--err{background:var(--errbg);border:1px solid var(--errbd);color:var(--errfg);}
+  .wz-step{display:none;animation:fade .2s ease;}
+  .wz-step.on{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  .wz-step h2{font-size:26px;margin:18px 0 6px;}
+  .wz-step .sub{color:var(--ink3);font-size:14px;line-height:1.5;margin:0 0 22px;max-width:540px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px;display:flex;gap:14px;align-items:flex-start;}
+  .card .ic{width:34px;height:34px;border-radius:9px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;}
+  .card h3{margin:0 0 3px;font-size:15px;}
+  .card p{margin:0;color:var(--ink3);font-size:13px;line-height:1.45;}
+  .verified{background:#10241a;border:1px solid #1f5138;}
+  .verified .ic{background:var(--ok);}
+  .key{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;letter-spacing:1px;}
+  form.wz-form{display:flex;flex-direction:column;gap:14px;max-width:560px;}
+  label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600;}
+  input[type=text],textarea{font-size:14px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--ink);font-family:inherit;}
+  input:focus,textarea:focus{outline:2px solid var(--accent);border-color:var(--accent);}
+  .row{display:flex;gap:14px;}.row label{flex:1;}
+  .hint{font-weight:400;color:var(--ink3);font-size:12px;}
+  fieldset{border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+  legend{font-size:12px;font-weight:700;color:var(--ink3);padding:0 6px;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chk{display:inline-flex;align-items:center;gap:7px;font-weight:500;font-size:13px;}
+  .wz-nav{display:flex;align-items:center;justify-content:space-between;margin-top:26px;gap:12px;}
+  .btn{border:0;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;}
+  .btn svg{width:16px;height:16px;}
+  .btn-primary{background:var(--accent);color:#fff;}.btn-primary:hover{background:#2f6fe0;}
+  .btn-ghost{background:transparent;color:var(--ink3);border:1px solid var(--border);}
+  .sum{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
+  .sum li{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 15px;}
+  .sum .ck{width:24px;height:24px;border-radius:50%;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .sum .ck svg{width:14px;height:14px;}
+  .sum .muted .ck{background:#2a3650;}
+  .sum b{font-size:14px;}.sum span{color:var(--ink3);font-size:13px;}
+  @media(max-width:860px){.wz-hero{display:none;}.wz-main{padding:28px 22px;}}
+</style>
+</head>
+<body>
+<div class="wz">
+  <aside class="wz-hero">
+    <div class="wz-brand"><span class="wz-mark">≈</span><div><h1>Kaimi</h1><div class="tag">The Seeker · by BlueMeta</div></div></div>
+    <div class="wz-hero-copy">
+      <h2>The agents hunt.<br><span class="hl">You</span> make the calls.</h2>
+      <p>Kaimi finds and scores federal opportunities, drafts the proposals worth pursuing, and pauses for your review before anything ships.</p>
+    </div>
+    <div class="wz-foot">One key, your whole BD pipeline.</div>
+  </aside>
 
-  {{if .Saved}}
-  <div class="ob-banner ob-banner--ok">` + iconCheck + `<span>Company profile saved. Kaimi will use it on the next hunt.</span></div>
-  {{end}}
-  {{if .DriveSaved}}
-  <div class="ob-banner ob-banner--ok">` + iconCheck + `<span>Drive destination updated. New proposal Docs will land there.</span></div>
-  {{end}}
-  {{if .FormErr}}
-  <div class="ob-banner ob-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>
-  {{end}}
+  <main class="wz-main">
+    <div class="wz-top">
+      <div class="wz-dots"><i data-d="welcome"></i><i data-d="license"></i><i data-d="profile"></i><i data-d="connect"></i><i data-d="done"></i></div>
+      <div class="wz-count"><span id="wzCur">1</span> / 5</div>
+    </div>
 
-  <ol class="ob-list">
-    <li class="ob-step">
-      <div class="ob-step-h">
-        <span class="ob-dot {{if .SignedIn}}ob-dot--ok{{end}}">{{if .SignedIn}}` + iconCheck + `{{else}}1{{end}}</span>
-        <h3>Sign-in &amp; workspace</h3>
-      </div>
-      {{if .SignedIn}}
-      <p class="ob-note">Signed in as <b>{{.Email}}</b>.</p>
+    {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
+    {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
+    {{if .SAMKeySaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved — your next hunt will use it.</span></div>{{end}}
+    {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
+
+    <!-- 1. Welcome -->
+    <section class="wz-step" data-step="welcome">
+      <h2>Welcome to Kaimi</h2>
+      <p class="sub">Setup takes about three minutes: confirm your license, tell Kaimi what your company does, and connect SAM.gov — so your next hunt is already yours.</p>
+      <div class="card"><span class="ic" style="background:#3b82f6">N</span><div><h3>It hunts for you</h3><p>Kaimi pulls live SAM.gov opportunities and scores each against your capabilities.</p></div></div>
+      <div class="card"><span class="ic" style="background:#22b8cf">T</span><div><h3>It drafts the ones you pick</h3><p>Select an opportunity and a team of agents outlines, writes, and checks the proposal.</p></div></div>
+      <div class="card"><span class="ic" style="background:#f59e0b">✋</span><div><h3>You stay in command</h3><p>Nothing ships without you. Every proposal pauses at one human review gate — yours.</p></div></div>
+      <div class="wz-nav"><span></span><button class="btn btn-primary" data-go="license">` + iconArrow + `Get started</button></div>
+    </section>
+
+    <!-- 2. License -->
+    <section class="wz-step" data-step="license">
+      <h2>Link your Kaimi license</h2>
+      <p class="sub">Your access key connects this workspace to your evaluation and the agent runtime.</p>
+      {{if .LicenseKey}}
+      <div class="card verified"><span class="ic">` + iconCheck + `</span><div><h3>License verified</h3><p>Evaluation access · key <span class="key">{{.LicenseKey}}</span></p></div></div>
+      {{else if .SignedIn}}
+      <div class="card verified"><span class="ic">` + iconCheck + `</span><div><h3>Signed in</h3><p>{{.Email}}</p></div></div>
       {{else}}
-      <p class="ob-note">You are not signed in. <a href="/auth/login">Sign in</a> to configure this deployment.</p>
+      <div class="card"><span class="ic" style="background:#2a3650">!</span><div><h3>Not verified</h3><p>Open the access link from your invitation to verify your license.</p></div></div>
       {{end}}
-    </li>
+      <div class="wz-nav"><button class="btn btn-ghost" data-back="welcome">Back</button><button class="btn btn-primary" data-go="profile">` + iconArrow + `Continue</button></div>
+    </section>
 
-    <li class="ob-step">
-      <div class="ob-step-h">
-        <span class="ob-dot {{if .HasProfile}}ob-dot--ok{{end}}">{{if .HasProfile}}` + iconCheck + `{{else}}2{{end}}</span>
-        <h3>Company profile</h3>
-      </div>
-      <p class="ob-note">Kaimi grounds its hunting, scoring, and drafting in these facts. Required: company name and at least one NAICS code.</p>
-      <form class="ob-form" method="POST" action="/onboarding/profile">
+    <!-- 3. Profile -->
+    <section class="wz-step" data-step="profile">
+      <h2>What does your company do?</h2>
+      <p class="sub">Kaimi scores every opportunity against this profile. The better it knows you, the sharper the fit scores. Required: company name and at least one NAICS code.</p>
+      <form class="wz-form" method="POST" action="/onboarding/profile">
         {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-        <label>Company name<input name="company" value="{{.Company}}" required></label>
-        <div class="ob-row">
-          <label>UEI<input name="uei" value="{{.UEI}}"></label>
-          <label>CAGE<input name="cage" value="{{.CAGE}}"></label>
+        <label>Company name<input type="text" name="company" value="{{.Company}}" required></label>
+        <div class="row">
+          <label>UEI <span class="hint">(optional)</span><input type="text" name="uei" value="{{.UEI}}"></label>
+          <label>CAGE <span class="hint">(optional)</span><input type="text" name="cage" value="{{.CAGE}}"></label>
         </div>
-        <label>NAICS codes<textarea name="naics" rows="3" placeholder="One per line: code|description|tier (primary|secondary|tertiary)">{{.NAICS}}</textarea></label>
-        <fieldset class="ob-fs">
-          <legend>Set-aside eligibility</legend>
-          <label class="ob-chk"><input type="checkbox" name="sa_small_business"{{if .SetAside.SmallBusiness}} checked{{end}}> Small business</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_sdb"{{if .SetAside.SDB}} checked{{end}}> SDB</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_minority_owned"{{if .SetAside.MinorityOwned}} checked{{end}}> Minority-owned</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_eight_a"{{if .SetAside.EightA}} checked{{end}}> 8(a)</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_sdvosb"{{if .SetAside.SDVOSB}} checked{{end}}> SDVOSB</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_wosb"{{if .SetAside.WOSB}} checked{{end}}> WOSB</label>
-          <label class="ob-chk"><input type="checkbox" name="sa_hubzone"{{if .SetAside.HUBZone}} checked{{end}}> HUBZone</label>
-        </fieldset>
-        <label>Core competencies<textarea name="competencies" rows="3" placeholder="One per line">{{.Competencies}}</textarea></label>
-        <label>Past performance<textarea name="past_performance" rows="3" placeholder="One per line: client|scope|value">{{.PastPerformance}}</textarea></label>
-        <fieldset class="ob-fs">
-          <legend>Scoring hints (optional)</legend>
-          <label>Primary NAICS<input name="primary_naics" value="{{.PrimaryNAICS}}" placeholder="comma-separated"></label>
-          <label>Secondary NAICS<input name="secondary_naics" value="{{.SecondaryNAICS}}" placeholder="comma-separated"></label>
-          <label>Competency tags<textarea name="competency_tags" rows="2" placeholder="One per line (lowercase keywords)">{{.CompetencyTags}}</textarea></label>
-          <label>Scoring past-performance<textarea name="scoring_pp" rows="2" placeholder="One sentence per line">{{.ScoringPP}}</textarea></label>
-        </fieldset>
-        <div class="ob-actions">
-          <button class="kbtn kbtn--select" type="submit">` + iconCheck + `Save company profile</button>
-        </div>
+        <label>NAICS codes <span class="hint">— one per line: code|description|tier (primary|secondary|tertiary)</span>
+          <textarea name="naics" rows="4" placeholder="541512|Computer Systems Design|primary">{{.NAICS}}</textarea></label>
+        <fieldset><legend>Set-aside eligibility</legend><div class="chips">
+          <label class="chk"><input type="checkbox" name="sa_small_business"{{if .SetAside.SmallBusiness}} checked{{end}}> Small business</label>
+          <label class="chk"><input type="checkbox" name="sa_sdb"{{if .SetAside.SDB}} checked{{end}}> SDB</label>
+          <label class="chk"><input type="checkbox" name="sa_eight_a"{{if .SetAside.EightA}} checked{{end}}> 8(a)</label>
+          <label class="chk"><input type="checkbox" name="sa_sdvosb"{{if .SetAside.SDVOSB}} checked{{end}}> SDVOSB</label>
+          <label class="chk"><input type="checkbox" name="sa_wosb"{{if .SetAside.WOSB}} checked{{end}}> WOSB</label>
+          <label class="chk"><input type="checkbox" name="sa_hubzone"{{if .SetAside.HUBZone}} checked{{end}}> HUBZone</label>
+        </div></fieldset>
+        <label>Capabilities statement <span class="hint">— one competency per line</span>
+          <textarea name="competencies" rows="3" placeholder="Cloud migration &amp; DevSecOps">{{.Competencies}}</textarea></label>
+        <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="license">Back</button><button class="btn btn-primary" type="submit">` + iconCheck + `Save &amp; continue</button></div>
       </form>
-    </li>
+    </section>
 
-    <li class="ob-step">
-      <div class="ob-step-h">
-        <span class="ob-dot {{if .Drive.Connected}}ob-dot--ok{{end}}">{{if .Drive.Connected}}` + iconCheck + `{{else}}3{{end}}</span>
-        <h3>Google Drive</h3>
-      </div>
-      {{if not .Drive.Configured}}
-      <p class="ob-note">Customer-Drive connect is not enabled in this deployment. Generated proposal Docs use the default Drive. Ask your administrator to set the Drive OAuth configuration to land Docs in your own Workspace.</p>
-      {{else if .Drive.Connected}}
-      <p class="ob-note">Connected. Proposal Docs are created in this destination:</p>
-      <div class="ob-dest">
-        {{if .DriveDest.IsFolder}}
-        <span class="ob-dest-label">Folder <strong>{{.DriveDest.Label}}</strong></span>
-        <a class="ob-dest-open" href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer">` + iconLink + `Open in Drive</a>
-        {{else if .DriveDest.IsRoot}}
-        <span class="ob-dest-label">My Drive (root)</span>
-        {{else}}
-        <span class="ob-dest-label ob-dest-unset">Not set yet — Docs land in your connected Drive&#39;s default location.</span>
+    <!-- 4. Connect -->
+    <section class="wz-step" data-step="connect">
+      <h2>Connect your data sources</h2>
+      <p class="sub">Kaimi reads opportunities from SAM.gov with your own API key, and (optionally) saves finished proposals to your Google Drive.</p>
+      {{if .SAMKeyConfigured}}
+      <form class="wz-form" method="POST" action="/onboarding/samgov">
+        {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+        <label>SAM.gov API key <span class="hint">— from your SAM.gov account → Account Details → API Key (40 characters)</span>
+          <input type="text" name="sam_api_key" autocomplete="off" spellcheck="false" placeholder="Paste your SAM.gov API key"></label>
+        <p class="sub" style="margin:0">Your key is stored encrypted in Secret Manager — never shown, logged, or shared. It is yours alone, so your daily quota is never shared with another tester.</p>
+        <div><button class="btn btn-primary" type="submit">` + iconCheck + `Save SAM.gov key</button></div>
+      </form>
+      {{else}}
+      <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>Managed by your administrator</h3><p>This deployment supplies the SAM.gov key as a server secret; you don't need to enter one.</p></div></div>
+      {{end}}
+      <div class="card" style="margin-top:14px"><span class="ic" style="background:#22b8cf">` + iconLink + `</span><div style="flex:1">
+        <h3>Google Drive <span class="hint">(optional)</span></h3>
+        {{if not .Drive.Configured}}
+        <p>Customer-Drive connect is not enabled in this deployment. Generated proposal Docs use the default Drive — drafts stay in Kaimi.</p>
+        {{else if .Drive.Connected}}
+        <p>Connected. Proposal Docs are created in this destination:</p>
+        <p>
+          {{if .DriveDest.IsFolder}}Folder <strong>{{.DriveDest.Label}}</strong> — <a href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer" style="color:#5aa2ff">Open in Drive</a>
+          {{else if .DriveDest.IsRoot}}My Drive (root)
+          {{else}}Not set yet — Docs land in your connected Drive's default location.{{end}}
+        </p>
+        {{if .CanEditDrive}}
+        <form class="wz-form" method="POST" action="/onboarding/drive/target" style="margin-top:10px">
+          {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+          <fieldset><legend>Change destination</legend>
+            <label class="chk"><input type="radio" name="drive_choice" value="folder"{{if not .DriveDest.IsRoot}} checked{{end}}> Specific folder</label>
+            <label>Folder id<input type="text" name="drive_id" value="{{.DriveDest.FolderID}}" placeholder="Paste a Google Drive folder id"></label>
+            <label class="chk"><input type="radio" name="drive_choice" value="root"{{if .DriveDest.IsRoot}} checked{{end}}> My Drive root</label>
+          </fieldset>
+          <div><button class="btn btn-primary" type="submit">` + iconCheck + `Save destination</button></div>
+        </form>
         {{end}}
-      </div>
-      {{if .CanEditDrive}}
-      <form class="ob-form ob-drive-form" method="POST" action="/onboarding/drive/target">
-        {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-        <fieldset class="ob-fs">
-          <legend>Change destination</legend>
-          <label class="ob-chk"><input type="radio" name="drive_choice" value="folder"{{if not .DriveDest.IsRoot}} checked{{end}}> Specific folder</label>
-          <label>Folder id<input name="drive_id" value="{{.DriveDest.FolderID}}" placeholder="Paste a Google Drive folder id"></label>
-          <label class="ob-chk"><input type="radio" name="drive_choice" value="root"{{if .DriveDest.IsRoot}} checked{{end}}> My Drive root</label>
-        </fieldset>
-        <div class="ob-actions">
-          <button class="kbtn kbtn--select" type="submit">` + iconCheck + `Save destination</button>
-        </div>
-      </form>
-      {{end}}
-      <p class="ob-note"><a href="` + driveConnectPath + `">Reconnect</a></p>
-      {{else}}
-      <p class="ob-note">Connect your Google Workspace so generated proposal Docs land in your own Drive.</p>
-      <div class="ob-actions"><a class="kbtn kbtn--secondary" href="` + driveConnectPath + `">` + iconLink + `Connect Drive</a></div>
-      {{end}}
-    </li>
+        <p><a href="` + driveConnectPath + `" style="color:#5aa2ff">Reconnect</a></p>
+        {{else}}
+        <p>Connect your Google Workspace so finished proposal Docs land in your own Drive.</p>
+        <div><a class="btn btn-primary" href="` + driveConnectPath + `">` + iconLink + `Connect Drive</a></div>
+        {{end}}
+      </div></div>
+      <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="profile">Back</button><button class="btn btn-primary" type="button" data-go="done">` + iconArrow + `Continue</button></div>
+    </section>
 
-    <li class="ob-step">
-      <div class="ob-step-h">
-        <span class="ob-dot">4</span>
-        <h3>SAM.gov API key</h3>
-      </div>
-      <p class="ob-note">Kaimi reads opportunities from SAM.gov using a server-side API key. For security the key is a deployment secret (Secret Manager) — it is <b>not</b> entered here and Kaimi never stores or logs it. Your administrator configures <code>SAM_API_KEY</code> in the deployment environment.</p>
-    </li>
-
-    <li class="ob-step">
-      <div class="ob-step-h">
-        <span class="ob-dot {{if .HasProfile}}ob-dot--ok{{end}}">5</span>
-        <h3>You&#39;re set</h3>
-      </div>
-      {{if .HasProfile}}
-      <p class="ob-note">Your profile is configured. Kaimi runs the next hunt automatically; jump into the queue to triage opportunities.</p>
-      <div class="ob-actions"><a class="kbtn kbtn--select kbtn--lg" href="/">` + iconArrow + `Go to the dashboard</a></div>
-      {{else}}
-      <p class="ob-note">Save your company profile above to finish onboarding.</p>
-      {{end}}
-    </li>
-  </ol>
+    <!-- 5. Done -->
+    <section class="wz-step" data-step="done">
+      <h2>You're set.</h2>
+      <p class="sub">Kaimi runs your next hunt automatically and scores every opportunity against your profile. Jump in and triage your queue.</p>
+      <ul class="sum">
+        <li{{if not .LicenseKey}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>License linked</b></div></li>
+        <li{{if not .HasProfile}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>Company profile {{if .HasProfile}}saved{{else}}pending{{end}}</b> <span>— grounds hunting, scoring &amp; drafting</span></div></li>
+        <li{{if not .SAMKeySaved}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>SAM.gov {{if .SAMKeySaved}}connected{{else}}pending{{end}}</b> <span>— your own key &amp; quota</span></div></li>
+      </ul>
+      <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="connect">Back</button><a class="btn btn-primary" href="/">` + iconArrow + `Enter Kaimi</a></div>
+    </section>
+  </main>
 </div>
 
-<style>
-  .ob-banner { display:flex; align-items:center; gap:var(--s-2); padding:var(--s-3); border-radius:var(--r-sm); margin-bottom:var(--s-4); font:var(--t-small); }
-  .ob-banner svg { width:18px; height:18px; flex:0 0 auto; }
-  .ob-banner--ok { background:var(--st-ok-bg,#e7f7ee); color:var(--st-ok,#1a7f4b); }
-  .ob-banner--err { background:var(--st-failed-bg,#fde8e8); color:var(--st-failed,#b42318); }
-  .ob-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--s-4); }
-  .ob-step { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md,10px); padding:var(--s-4); }
-  .ob-step-h { display:flex; align-items:center; gap:var(--s-2); margin-bottom:var(--s-2); }
-  .ob-step-h h3 { margin:0; }
-  .ob-dot { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; background:var(--surface-2); color:var(--ink-3); font-weight:700; flex:0 0 auto; }
-  .ob-dot svg { width:16px; height:16px; }
-  .ob-dot--ok { background:var(--st-ok,#1a7f4b); color:#fff; }
-  .ob-note { color:var(--ink-3); font:var(--t-small); margin:var(--s-1) 0; }
-  .ob-form { display:flex; flex-direction:column; gap:var(--s-3); margin-top:var(--s-3); max-width:680px; }
-  .ob-form label { display:flex; flex-direction:column; gap:4px; font:var(--t-small); font-weight:600; }
-  .ob-form input, .ob-form textarea { font:var(--t-body); padding:var(--s-2); border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface-2); }
-  .ob-row { display:flex; gap:var(--s-3); }
-  .ob-row label { flex:1; }
-  .ob-fs { border:1px solid var(--border); border-radius:var(--r-sm); padding:var(--s-3); display:flex; flex-direction:column; gap:var(--s-2); }
-  .ob-fs legend { font:var(--t-small); font-weight:700; padding:0 6px; }
-  .ob-chk { flex-direction:row !important; align-items:center; gap:8px; font-weight:500 !important; }
-  .ob-actions { margin-top:var(--s-2); }
-  .ob-dest { display:flex; align-items:center; flex-wrap:wrap; gap:var(--s-2); margin:var(--s-2) 0; }
-  .ob-dest-label { font:var(--t-small); }
-  .ob-dest-label code { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); padding:1px 6px; }
-  .ob-dest-unset { color:var(--ink-3); }
-  .ob-dest-open { display:inline-flex; align-items:center; gap:4px; font:var(--t-small); font-weight:600; color:var(--primary,#0b5fff); text-decoration:none; }
-  .ob-dest-open svg { width:15px; height:15px; }
-  .ob-drive-form { margin-top:var(--s-2); }
-</style>
-{{end}}
-`
+<script>
+(function(){
+  var steps=["welcome","license","profile","connect","done"];
+  var initial="{{.Step}}";
+  function show(name){
+    var idx=steps.indexOf(name); if(idx<0){idx=0;name=steps[0];}
+    var secs=document.querySelectorAll(".wz-step");
+    for(var i=0;i<secs.length;i++){secs[i].classList.toggle("on",secs[i].getAttribute("data-step")===name);}
+    var dots=document.querySelectorAll(".wz-dots i");
+    for(var j=0;j<dots.length;j++){dots[j].classList.toggle("on",j<=idx);}
+    document.getElementById("wzCur").textContent=(idx+1);
+    try{history.replaceState(null,"","?step="+name);}catch(e){}
+    window.scrollTo(0,0);
+  }
+  document.addEventListener("click",function(ev){
+    var go=ev.target.closest&&ev.target.closest("[data-go]");
+    if(go){ev.preventDefault();show(go.getAttribute("data-go"));return;}
+    var back=ev.target.closest&&ev.target.closest("[data-back]");
+    if(back){ev.preventDefault();show(back.getAttribute("data-back"));}
+  });
+  show(initial);
+})();
+</script>
+</body>
+</html>`
 
 // handleOnboarding serves GET /onboarding. It pre-fills the company-profile form
 // from the saved profile (empty when none has been saved), shows the signed-in
@@ -419,6 +542,11 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 	data := h.newOnboardingData(r)
 	data.Saved = r.URL.Query().Get("saved") == "1"
 	data.DriveSaved = r.URL.Query().Get("drive_saved") == "1"
+	data.SAMKeySaved = r.URL.Query().Get("sam_saved") == "1"
+	// Resume at the requested step after a PRG redirect; ignore an unknown value.
+	if s := r.URL.Query().Get("step"); validStep(s) {
+		data.Step = s
+	}
 
 	// Pre-fill from the saved profile when one exists.
 	if p, err := h.profileStore.Load(); err == nil {
@@ -463,6 +591,8 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 		// Re-render the form with the submitted values and the error. Persist nothing.
 		data := h.newOnboardingData(r)
 		fillFormFromProfile(&data, p)
+		data.HasProfile = true // keep the License step marked done on re-render
+		data.Step = stepProfile
 		data.FormErr = err.Error()
 		w.WriteHeader(http.StatusBadRequest)
 		h.renderOnboarding(w, &data)
@@ -475,8 +605,8 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// PRG: redirect so a refresh does not re-POST the form.
-	http.Redirect(w, r, onboardingPath+"?saved=1", http.StatusSeeOther)
+	// PRG: redirect so a refresh does not re-POST the form; advance to the Connect step.
+	http.Redirect(w, r, onboardingPath+"?saved=1&step="+stepConnect, http.StatusSeeOther)
 }
 
 // handleOnboardingDriveTarget serves POST /onboarding/drive/target (WS-C5b): the
@@ -550,6 +680,48 @@ func (h *Handler) handleOnboardingDriveTarget(w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, onboardingPath+"?drive_saved=1", http.StatusSeeOther)
 }
 
+// handleOnboardingSAMKey serves POST /onboarding/samgov: the onboarding "Connect"
+// step's SAM.gov API key form. Like the profile and Drive writes it FAILS CLOSED on
+// auth + CSRF (authorizeMutation) and mutates nothing until the gate passes. The key
+// is handed to the injected samKeySaver (Secret Manager); a malformed key
+// (samsecret.ErrInvalidKey) re-renders the page with a 400 and persists nothing, while
+// a backend failure is a 500. On success it follows PRG, advancing the wizard to the
+// final step. The key is never logged.
+func (h *Handler) handleOnboardingSAMKey(w http.ResponseWriter, r *http.Request) {
+	if h.samKeySaver == nil {
+		http.Error(w, "SAM.gov key entry is not available in this deployment", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+
+	key := strings.TrimSpace(r.PostFormValue("sam_api_key"))
+	if err := h.samKeySaver(r.Context(), key); err != nil {
+		if errors.Is(err, samsecret.ErrInvalidKey) {
+			// Malformed key: re-render the wizard at the Connect step with the reason.
+			// Never echo the key back into the page.
+			data := h.newOnboardingData(r)
+			data.Step = stepConnect
+			data.FormErr = "That doesn't look like a SAM.gov API key. Paste the 40-character key from your SAM.gov account."
+			w.WriteHeader(http.StatusBadRequest)
+			h.renderOnboarding(w, &data)
+			return
+		}
+		// Backend failure (Secret Manager). Keep detail server-side; never log the key.
+		log.Printf("dashboard: onboarding SAM key save failed: %v", err)
+		http.Error(w, "failed to save the SAM.gov key", http.StatusInternalServerError)
+		return
+	}
+
+	// PRG: advance to the final step with a success flag.
+	http.Redirect(w, r, onboardingPath+"?sam_saved=1&step="+stepDone, http.StatusSeeOther)
+}
+
 // authorizeMutation is the fail-closed auth + CSRF gate every state-mutating
 // onboarding POST must pass before it touches the store. It writes the rejection
 // response itself and returns false on denial; callers must NOT mutate when it
@@ -604,7 +776,10 @@ func (h *Handler) newOnboardingData(r *http.Request) OnboardingData {
 		data.SignedIn = true
 		data.Email = ident.Email
 		data.CSRFToken = ident.CSRFToken
+		data.LicenseKey = ident.LicenseKey
 	}
+	data.SAMKeyConfigured = h.samKeySaver != nil
+	data.Step = stepWelcome
 	if h.driveStatus != nil {
 		data.Drive = h.driveStatus()
 	}
@@ -784,9 +959,11 @@ func (h *Handler) firstRunRedirect() bool {
 	return errors.Is(err, profile.ErrProfileNotFound)
 }
 
-// onboardingTemplate compiles the onboarding page over the shared shell. It is a
-// package function so setupTemplates can build it alongside the other page templates.
+// onboardingTemplate compiles the standalone onboarding WIZARD page. Unlike the other
+// dashboard pages it does NOT wrap the shared shell (sidebar/chrome): the wizard is a
+// full-screen, multi-step setup experience, so onboardingContentTmpl is a complete HTML
+// document parsed on its own. It is a package function so setupTemplates can build it
+// alongside the other page templates.
 func onboardingTemplate(funcMap template.FuncMap) *template.Template {
-	return template.Must(template.Must(
-		template.New("onboarding").Funcs(funcMap).Parse(shellTmpl)).Parse(onboardingContentTmpl))
+	return template.Must(template.New("onboarding").Funcs(funcMap).Parse(onboardingContentTmpl))
 }

@@ -54,6 +54,11 @@ type Handler struct {
 	// invented when Drive connect is not wired). See WithDriveTargetSaver.
 	driveTargetSaver DriveTargetSaver
 
+	// samKeySaver persists the tenant's SAM.gov API key from the onboarding "Connect"
+	// step to Secret Manager (see SAMKeySaver). nil = the key field is hidden and the
+	// page shows the deployment-secret note. cmd/api wires it via WithSAMKeySaver.
+	samKeySaver SAMKeySaver
+
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
 	// cmd/api uses to gate the whole API). It defaults to false so production fails
@@ -139,6 +144,10 @@ func (h *Handler) setupRoutes() {
 	// editing files. POST-only and CSRF-gated like the profile write; it persists via
 	// the SAME drivetoken target store the JSON PUT endpoint uses (no parallel store).
 	h.mux.HandleFunc("/onboarding/drive/target", postOnly(h.handleOnboardingDriveTarget))
+	// SAM.gov API key entry (onboarding "Connect" step). POST-only and CSRF-gated like
+	// the profile write; it persists to Secret Manager via the injected SAMKeySaver so
+	// each tenant supplies their own key (per-tenant SAM quota isolation).
+	h.mux.HandleFunc("/onboarding/samgov", postOnly(h.handleOnboardingSAMKey))
 	// #246 B3: the working draft is downloadable as Markdown from the workspace.
 	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))

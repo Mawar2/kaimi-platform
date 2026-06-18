@@ -7,13 +7,11 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/oauth2"
 
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
-	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -70,38 +68,23 @@ func newOnboardingHandler(t *testing.T, opts ...dashboard.Option) *dashboard.Han
 	return dashboard.NewHandler(newEmptyService(t), opts...)
 }
 
-// TestOnboardingShowsPipelineCounts proves the onboarding page's sidebar pipeline
-// bar reflects the real queue (it previously showed all zeros because the onboarding
-// handler never listed the store, unlike every other screen).
-func TestOnboardingShowsPipelineCounts(t *testing.T) {
-	s, err := store.NewJSONStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	now := time.Now()
-	// Three scored opportunities → QueueCount 3 (Hunted/Scored), all others 0.
-	for i, id := range []string{"opp-a", "opp-b", "opp-c"} {
-		if err := s.Save(context.Background(), &opportunity.Opportunity{
-			ID:        id,
-			Title:     "Solicitation " + id,
-			Score:     0.5 + float64(i)*0.1,
-			ScoredAt:  &now,
-			UpdatedAt: now,
-		}); err != nil {
-			t.Fatalf("seed %s: %v", id, err)
-		}
-	}
-
-	h := dashboard.NewHandler(dashboard.NewService(s), dashboard.WithProfileStore(&memProfileStore{}))
+// TestOnboardingRendersWizard proves GET /onboarding renders the full-screen setup
+// WIZARD (Welcome → … → Done) as a standalone page. The wizard intentionally drops the
+// dashboard sidebar/chrome — it is a focused, multi-step setup flow — so this asserts
+// the wizard scaffolding (welcome heading + step markers) rather than sidebar counts.
+func TestOnboardingRendersWizard(t *testing.T) {
+	h := dashboard.NewHandler(newEmptyService(t), dashboard.WithProfileStore(&memProfileStore{}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	// The Opportunities nav count must show 3 (not 0).
-	if !strings.Contains(rec.Body.String(), `<span class="count">3</span>`) {
-		t.Errorf("onboarding sidebar did not show QueueCount=3; body=%s", rec.Body.String())
+	body := rec.Body.String()
+	for _, want := range []string{"Welcome to Kaimi", `data-step="license"`, `data-step="profile"`, `data-step="connect"`, `data-step="done"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("onboarding wizard missing %q", want)
+		}
 	}
 }
 
@@ -782,17 +765,33 @@ func TestOnboardingDriveTargetRoundTrip(t *testing.T) {
 	}
 }
 
-// TestOnboardingSAMKeyStatusOnly proves the SAM.gov section is status/guidance only:
-// it explains the key is a deployment secret and never offers an input for it.
-func TestOnboardingSAMKeyStatusOnly(t *testing.T) {
+// TestOnboardingSAMKeyEntry proves the Connect step adapts to whether a SAM-key write
+// path is wired: with NO saver it shows the "managed by your administrator" note and no
+// input; with a saver wired it offers the key field that posts to /onboarding/samgov.
+func TestOnboardingSAMKeyEntry(t *testing.T) {
+	// No saver → admin note, no input.
 	h := newOnboardingHandler(t, dashboard.WithProfileStore(&memProfileStore{}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
 	body := rec.Body.String()
-	if !strings.Contains(body, "SAM_API_KEY") {
-		t.Errorf("SAM.gov section missing the deployment-secret guidance")
+	if !strings.Contains(body, "Managed by your administrator") {
+		t.Errorf("SAM.gov section missing the no-saver administrator note")
 	}
 	if strings.Contains(body, `name="sam_api_key"`) {
-		t.Errorf("SAM.gov section must NOT accept the raw key via a form field")
+		t.Errorf("SAM.gov key field must be hidden when no saver is wired")
+	}
+
+	// Saver wired → key field present, posting to the samgov endpoint.
+	h2 := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		dashboard.WithSAMKeySaver(func(context.Context, string) error { return nil }))
+	rec2 := httptest.NewRecorder()
+	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	body2 := rec2.Body.String()
+	if !strings.Contains(body2, `name="sam_api_key"`) {
+		t.Errorf("SAM.gov key field missing when a saver is wired")
+	}
+	if !strings.Contains(body2, `action="/onboarding/samgov"`) {
+		t.Errorf("SAM.gov form must post to /onboarding/samgov")
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/productkey"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
+	"github.com/Mawar2/Kaimi/internal/samsecret"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
 
@@ -266,9 +267,24 @@ func run() error {
 		// token is bound to the session's key id over the same HMAC key.
 		dashboardOpts = append(dashboardOpts, dashboard.WithIdentity(
 			func(ctx context.Context) (dashboard.Identity, bool) {
-				email, csrf, ok := productKeyGate.DashboardIdentity(ctx)
-				return dashboard.Identity{Email: email, CSRFToken: csrf}, ok
+				email, csrf, license, ok := productKeyGate.DashboardIdentity(ctx)
+				return dashboard.Identity{Email: email, CSRFToken: csrf, LicenseKey: license}, ok
 			}))
+	}
+
+	// SAM.gov key entry on the onboarding "Connect" step (per-tenant key → own quota).
+	// When SAM_SECRET_NAME is set, wire a Secret Manager writer so a tester's key is
+	// stored as a new version of the deployment's SAM secret (which the pipeline reads).
+	// Without it, onboarding shows the "managed by your administrator" note. The runtime
+	// SA needs roles/secretmanager.secretVersionAdder on that secret.
+	if samSecretName := os.Getenv("SAM_SECRET_NAME"); samSecretName != "" && cfg.GCP.ProjectID != "" {
+		samWriter, serr := samsecret.NewSecretManagerWriter(context.Background(), cfg.GCP.ProjectID, samSecretName)
+		if serr != nil {
+			return fmt.Errorf("build SAM key writer: %w", serr)
+		}
+		defer func() { _ = samWriter.Close() }()
+		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeySaver(samWriter.Save))
+		log.Printf("Onboarding SAM.gov key entry enabled (writes to Secret Manager secret %q)", samSecretName)
 	}
 	// Show the WS-C2 Drive connection state on the onboarding page when customer-Drive
 	// connect is configured. Read straight from the drivetoken stores (no httpapi/
