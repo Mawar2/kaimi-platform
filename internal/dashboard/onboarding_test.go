@@ -264,13 +264,13 @@ func TestOnboardingDriveStatus(t *testing.T) {
 		{
 			name:     "not connected shows connect button",
 			status:   dashboard.DriveStatus{Configured: true, Connected: false},
-			contains: "Connect Drive",
+			contains: "Connect Google Drive",
 		},
 		{
 			name:     "connected shows target",
 			status:   dashboard.DriveStatus{Configured: true, Connected: true, Target: "drive-xyz"},
 			contains: "drive-xyz",
-			excludes: "Connect Drive",
+			excludes: "Connect Google Drive",
 		},
 		{
 			name:     "not configured shows administrator note",
