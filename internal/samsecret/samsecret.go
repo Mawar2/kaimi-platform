@@ -41,9 +41,11 @@ const (
 )
 
 // ValidateKey reports whether key is a plausible SAM.gov API key: trimmed, within the
-// length band, and strictly alphanumeric. It does NOT call SAM.gov (that would spend
-// the very quota the key unlocks); a wrong-but-well-formed key surfaces on the first
-// hunt. It returns ErrInvalidKey (wrapped, with a reason) on failure.
+// length band, and limited to the characters real keys use — letters, digits, and the
+// separators '-', '_', '.'. (api.data.gov / SAM.gov keys are 40 characters and DO
+// contain hyphens, so a pure-alphanumeric check wrongly rejects a valid key.) It does
+// NOT call SAM.gov (that would spend the very quota the key unlocks); a wrong-but-well-
+// formed key surfaces on the first hunt. It returns ErrInvalidKey (wrapped) on failure.
 func ValidateKey(key string) error {
 	k := strings.TrimSpace(key)
 	if k == "" {
@@ -53,9 +55,10 @@ func ValidateKey(key string) error {
 		return fmt.Errorf("%w: expected %d–%d characters, got %d", ErrInvalidKey, minKeyLen, maxKeyLen, len(k))
 	}
 	for _, r := range k {
-		isAlnum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
-		if !isAlnum {
-			return fmt.Errorf("%w: the key must be letters and digits only", ErrInvalidKey)
+		allowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.'
+		if !allowed {
+			return fmt.Errorf("%w: the key may contain only letters, digits, hyphen, underscore and dot", ErrInvalidKey)
 		}
 	}
 	return nil

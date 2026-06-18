@@ -18,12 +18,14 @@ func TestValidateKey(t *testing.T) {
 	}{
 		{"valid 40-char", valid, true},
 		{"valid trimmed", "  " + valid + "  ", true},
+		{"valid with hyphens (real SAM format)", valid[:8] + "-" + valid[9:20] + "-" + valid[21:], true},
+		{"valid with underscore/dot", valid[:10] + "_" + valid[11:30] + "." + valid[31:], true},
 		{"empty", "", false},
 		{"whitespace only", "    ", false},
 		{"too short", "abc123", false},
 		{"too long", strings.Repeat("a", maxKeyLen+1), false},
 		{"contains space", valid[:20] + " " + valid[21:], false},
-		{"contains dash", valid[:20] + "-" + valid[21:], false},
+		{"contains slash", valid[:20] + "/" + valid[21:], false},
 		{"looks like a url", "https://api.sam.gov/key/abcdefghijklmno", false},
 	}
 	for _, c := range cases {
