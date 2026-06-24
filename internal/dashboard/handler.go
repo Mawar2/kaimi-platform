@@ -420,6 +420,20 @@ const detailContentTmpl = `{{define "content"}}
   </div>
   {{end}}
 
+  {{if .HasCapMatch}}
+  <div class="dr-sec-h">Why this fits your capabilities</div>
+  {{if .CapMatch.Coverage}}
+  <p class="cap-lead">Matched against your capability map:</p>
+  <div class="cap-chips">
+    {{range .CapMatch.Competencies}}<span class="cap-chip cap-chip--strong">{{.}}</span>{{end}}
+    {{range .CapMatch.Domains}}<span class="cap-chip cap-chip--dom">{{.}}</span>{{end}}
+    {{range .CapMatch.Keywords}}<span class="cap-chip">{{.}}</span>{{end}}
+  </div>
+  {{else}}
+  <p class="cap-lead">No direct capability matches in the listing summary. Kaimi will assess fit more deeply against the full solicitation text.</p>
+  {{end}}
+  {{end}}
+
   <div class="dr-sec-h">Identification</div>
   <table class="kv">
     <tr><td>ID</td><td>{{.Opp.ID}}</td></tr>
@@ -485,6 +499,11 @@ const detailContentTmpl = `{{define "content"}}
   .kv td:first-child { color: var(--ink-3); width: 200px; background: var(--surface-2); }
   .detail-pre { white-space: pre-wrap; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--s-3); font: var(--t-small); margin: 0; }
   .deadline-soon { background: var(--st-failed-bg); color: var(--st-failed); font-weight: bold; }
+  .cap-lead { font: var(--t-small); color: var(--ink-3); margin: 0 0 var(--s-2); }
+  .cap-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+  .cap-chip { font: var(--t-small); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-pill, 999px); padding: 3px 10px; color: var(--ink-2); }
+  .cap-chip--strong { background: var(--st-ok-bg, #e7f7ee); color: var(--st-ok, #1a7f4b); border-color: transparent; font-weight: 600; }
+  .cap-chip--dom { background: var(--st-progress-bg, #e7eeff); color: var(--st-progress, #2563eb); border-color: transparent; }
 </style>
 {{end}}
 `
@@ -864,6 +883,12 @@ type DetailData struct {
 	DeadlineDays                                                          int
 	DeadlineSoon                                                          bool
 	PostedDateStr, CreatedAtStr, UpdatedAtStr, ScoredAtStr, SelectedAtStr string
+
+	// HasCapMatch is true when a capability map is wired and was read; CapMatch holds
+	// which of the tenant's competencies/keywords/domains appear in this solicitation —
+	// the "why this fits your capabilities" rationale (additive; does not change the score).
+	HasCapMatch bool
+	CapMatch    capabilitymap.Match
 }
 
 func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
@@ -915,6 +940,22 @@ func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if !opp.ResponseDeadline.IsZero() {
 		data.DeadlineStr = opp.ResponseDeadline.Format("2006-01-02")
 		data.DeadlineLabel, data.DeadlineDays = deadlineDisplay(opp.ResponseDeadline, now)
+	}
+
+	// Capability-aware qualification (additive, does not change the score): match the
+	// tenant's capability map against this solicitation's text and show the rationale.
+	// Best-effort — a missing/unbuilt map simply omits the section.
+	if h.capMap != nil {
+		if cm, mErr := h.capMap.Load(); mErr == nil && cm != nil {
+			text := opp.Title + " " + opp.Agency + " " + opp.NAICSDescription
+			// opp.Description is often a SAM noticedesc URL (not text); only include it
+			// when it's real prose (resolving the URL to text is the scoring phase).
+			if !strings.HasPrefix(opp.Description, "http") {
+				text += " " + opp.Description
+			}
+			data.CapMatch = cm.Match(text)
+			data.HasCapMatch = true
+		}
 	}
 
 	// Shell counts for the sidebar — same grouping as every other screen.
