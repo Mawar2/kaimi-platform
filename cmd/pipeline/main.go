@@ -97,7 +97,7 @@ func run() error {
 		return fmt.Errorf("failed to create store: %w", err)
 	}
 
-	samClient, scoreEngine, err := buildBackends(ctx, &cfg)
+	samClient, scoreEngine, descResolver, err := buildBackends(ctx, &cfg)
 	if err != nil {
 		return err
 	}
@@ -110,6 +110,7 @@ func run() error {
 		Eligibility: eligibilityProfile,
 		NAICSCodes:  cfg.Profile.NAICSCodes,
 		TenantID:    cfg.Tenant.ID,
+		Resolver:    descResolver,
 	})
 	if err != nil {
 		return fmt.Errorf("zone-1 run failed: %w", err)
@@ -119,6 +120,7 @@ func run() error {
 	fmt.Printf("Fetched:   %d\n", report.Fetched)
 	fmt.Printf("Eligible:  %d\n", report.Eligible)
 	fmt.Printf("Dropped:   %d\n", report.Dropped)
+	fmt.Printf("Resolved:  %d\n", report.Resolved)
 	fmt.Printf("Scored:    %d\n", report.Scored)
 	fmt.Printf("Failed:    %d\n", report.Failed)
 	if report.Failed > 0 {
@@ -131,28 +133,34 @@ func run() error {
 	return nil
 }
 
-// buildBackends selects the SAM.gov client and Scorer for the configured mode.
-// cached → fixtures + offline DeterministicScorer; live → SAM.gov + GeminiScorer.
-func buildBackends(ctx context.Context, cfg *config.Config) (samgov.Client, scorer.Scorer, error) {
+// buildBackends selects the SAM.gov client, Scorer, and (live only) description Resolver
+// for the configured mode. cached → fixtures + offline DeterministicScorer + no resolver;
+// live → SAM.gov + GeminiScorer + a SAM description resolver so the Scorer scores the real
+// solicitation text (resolved for the eligible set) rather than the noticedesc URL.
+func buildBackends(ctx context.Context, cfg *config.Config) (samgov.Client, scorer.Scorer, pipeline.DescriptionResolver, error) {
 	switch cfg.Mode {
 	case "cached":
 		samClient, err := samgov.NewClient(samgov.Config{UseCached: true})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create cached SAM.gov client: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create cached SAM.gov client: %w", err)
 		}
-		return samClient, scorer.NewDeterministicScorer(), nil
+		return samClient, scorer.NewDeterministicScorer(), nil, nil
 	case "live":
 		samClient, err := samgov.NewClient(samgov.Config{APIKey: cfg.SAM.APIKey, UseCached: false})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create live SAM.gov client: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create live SAM.gov client: %w", err)
 		}
 		geminiScorer, err := scorer.NewGeminiScorer(ctx, cfg.GCP.ProjectID, cfg.GCP.Region, cfg.GCP.ScorerModel)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create Gemini scorer: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create Gemini scorer: %w", err)
 		}
-		return samClient, geminiScorer, nil
+		resolver, err := samgov.NewDescriptionResolver(cfg.SAM.APIKey)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create description resolver: %w", err)
+		}
+		return samClient, geminiScorer, resolver, nil
 	default:
-		return nil, nil, fmt.Errorf("unknown mode %q", cfg.Mode)
+		return nil, nil, nil, fmt.Errorf("unknown mode %q", cfg.Mode)
 	}
 }
 

@@ -12,12 +12,20 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
 	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
+
+// DescriptionResolver fetches an opportunity's full description text from the SAM
+// noticedesc URL its Description field carries. samgov.DescriptionResolver satisfies it;
+// the interface keeps RunZone1 testable without live SAM.
+type DescriptionResolver interface {
+	Resolve(ctx context.Context, descURL string) (string, error)
+}
 
 // Zone1Deps are the collaborators RunZone1 needs.
 //
@@ -45,6 +53,13 @@ type Zone1Deps struct {
 	// full code list (AllNAICSCodes) when empty.
 	NAICSCodes []string
 
+	// Resolver, when set, fetches each ELIGIBLE opportunity's full description text from
+	// its SAM noticedesc URL before scoring, so the Scorer scores real prose rather than
+	// the URL the search API returns in Description. Optional; nil skips resolution (the
+	// Scorer falls back to the raw Description). Resolution is bounded to the eligible set
+	// — never the full fetch — to respect the SAM daily quota, and is non-fatal per opp.
+	Resolver DescriptionResolver
+
 	// TenantID is the owning deployment/org stamped onto every opportunity this
 	// run persists, making each record self-describing. Empty leaves the field
 	// unset (omitted from JSON), matching legacy records. Sourced from the
@@ -59,6 +74,7 @@ type Zone1Report struct {
 	Dropped  int      // opportunities dropped by the eligibility gate
 	Scored   int      // eligible opportunities scored and saved successfully
 	Failed   int      // eligible opportunities that failed to score or save
+	Resolved int      // eligible opportunities whose description text was resolved
 	SavedIDs []string // IDs of opportunities persisted to the Store
 	Errors   []string // per-opportunity failures, formatted "<id>: <error>"
 }
@@ -125,6 +141,17 @@ func RunZone1(ctx context.Context, deps *Zone1Deps) (*Zone1Report, error) {
 		// persisted, so every saved opportunity is self-describing. Empty
 		// TenantID leaves the field unset (omitempty), matching legacy records.
 		opp.TenantID = deps.TenantID
+
+		// Resolve the full description text (eligible set only — SAM-quota-bounded) so the
+		// Scorer scores real prose, not the noticedesc URL the search API returns. Skip if
+		// already resolved or if Description is not a URL. Non-fatal: on failure the Scorer
+		// falls back to the raw Description via EffectiveDescription.
+		if deps.Resolver != nil && opp.ResolvedDescription == "" && strings.HasPrefix(opp.Description, "http") {
+			if text, rerr := deps.Resolver.Resolve(ctx, opp.Description); rerr == nil && text != "" {
+				opp.ResolvedDescription = text
+				report.Resolved++
+			}
+		}
 
 		if err := scorer.ScoreAndSave(ctx, deps.Scorer, deps.Store, opp, deps.Profile); err != nil {
 			report.Failed++

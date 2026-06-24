@@ -79,6 +79,10 @@ type Handler struct {
 	// the view reports the feature is unavailable. cmd/api wires it via WithCapabilityMap.
 	capMap capabilitymap.Store
 
+	// asyncRun dispatches background work (the capability-map rebuild) off the request
+	// path so onboarding saves return immediately. Defaults to `go fn()`; never nil.
+	asyncRun func(fn func())
+
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
 	// cmd/api uses to gate the whole API). It defaults to false so production fails
@@ -133,6 +137,9 @@ func NewHandler(svc *Service, opts ...Option) *Handler {
 		svc: svc,
 		mux: http.NewServeMux(),
 		Now: time.Now,
+		// Default dispatcher runs background work in a goroutine so the capability-map
+		// rebuild doesn't block onboarding saves (the Gemini build takes ~15s).
+		asyncRun: func(fn func()) { go fn() },
 	}
 	for _, opt := range opts {
 		opt(h)

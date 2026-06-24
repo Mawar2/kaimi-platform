@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
@@ -148,15 +149,32 @@ func WithCapabilityMapRebuild(fn func(ctx context.Context) error) Option {
 	return func(h *Handler) { h.rebuildMap = fn }
 }
 
-// triggerMapRebuild runs the capability-map rebuild hook best-effort: it never blocks or
-// fails the onboarding write that triggered it. A nil hook is a no-op.
-func (h *Handler) triggerMapRebuild(ctx context.Context) {
+// mapRebuildTimeout bounds a background capability-map rebuild (the Gemini build is the
+// slow part). Generous headroom, not a tight estimate.
+const mapRebuildTimeout = 3 * time.Minute
+
+// triggerMapRebuild runs the capability-map rebuild hook best-effort and ASYNCHRONOUSLY:
+// it dispatches the rebuild off the request path (via h.asyncRun) so the onboarding save
+// returns immediately rather than blocking ~15s on the Gemini build. The background work
+// uses a fresh, bounded context — NOT the request's, which is canceled once the handler
+// returns. A nil hook is a no-op; failures are logged, never surfaced to the user.
+func (h *Handler) triggerMapRebuild() {
 	if h.rebuildMap == nil {
 		return
 	}
-	if err := h.rebuildMap(ctx); err != nil {
-		log.Printf("dashboard: capability-map rebuild failed (non-fatal): %v", err)
-	}
+	h.asyncRun(func() {
+		// Recover: a panic in the background rebuild must never crash the API process.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("dashboard: capability-map rebuild panicked (recovered): %v", r)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), mapRebuildTimeout)
+		defer cancel()
+		if err := h.rebuildMap(ctx); err != nil {
+			log.Printf("dashboard: capability-map rebuild failed (non-fatal): %v", err)
+		}
+	})
 }
 
 // driveTargetRoot is the sentinel target value meaning "create Docs at the root of
@@ -677,7 +695,7 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 	}
 
 	// The profile changed — refresh the capability map (best-effort; never fails the save).
-	h.triggerMapRebuild(r.Context())
+	h.triggerMapRebuild()
 
 	// PRG: redirect so a refresh does not re-POST the form; advance to the Connect step.
 	http.Redirect(w, r, onboardingPath+"?saved=1&step="+stepConnect, http.StatusSeeOther)
@@ -860,7 +878,7 @@ func (h *Handler) handleOnboardingDocUpload(w http.ResponseWriter, r *http.Reque
 
 	// New documents changed the business context — refresh the capability map
 	// (best-effort; never fails the upload).
-	h.triggerMapRebuild(r.Context())
+	h.triggerMapRebuild()
 
 	http.Redirect(w, r, onboardingPath+"?docs_saved=1&step="+stepConnect, http.StatusSeeOther)
 }
