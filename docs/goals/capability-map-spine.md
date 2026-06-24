@@ -1,0 +1,69 @@
+# GOAL: Capability Map spine — deep per-tenant business understanding
+
+**Owner:** Malik + agent · **Created:** 2026-06-18 · **Repo:** Mawar2/kaimi-platform
+**Builds on:** the onboarding wizard + product-key pilot (feat/onboarding-wizard).
+
+## Objective
+Make Kaimi genuinely understand each tester's business — from onboarding **and** the
+context documents they upload (and, later, a Drive folder they maintain) — and use that
+understanding to **qualify and score** opportunities far better than today's shallow
+keyword-substring matching. The understanding lives in one shared artifact, the
+**Capability Map**, that every agent (qualification, scorer, Zone-2 drafting) references.
+
+## Current state (verified 2026-06-18)
+- **Scoring** (`internal/scorer`): Gemini 2.5 Pro + pre-computed signals, but the
+  capability signals are **substring matches** of competency *keywords* and past-perf
+  *sentences* against the opportunity text. Shallow. No semantic understanding.
+- **Gate** (`internal/pipeline/zone1.go` + `internal/profile.IsEligible`): NAICS fetch
+  filter + a **set-aside eligibility table**. NOT capability-based. NOT hardcoded
+  BlueMeta in code — config-driven; an onboarded tenant's profile already comes from
+  onboarding via `ResolveProfileWithStore` (baked config is fallback only).
+- **Drive**: write-only (`drive.file`) — **cannot read** the tester's existing Drive.
+- **Ingest** (`internal/ingest`): SAM solicitation attachments only, Zone-2 only.
+- **No capability map / shared-context object exists.** Agents get the Opportunity +
+  a thin `scorer.CapabilityProfile` (name, tags, past-perf).
+- **Opportunity detail**: SAM attachment URLs captured but never shown; `ContractType`,
+  `NAICSDescription`, `EstimatedValue` shown but never populated.
+
+## Locked decisions (Malik, 2026-06-18)
+- **Context intake = upload docs in onboarding** (capability statement, CPARS, past
+  proposals), **plus guidance** telling testers they can build a Drive folder of context
+  for their BD team (full Drive-read via `drive.readonly` is a later follow-on — bigger
+  scope + Google verification).
+- **Build the capability-map spine first** (context intake → capability map → capability-
+  aware qualification + scoring), before the quick wins.
+
+## Phases
+### C1 — Capability Map core (THIS slice)
+`internal/capabilitymap`: the `CapabilityMap` schema (summary, core competencies with
+evidence, differentiators, domains, past performance, certifications, NAICS, expanded
+keywords, source provenance), a per-tenant JSON `Store`, a `Builder` interface, an
+offline deterministic builder (profile → map, no LLM), and a Gemini builder (profile +
+context-doc texts → map, mirroring `internal/scorer`'s Vertex client). TDD.
+
+### A/B — Context intake (upload + extract)
+Onboarding doc upload (multipart) → store → extract text (reuse the `internal/ingest`
+extractor: Document AI + DOCX/stdlib). Onboarding copy guiding testers to also maintain a
+Drive context folder. Trigger a map (re)build after onboarding/upload.
+
+### D — Capability-aware qualification
+Use the Capability Map to qualify/score: match solicitation requirements ↔ capabilities
+semantically, beyond NAICS/set-aside.
+
+### E — Scoring upgrade
+Replace substring signals with map-driven matching; re-evaluate rubric/thresholds; A/B
+against the current scorer.
+
+### Later (independent, fast)
+- **F** — opportunity-detail completeness (surface attachments; NAICS-description lookup;
+  pull ContractType/EstimatedValue from SAM detail endpoint).
+- **G** — remove expired (past-deadline) opportunities from the board.
+- **Drive-read** — `drive.readonly` + picker to ingest a referenced Drive folder.
+
+## Discipline
+TDD; go gate (build/test/lint/fmt); independent review; deploy to the pilot + browser-
+validate; never break the deployed gate/onboarding/drafting happy paths. Capability data
+is per-tenant — no cross-tenant leakage.
+
+## Progress log
+- 2026-06-18: Goal created; decisions locked. Starting C1 (capability map core).
