@@ -72,3 +72,4 @@ is per-tenant — no cross-tenant leakage.
 - 2026-06-18: Goal created; decisions locked. Starting C1 (capability map core).
 - 2026-06-18: **C1 done** — `internal/capabilitymap` (schema + Deterministic + Gemini builders + JSON store; TDD). Committed on `feat/onboarding-wizard`.
 - 2026-06-18: **Quick wins (F + G) done + deployed** (pilot rev 00006-v69): expired opps dropped from the board (`ExcludeExpired`; 131→59 live), SAM `description` URL rendered as a link + attachments surfaced. Next: loop the spine (A/B → wire → D/E).
+- 2026-06-18: **A/B backend done** — `internal/contextdoc` (per-tenant uploaded-doc store + text extraction reusing `ingest.Extractor`; path-safe; TDD; Gemma review clean). Not yet user-visible. Loop next: onboarding upload endpoint + UI, then WIRE the map (re)build.
