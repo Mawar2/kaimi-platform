@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/capabilitymap"
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
@@ -299,6 +300,43 @@ func run() error {
 		return fmt.Errorf("failed to initialize context-doc store: %w", err)
 	}
 	dashboardOpts = append(dashboardOpts, dashboard.WithContextDocs(ctxDocStore))
+
+	// Capability map: a deep, per-tenant business understanding (re)built from the saved
+	// profile + uploaded context docs after onboarding, persisted alongside the queue. The
+	// Gemini builder synthesizes it when a GCP project is configured; otherwise the
+	// deterministic (profile-only) builder is the dependable fallback. The dashboard calls
+	// the rebuild hook best-effort after a profile save or doc upload.
+	capMapStore, err := capabilitymap.NewJSONStore(*storePath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize capability map store: %w", err)
+	}
+	var mapBuilder capabilitymap.Builder = capabilitymap.NewDeterministicBuilder()
+	if cfg.GCP.ProjectID != "" {
+		if gb, gerr := capabilitymap.NewGeminiBuilder(context.Background(), cfg.GCP.ProjectID, cfg.GCP.Region, cfg.GCP.ScorerModel); gerr != nil {
+			log.Printf("Capability map: Gemini builder unavailable (%v); using the deterministic builder", gerr)
+		} else {
+			mapBuilder = gb
+		}
+	}
+	dashboardOpts = append(dashboardOpts, dashboard.WithCapabilityMapRebuild(func(ctx context.Context) error {
+		p, perr := profileStore.Load()
+		if perr != nil {
+			return fmt.Errorf("load profile for capability map: %w", perr)
+		}
+		var docs []capabilitymap.ContextDoc
+		if cds, derr := ctxDocStore.List(); derr == nil {
+			for _, d := range cds {
+				if d.Text != "" {
+					docs = append(docs, capabilitymap.ContextDoc{Name: d.Name, Text: d.Text})
+				}
+			}
+		}
+		m, berr := mapBuilder.Build(ctx, p, docs)
+		if berr != nil {
+			return berr
+		}
+		return capMapStore.Save(m)
+	}))
 	// Show the WS-C2 Drive connection state on the onboarding page when customer-Drive
 	// connect is configured. Read straight from the drivetoken stores (no httpapi/
 	// dashboard cycle); when Drive connect is disabled the page shows the

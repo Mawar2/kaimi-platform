@@ -140,6 +140,25 @@ func WithContextDocs(store contextdoc.Store) Option {
 	return func(h *Handler) { h.contextDocs = store }
 }
 
+// WithCapabilityMapRebuild wires the hook the onboarding profile-save and doc-upload
+// handlers call (best-effort) to (re)build the tenant's capability map from the saved
+// profile + uploaded documents. cmd/api supplies a closure over the capabilitymap
+// builder + store; a build failure is logged, never surfaced to the user.
+func WithCapabilityMapRebuild(fn func(ctx context.Context) error) Option {
+	return func(h *Handler) { h.rebuildMap = fn }
+}
+
+// triggerMapRebuild runs the capability-map rebuild hook best-effort: it never blocks or
+// fails the onboarding write that triggered it. A nil hook is a no-op.
+func (h *Handler) triggerMapRebuild(ctx context.Context) {
+	if h.rebuildMap == nil {
+		return
+	}
+	if err := h.rebuildMap(ctx); err != nil {
+		log.Printf("dashboard: capability-map rebuild failed (non-fatal): %v", err)
+	}
+}
+
 // driveTargetRoot is the sentinel target value meaning "create Docs at the root of
 // My Drive" rather than inside a specific folder. It is stored verbatim as the
 // drivetoken Target.DriveID and flows straight through to
@@ -656,6 +675,9 @@ func (h *Handler) handleOnboardingProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The profile changed — refresh the capability map (best-effort; never fails the save).
+	h.triggerMapRebuild(r.Context())
+
 	// PRG: redirect so a refresh does not re-POST the form; advance to the Connect step.
 	http.Redirect(w, r, onboardingPath+"?saved=1&step="+stepConnect, http.StatusSeeOther)
 }
@@ -834,6 +856,10 @@ func (h *Handler) handleOnboardingDocUpload(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+
+	// New documents changed the business context — refresh the capability map
+	// (best-effort; never fails the upload).
+	h.triggerMapRebuild(r.Context())
 
 	http.Redirect(w, r, onboardingPath+"?docs_saved=1&step="+stepConnect, http.StatusSeeOther)
 }

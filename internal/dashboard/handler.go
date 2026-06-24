@@ -66,6 +66,13 @@ type Handler struct {
 	// it via WithContextDocs.
 	contextDocs contextdoc.Store
 
+	// rebuildMap (re)builds the tenant's capability map from the saved profile + uploaded
+	// docs. The onboarding profile-save and doc-upload handlers call it best-effort after
+	// a successful write — a build failure must never fail the save/upload. nil = no map
+	// is built (the capability-map view shows "not built yet"). cmd/api wires it via
+	// WithCapabilityMapRebuild.
+	rebuildMap func(ctx context.Context) error
+
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
 	// cmd/api uses to gate the whole API). It defaults to false so production fails

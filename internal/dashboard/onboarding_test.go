@@ -78,6 +78,55 @@ func TestOnboardingDocUpload(t *testing.T) {
 	}
 }
 
+// TestOnboardingTriggersMapRebuild: a successful profile save and a successful doc upload
+// each fire the capability-map rebuild hook (best-effort).
+func TestOnboardingTriggersMapRebuild(t *testing.T) {
+	const token = "rebuild-csrf"
+
+	// Profile save fires the hook.
+	var profileCalls int
+	pstore := &memProfileStore{}
+	hp := newOnboardingHandler(t,
+		dashboard.WithProfileStore(pstore),
+		identityOpt("u@example.com", token),
+		dashboard.WithCapabilityMapRebuild(func(context.Context) error { profileCalls++; return nil }))
+	form := url.Values{"company": {"Acme"}, "naics": {"541512"}, "csrf_token": {token}}
+	req := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	hp.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("profile save status = %d, want 303", rec.Code)
+	}
+	if profileCalls != 1 {
+		t.Errorf("profile save fired map rebuild %d times, want 1", profileCalls)
+	}
+
+	// Doc upload fires the hook.
+	var uploadCalls int
+	hu := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithContextDocs(&memContextDocs{}),
+		dashboard.WithCapabilityMapRebuild(func(context.Context) error { uploadCalls++; return nil }))
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("csrf_token", token)
+	fw, _ := mw.CreateFormFile("docs", "x.txt")
+	_, _ = fw.Write([]byte("capabilities"))
+	_ = mw.Close()
+	ureq := httptest.NewRequest(http.MethodPost, "/onboarding/docs", &buf)
+	ureq.Header.Set("Content-Type", mw.FormDataContentType())
+	urec := httptest.NewRecorder()
+	hu.ServeHTTP(urec, ureq)
+	if urec.Code != http.StatusSeeOther {
+		t.Fatalf("doc upload status = %d, want 303", urec.Code)
+	}
+	if uploadCalls != 1 {
+		t.Errorf("doc upload fired map rebuild %d times, want 1", uploadCalls)
+	}
+}
+
 // newEmptyService builds a dashboard.Service over a fresh empty JSON store so the app
 // shell renders without seeding opportunities (onboarding tests care about the
 // onboarding page, not the queue).
