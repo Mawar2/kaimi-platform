@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/Mawar2/Kaimi/internal/capabilitymap"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -54,6 +55,13 @@ type Signals struct {
 	// SDBApplies is true when the company has SDB status and the opportunity's
 	// set-aside code matches one of the profile's qualifying set-aside codes.
 	SDBApplies bool
+
+	// CapabilityCoverage / CapabilityMatches come from the capability map (when one is
+	// wired): which of the company's competencies, mission domains, and matching keywords
+	// appear in the solicitation. Richer and more explainable than the flat TagOverlap,
+	// and grounded in the company's uploaded documents. Zero/empty when no map is wired.
+	CapabilityCoverage int
+	CapabilityMatches  []string
 }
 
 // ScoreResult holds the structured output from the LLM scorer.
@@ -90,6 +98,21 @@ type Scorer interface {
 type GeminiScorer struct {
 	client    *genai.Client
 	modelName string
+
+	// capMap, when set, adds capability-map signals (competency/domain/keyword coverage
+	// against the solicitation text) to scoring. nil = the legacy profile-only signals,
+	// so wiring is opt-in and the live pipeline is unchanged until explicitly enabled.
+	capMap *capabilitymap.CapabilityMap
+}
+
+// WithCapabilityMap returns a COPY of the scorer with the given capability map wired in,
+// so scoring uses capability-map coverage signals in addition to the profile signals.
+// Pass nil to disable. Returning a shallow copy (rather than mutating the receiver) keeps
+// the scorer safe to share across goroutines — the shared *genai.Client is concurrency-safe.
+func (gs *GeminiScorer) WithCapabilityMap(m *capabilitymap.CapabilityMap) *GeminiScorer {
+	clone := *gs
+	clone.capMap = m
+	return &clone
 }
 
 // NewGeminiScorer creates a new GeminiScorer backed by Vertex AI.
@@ -130,7 +153,7 @@ func (gs *GeminiScorer) Score(ctx context.Context, opp *opportunity.Opportunity,
 		return nil, fmt.Errorf("capability profile cannot be nil")
 	}
 
-	signals := computeSignals(opp, profile)
+	signals := computeSignals(opp, profile, gs.capMap)
 	prompt := buildScoringPrompt(opp, profile, signals)
 
 	contents := []*genai.Content{
@@ -214,7 +237,7 @@ func scoringResponseSchema() *genai.Schema {
 
 // computeSignals pre-computes deterministic bid-fit signals from the opportunity
 // and capability profile without calling the LLM.
-func computeSignals(opp *opportunity.Opportunity, profile *CapabilityProfile) Signals {
+func computeSignals(opp *opportunity.Opportunity, profile *CapabilityProfile, capMap *capabilitymap.CapabilityMap) Signals {
 	var signals Signals
 
 	// NAICS match — primary codes (highest weight)
@@ -264,6 +287,14 @@ func computeSignals(opp *opportunity.Opportunity, profile *CapabilityProfile) Si
 		}
 	}
 
+	// Capability-map coverage — when a map is wired, match the company's competencies,
+	// mission domains, and matching vocabulary against the (resolved) solicitation text.
+	if capMap != nil {
+		m := capMap.Match(opp.Title + " " + opp.EffectiveDescription())
+		signals.CapabilityCoverage = m.Coverage
+		signals.CapabilityMatches = append(append(append([]string{}, m.Competencies...), m.Domains...), m.Keywords...)
+	}
+
 	return signals
 }
 
@@ -295,7 +326,11 @@ func buildScoringPrompt(opp *opportunity.Opportunity, profile *CapabilityProfile
 	fmt.Fprintf(&sb, "Secondary NAICS Match: %v\n", signals.SecondaryNAICSMatch)
 	fmt.Fprintf(&sb, "Competency Tag Overlap: %d\n", signals.TagOverlapCount)
 	fmt.Fprintf(&sb, "Past Performance Overlap: %d\n", signals.PastPerfOverlapCount)
-	fmt.Fprintf(&sb, "SDB Set-Aside Applies: %v\n\n", signals.SDBApplies)
+	fmt.Fprintf(&sb, "SDB Set-Aside Applies: %v\n", signals.SDBApplies)
+	if signals.CapabilityCoverage > 0 {
+		fmt.Fprintf(&sb, "Capability Map Coverage: %d (matched: %s)\n", signals.CapabilityCoverage, strings.Join(signals.CapabilityMatches, ", "))
+	}
+	sb.WriteString("\n")
 
 	sb.WriteString("## Scoring Rubric\n")
 	sb.WriteString("Score 0–100 where: 80–100 = excellent fit (BID), 60–79 = good fit (BID), ")

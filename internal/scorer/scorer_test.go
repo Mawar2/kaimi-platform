@@ -8,9 +8,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/capabilitymap"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
+
+// TestComputeSignalsWithCapabilityMap: when a capability map is wired, computeSignals adds
+// capability coverage from the map matched against the (resolved) solicitation text; a nil
+// map leaves coverage at zero (the legacy profile-only behavior).
+func TestComputeSignalsWithCapabilityMap(t *testing.T) {
+	opp := &opportunity.Opportunity{
+		Title:               "Zero Trust Architecture Implementation",
+		ResolvedDescription: "Cybersecurity and continuous monitoring services for DHS networks.",
+	}
+	profile := &CapabilityProfile{}
+	m := &capabilitymap.CapabilityMap{
+		CoreCompetencies: []capabilitymap.Competency{{Name: "Zero Trust Architecture"}},
+		Domains:          []string{"Cybersecurity"},
+		Keywords:         []string{"Continuous Monitoring"},
+	}
+
+	s := computeSignals(opp, profile, m)
+	if s.CapabilityCoverage < 3 {
+		t.Errorf("CapabilityCoverage = %d, want >= 3 (competency + domain + keyword)", s.CapabilityCoverage)
+	}
+	if !strings.Contains(strings.Join(s.CapabilityMatches, "|"), "Zero Trust Architecture") {
+		t.Errorf("CapabilityMatches missing competency: %v", s.CapabilityMatches)
+	}
+
+	if s0 := computeSignals(opp, profile, nil); s0.CapabilityCoverage != 0 || s0.CapabilityMatches != nil {
+		t.Errorf("nil map should yield zero coverage, got %d / %v", s0.CapabilityCoverage, s0.CapabilityMatches)
+	}
+}
 
 // mockScorer is a test double for the Scorer interface.
 type mockScorer struct {
@@ -108,7 +137,7 @@ func TestComputeSignals_PrimaryNAICSMatch(t *testing.T) {
 	opp.NAICSCode = "541512"
 	profile := testProfile()
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if !got.PrimaryNAICSMatch {
 		t.Error("expected PrimaryNAICSMatch true for primary code 541512")
@@ -125,7 +154,7 @@ func TestComputeSignals_SecondaryNAICSMatch(t *testing.T) {
 	opp.NAICSCode = "541511" // secondary, not primary
 	profile := testProfile()
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.PrimaryNAICSMatch {
 		t.Error("expected PrimaryNAICSMatch false for secondary code 541511")
@@ -142,7 +171,7 @@ func TestComputeSignals_NoNAICSMatch(t *testing.T) {
 	opp.NAICSCode = "999999" // not in primary or secondary
 	profile := testProfile()
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.PrimaryNAICSMatch || got.SecondaryNAICSMatch {
 		t.Errorf("expected no NAICS match for code 999999; got primary=%v secondary=%v",
@@ -159,7 +188,7 @@ func TestComputeSignals_TagOverlap(t *testing.T) {
 	opp.Description = "Zero Trust architecture and DevSecOps support required."
 	profile := testProfile() // tags: cloud migration, Zero Trust, DevSecOps
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.TagOverlapCount != 3 {
 		t.Errorf("TagOverlapCount = %d, want 3", got.TagOverlapCount)
@@ -173,7 +202,7 @@ func TestComputeSignals_NoTagOverlap(t *testing.T) {
 	opp.Description = "Structural inspection of federal highway bridges."
 	profile := testProfile() // tags unrelated to construction
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.TagOverlapCount != 0 {
 		t.Errorf("TagOverlapCount = %d, want 0 for unrelated opportunity", got.TagOverlapCount)
@@ -187,7 +216,7 @@ func TestComputeSignals_SDBApplies(t *testing.T) {
 	opp.SetAsideCode = "SDB"
 	profile := testProfile() // SDBStatus true, QualifyingSetAsides includes SDB
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if !got.SDBApplies {
 		t.Error("expected SDBApplies true for SDB set-aside when company has SDB status")
@@ -202,7 +231,7 @@ func TestComputeSignals_SDBNotApplies_NoStatus(t *testing.T) {
 	profile := testProfile()
 	profile.SDBStatus = false // company is not SDB
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.SDBApplies {
 		t.Error("expected SDBApplies false when SDBStatus is false")
@@ -217,7 +246,7 @@ func TestComputeSignals_PastPerformanceOverlap(t *testing.T) {
 	opp.Description = "DHS enterprise cloud." // matches "DHS"
 	profile := testProfile()                  // past performance: Department of Defense, DHS
 
-	got := computeSignals(opp, profile)
+	got := computeSignals(opp, profile, nil)
 
 	if got.PastPerfOverlapCount != 2 {
 		t.Errorf("PastPerfOverlapCount = %d, want 2", got.PastPerfOverlapCount)
@@ -231,7 +260,7 @@ func TestComputeSignals_PastPerformanceOverlap(t *testing.T) {
 func TestBuildScoringPrompt_ContainsRequiredElements(t *testing.T) {
 	opp := testOpportunity()
 	profile := testProfile()
-	signals := computeSignals(opp, profile)
+	signals := computeSignals(opp, profile, nil)
 
 	prompt := buildScoringPrompt(opp, profile, signals)
 

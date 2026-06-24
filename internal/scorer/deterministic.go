@@ -54,7 +54,7 @@ func (d *DeterministicScorer) Score(_ context.Context, opp *opportunity.Opportun
 		return nil, fmt.Errorf("capability profile cannot be nil")
 	}
 
-	signals := computeSignals(opp, profile)
+	signals := computeSignals(opp, profile, nil)
 	score := scoreFromSignals(signals)
 
 	var rec Recommendation
