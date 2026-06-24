@@ -336,7 +336,9 @@ func run() error {
 			return berr
 		}
 		return capMapStore.Save(m)
-	}))
+	}),
+		// Read path for the "Your capability map" view.
+		dashboard.WithCapabilityMap(capMapStore))
 	// Show the WS-C2 Drive connection state on the onboarding page when customer-Drive
 	// connect is configured. Read straight from the drivetoken stores (no httpapi/
 	// dashboard cycle); when Drive connect is disabled the page shows the

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/capabilitymap"
 	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
@@ -35,6 +36,7 @@ type Handler struct {
 	submittedTmpl  *template.Template
 	editorTmpl     *template.Template
 	onboardingTmpl *template.Template
+	capMapTmpl     *template.Template
 	notFoundTmpl   *template.Template
 	Now            func() time.Time
 
@@ -72,6 +74,10 @@ type Handler struct {
 	// is built (the capability-map view shows "not built yet"). cmd/api wires it via
 	// WithCapabilityMapRebuild.
 	rebuildMap func(ctx context.Context) error
+
+	// capMap reads the tenant's capability map for the "Your capability map" view. nil =
+	// the view reports the feature is unavailable. cmd/api wires it via WithCapabilityMap.
+	capMap capabilitymap.Store
 
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
@@ -165,6 +171,8 @@ func (h *Handler) setupRoutes() {
 	// Context-document upload (onboarding "Connect" step). POST-only, multipart,
 	// CSRF-gated; persists via the contextdoc store whose text feeds the capability map.
 	h.mux.HandleFunc("/onboarding/docs", postOnly(h.handleOnboardingDocUpload))
+	// "Your capability map" view — how Kaimi understands the tenant's business.
+	h.mux.HandleFunc("GET /capability-map", h.handleCapabilityMap)
 	// #246 B3: the working draft is downloadable as Markdown from the workspace.
 	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
@@ -550,6 +558,7 @@ func (h *Handler) setupTemplates() {
 	// The editor is a standalone full-page surface — no app shell.
 	h.editorTmpl = template.Must(template.New("editor").Funcs(funcMap).Parse(editorPageTmpl))
 	h.onboardingTmpl = onboardingTemplate(funcMap)
+	h.capMapTmpl = capabilityMapTemplate(funcMap)
 	h.notFoundTmpl = template.Must(template.New("notfound").Funcs(funcMap).Parse(notFoundTmplStr))
 }
 

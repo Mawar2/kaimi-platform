@@ -564,6 +564,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
         <li{{if not .HasProfile}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>Company profile {{if .HasProfile}}saved{{else}}pending{{end}}</b> <span>— grounds hunting, scoring &amp; drafting</span></div></li>
         <li{{if not .SAMKeySaved}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>SAM.gov {{if .SAMKeySaved}}connected{{else}}pending{{end}}</b> <span>— your own key &amp; quota</span></div></li>
       </ul>
+      <p class="sub" style="margin-top:18px">Kaimi has built a <a href="/capability-map" style="color:#5aa2ff">capability map</a> of your business from your profile and documents — it's what sharpens how opportunities are qualified and scored.</p>
       <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="connect">Back</button><a class="btn btn-primary" href="/">` + iconArrow + `Enter Kaimi</a></div>
     </section>
   </main>
