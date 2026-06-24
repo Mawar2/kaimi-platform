@@ -1,7 +1,9 @@
 package dashboard_test
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,11 +12,71 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
+
+// memContextDocs is an in-memory contextdoc.Store for onboarding upload tests.
+type memContextDocs struct{ docs []contextdoc.Doc }
+
+func (m *memContextDocs) Save(_ context.Context, name, contentType string, raw []byte) (contextdoc.Doc, error) {
+	d := contextdoc.Doc{Name: name, ContentType: contentType, Bytes: int64(len(raw)), Text: string(raw)}
+	m.docs = append(m.docs, d)
+	return d, nil
+}
+func (m *memContextDocs) List() ([]contextdoc.Doc, error) { return m.docs, nil }
+
+// TestOnboardingDocUpload: a multipart upload (authenticated + CSRF) is stored via the
+// context-doc store and PRG-redirects; no store wired → 503; the Connect step shows the
+// upload control when a store is wired.
+func TestOnboardingDocUpload(t *testing.T) {
+	const token = "doc-csrf"
+	cds := &memContextDocs{}
+	h := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithContextDocs(cds))
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("csrf_token", token)
+	fw, _ := mw.CreateFormFile("docs", "capabilities.txt")
+	_, _ = fw.Write([]byte("zero trust and cloud migration for federal agencies"))
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/onboarding/docs", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("upload status = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(cds.docs) != 1 || cds.docs[0].Name != "capabilities.txt" {
+		t.Fatalf("expected 1 stored doc, got %+v", cds.docs)
+	}
+
+	// The Connect step renders the upload control when a store is wired.
+	gr := httptest.NewRecorder()
+	h.ServeHTTP(gr, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
+	body := gr.Body.String()
+	if !strings.Contains(body, `action="/onboarding/docs"`) || !strings.Contains(body, `name="docs"`) {
+		t.Errorf("onboarding missing the document-upload control")
+	}
+
+	// No store wired → 503.
+	h2 := newOnboardingHandler(t, dashboard.WithProfileStore(&memProfileStore{}), identityOpt("u@example.com", token))
+	r2 := httptest.NewRequest(http.MethodPost, "/onboarding/docs", strings.NewReader(""))
+	r2.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	w2 := httptest.NewRecorder()
+	h2.ServeHTTP(w2, r2)
+	if w2.Code != http.StatusServiceUnavailable {
+		t.Errorf("no-store upload = %d, want 503", w2.Code)
+	}
+}
 
 // newEmptyService builds a dashboard.Service over a fresh empty JSON store so the app
 // shell renders without seeding opportunities (onboarding tests care about the

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samsecret"
@@ -130,6 +133,13 @@ func WithSAMKeySaver(fn SAMKeySaver) Option {
 	return func(h *Handler) { h.samKeySaver = fn }
 }
 
+// WithContextDocs wires the context-document store so the onboarding "Connect" step can
+// accept uploads (capability statements, CPARS, past proposals) whose text feeds the
+// capability map. Without it the upload control is hidden.
+func WithContextDocs(store contextdoc.Store) Option {
+	return func(h *Handler) { h.contextDocs = store }
+}
+
 // driveTargetRoot is the sentinel target value meaning "create Docs at the root of
 // My Drive" rather than inside a specific folder. It is stored verbatim as the
 // drivetoken Target.DriveID and flows straight through to
@@ -247,6 +257,13 @@ type OnboardingData struct {
 	SAMKeyConfigured bool
 	SAMKeySaved      bool
 
+	// Context-document upload (Connect step). ContextDocsEnabled is true when a store is
+	// wired (WithContextDocs); ContextDocs lists what's been uploaded; DocsSaved drives
+	// the success banner after an upload.
+	ContextDocsEnabled bool
+	ContextDocs        []contextdoc.Doc
+	DocsSaved          bool
+
 	// Step is the wizard step to open on load ("welcome".."done"). The server sets it
 	// to resume after a PRG redirect; the page's JS shows the matching panel.
 	Step string
@@ -359,6 +376,9 @@ const onboardingContentTmpl = `<!DOCTYPE html>
   .gglyph{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#fff;color:#4285F4;font-weight:800;font-size:14px;line-height:1;flex:0 0 auto;}
   .drive-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
   .drive-row .muted{color:var(--ink3);font-size:12px;}
+  input[type=file]{font-size:13px;color:var(--ink3);}
+  .doc-list{margin:10px 0 0;padding-left:18px;}
+  .doc-list li{font-size:13px;margin:3px 0;}
   fieldset{border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
   legend{font-size:12px;font-weight:700;color:var(--ink3);padding:0 6px;}
   .chips{display:flex;flex-wrap:wrap;gap:8px;}
@@ -397,6 +417,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
     {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
     {{if .SAMKeySaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved — your next hunt will use it.</span></div>{{end}}
+    {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded — Kaimi will use them to understand your business.</span></div>{{end}}
     {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
 
     <!-- 1. Welcome -->
@@ -464,6 +485,22 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       </form>
       {{else}}
       <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>Managed by your administrator</h3><p>This deployment supplies the SAM.gov key as a server secret; you don't need to enter one.</p></div></div>
+      {{end}}
+      {{if .ContextDocsEnabled}}
+      <div class="card" style="margin-top:14px"><span class="ic" style="background:#8b5cf6">+</span><div style="flex:1">
+        <h3>Business context documents <span class="hint">(optional, recommended)</span></h3>
+        <p>Upload your capability statement, CPARS, or recent proposals. Kaimi reads them to understand your business and sharpen how it qualifies and scores opportunities. Tip: keep a Google Drive folder of BD context your team maintains over time — you can point Kaimi at it later.</p>
+        <form class="wz-form" method="POST" action="/onboarding/docs" enctype="multipart/form-data">
+          {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+          <input type="file" name="docs" multiple accept=".pdf,.docx,.doc,.txt,.md">
+          <div><button class="btn btn-primary" type="submit">` + iconCheck + `Upload documents</button></div>
+        </form>
+        {{if .ContextDocs}}
+        <ul class="doc-list">
+          {{range .ContextDocs}}<li><strong>{{.Name}}</strong> <span class="hint">{{if .Text}}· text extracted{{else}}· stored{{end}}</span></li>{{end}}
+        </ul>
+        {{end}}
+      </div></div>
       {{end}}
       <div class="card" style="margin-top:14px"><span class="ic" style="background:#22b8cf">` + iconLink + `</span><div style="flex:1">
         <h3>Google Drive <span class="hint">(optional)</span></h3>
@@ -556,6 +593,7 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 	data.Saved = r.URL.Query().Get("saved") == "1"
 	data.DriveSaved = r.URL.Query().Get("drive_saved") == "1"
 	data.SAMKeySaved = r.URL.Query().Get("sam_saved") == "1"
+	data.DocsSaved = r.URL.Query().Get("docs_saved") == "1"
 	// Resume at the requested step after a PRG redirect; ignore an unknown value.
 	if s := r.URL.Query().Get("step"); validStep(s) {
 		data.Step = s
@@ -735,6 +773,71 @@ func (h *Handler) handleOnboardingSAMKey(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, onboardingPath+"?sam_saved=1&step="+stepDone, http.StatusSeeOther)
 }
 
+// maxUploadBytes bounds an onboarding document upload request. Capability statements /
+// CPARS / past proposals are small; 25 MiB is generous headroom while preventing a
+// memory-exhaustion upload.
+const maxUploadBytes = 25 << 20
+
+// handleOnboardingDocUpload serves POST /onboarding/docs: the Connect step's context-
+// document upload (multipart). Like the other onboarding writes it FAILS CLOSED on auth
+// + CSRF (authorizeMutation) before storing anything. Each uploaded file is persisted +
+// text-extracted via the contextdoc store; on success it PRG-redirects back to the
+// Connect step. Files are never logged.
+func (h *Handler) handleOnboardingDocUpload(w http.ResponseWriter, r *http.Request) {
+	if h.contextDocs == nil {
+		http.Error(w, "document upload is not available in this deployment", http.StatusServiceUnavailable)
+		return
+	}
+	// Cap the TOTAL request body BEFORE parsing: ParseMultipartForm only bounds the
+	// in-memory portion, not the request size, so without this a large body would be
+	// read to disk before the auth/CSRF gate runs. MaxBytesReader also bounds the
+	// cumulative bytes across all files in one request. The small extra headroom covers
+	// multipart framing overhead around the file payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+(1<<20))
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		http.Error(w, "upload too large or malformed", http.StatusBadRequest)
+		return
+	}
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+
+	var files []*multipart.FileHeader
+	if r.MultipartForm != nil {
+		files = r.MultipartForm.File["docs"]
+	}
+	if len(files) == 0 {
+		data := h.newOnboardingData(r)
+		data.Step = stepConnect
+		data.FormErr = "Choose at least one document to upload."
+		w.WriteHeader(http.StatusBadRequest)
+		h.renderOnboarding(w, &data)
+		return
+	}
+
+	for _, fh := range files {
+		f, err := fh.Open()
+		if err != nil {
+			http.Error(w, "could not read the uploaded file", http.StatusBadRequest)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, maxUploadBytes))
+		_ = f.Close()
+		if err != nil {
+			http.Error(w, "could not read the uploaded file", http.StatusBadRequest)
+			return
+		}
+		if _, err := h.contextDocs.Save(r.Context(), fh.Filename, fh.Header.Get("Content-Type"), raw); err != nil {
+			// Keep detail server-side; never log the file contents.
+			log.Printf("dashboard: onboarding doc upload save failed: %v", err)
+			http.Error(w, "failed to save the uploaded document", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	http.Redirect(w, r, onboardingPath+"?docs_saved=1&step="+stepConnect, http.StatusSeeOther)
+}
+
 // authorizeMutation is the fail-closed auth + CSRF gate every state-mutating
 // onboarding POST must pass before it touches the store. It writes the rejection
 // response itself and returns false on denial; callers must NOT mutate when it
@@ -792,6 +895,14 @@ func (h *Handler) newOnboardingData(r *http.Request) OnboardingData {
 		data.LicenseKey = ident.LicenseKey
 	}
 	data.SAMKeyConfigured = h.samKeySaver != nil
+	if h.contextDocs != nil {
+		data.ContextDocsEnabled = true
+		// Best-effort: an I/O error listing uploads must not break the page (the rest
+		// of onboarding still works); just show none.
+		if docs, err := h.contextDocs.List(); err == nil {
+			data.ContextDocs = docs
+		}
+	}
 	data.Step = stepWelcome
 	if h.driveStatus != nil {
 		data.Drive = h.driveStatus()

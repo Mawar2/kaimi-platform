@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/profile"
@@ -58,6 +59,12 @@ type Handler struct {
 	// step to Secret Manager (see SAMKeySaver). nil = the key field is hidden and the
 	// page shows the deployment-secret note. cmd/api wires it via WithSAMKeySaver.
 	samKeySaver SAMKeySaver
+
+	// contextDocs stores the context documents (capability statements, CPARS, past
+	// proposals) a tester uploads on the onboarding "Connect" step; their extracted
+	// text feeds the capability map. nil = the upload control is hidden. cmd/api wires
+	// it via WithContextDocs.
+	contextDocs contextdoc.Store
 
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
@@ -148,6 +155,9 @@ func (h *Handler) setupRoutes() {
 	// the profile write; it persists to Secret Manager via the injected SAMKeySaver so
 	// each tenant supplies their own key (per-tenant SAM quota isolation).
 	h.mux.HandleFunc("/onboarding/samgov", postOnly(h.handleOnboardingSAMKey))
+	// Context-document upload (onboarding "Connect" step). POST-only, multipart,
+	// CSRF-gated; persists via the contextdoc store whose text feeds the capability map.
+	h.mux.HandleFunc("/onboarding/docs", postOnly(h.handleOnboardingDocUpload))
 	// #246 B3: the working draft is downloadable as Markdown from the workspace.
 	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))

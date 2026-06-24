@@ -22,9 +22,11 @@ import (
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/config"
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
+	"github.com/Mawar2/Kaimi/internal/ingest"
 	"github.com/Mawar2/Kaimi/internal/productkey"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
@@ -286,6 +288,17 @@ func run() error {
 		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeySaver(samWriter.Save))
 		log.Printf("Onboarding SAM.gov key entry enabled (writes to Secret Manager secret %q)", samSecretName)
 	}
+
+	// Context-document uploads (onboarding "Connect" step) → their extracted text feeds
+	// the capability map. Stored under the tenant store path. The RoutingExtractor handles
+	// DOCX via the stdlib and routes everything else to its primary; with no Document AI
+	// wired here the primary is a plain-text passthrough, so DOCX/text/markdown extract and
+	// PDFs/images are stored with empty text (Document AI for those is a follow-on).
+	ctxDocStore, err := contextdoc.NewJSONStore(*storePath, ingest.NewRoutingExtractor(contextdoc.PlainTextExtractor{}))
+	if err != nil {
+		return fmt.Errorf("failed to initialize context-doc store: %w", err)
+	}
+	dashboardOpts = append(dashboardOpts, dashboard.WithContextDocs(ctxDocStore))
 	// Show the WS-C2 Drive connection state on the onboarding page when customer-Drive
 	// connect is configured. Read straight from the drivetoken stores (no httpapi/
 	// dashboard cycle); when Drive connect is disabled the page shows the
