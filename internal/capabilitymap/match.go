@@ -15,12 +15,14 @@ type Match struct {
 	Coverage int `json:"coverage"`
 }
 
-// Minimum term lengths to count as a match, to avoid noise from very short tokens (a
-// 2-char keyword like "AI" would match far too much opportunity text to be meaningful).
+// Minimum term lengths to count as a match. The guard rejects 1–2 char tokens ("AI",
+// "IT") that would be noise, but allows 3-char terms: in federal solicitations the most
+// distinctive matches are agency/program acronyms (DHS, CDM, ZTA, GIS), and whole-word
+// boundary matching keeps them precise.
 const (
 	minCompetencyLen = 3
-	minKeywordLen    = 4
-	minDomainLen     = 4
+	minKeywordLen    = 3
+	minDomainLen     = 3
 )
 
 // Match reports which of the map's competencies, keywords, and domains appear (case-
