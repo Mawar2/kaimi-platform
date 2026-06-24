@@ -45,7 +45,10 @@ func sessionCookieFrom(t *testing.T, res *http.Response) *http.Cookie {
 // TestGateAccessMagicLinkGrantsSession: a valid ?key= mints a session bound to the key
 // and redirects into the app.
 func TestGateAccessMagicLinkGrantsSession(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	rec, _ := reg.Mint(context.Background(), "Ey3 Technologies", 14*24*time.Hour)
 
@@ -110,7 +113,10 @@ func TestGateAccessInvalidKeyDenied(t *testing.T) {
 
 // TestGateEntrySubmitValid: posting a valid key to /entry grants a session and redirects.
 func TestGateEntrySubmitValid(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	rec, _ := reg.Mint(context.Background(), "T", 7*24*time.Hour)
 
@@ -174,7 +180,10 @@ func (n *okNext) ServeHTTP(_ http.ResponseWriter, r *http.Request) {
 // TestRequireProductKeyPassesValidSession: a request with a valid session reaches next
 // with the verified session injected into context.
 func TestRequireProductKeyPassesValidSession(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	req, rec := grantedRequest(t, g, reg, 14*24*time.Hour, http.MethodGet, "/api/v1/me")
 
@@ -209,7 +218,10 @@ func TestRequireProductKeyDeniesNoCookie(t *testing.T) {
 // TestRequireProductKeyDeniesForgedCookie: a session cookie signed with a DIFFERENT
 // secret is rejected (unforgeable).
 func TestRequireProductKeyDeniesForgedCookie(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, _ := newTestGate(t, now)
 
 	// Forge a session with an attacker's secret but a plausible key id.
@@ -232,7 +244,10 @@ func TestRequireProductKeyDeniesForgedCookie(t *testing.T) {
 // TestRequireProductKeyEnforcesExpiry: once the clock passes the key's expiry, a
 // previously-valid session is rejected (the registry re-check is the authority).
 func TestRequireProductKeyEnforcesExpiry(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	req, _ := grantedRequest(t, g, reg, 24*time.Hour, http.MethodGet, "/api/v1/me")
 
@@ -250,7 +265,10 @@ func TestRequireProductKeyEnforcesExpiry(t *testing.T) {
 // TestRequireProductKeyEnforcesRevocation: revoking the key locks out an existing
 // session immediately (instant revoke).
 func TestRequireProductKeyEnforcesRevocation(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	req, rec := grantedRequest(t, g, reg, 14*24*time.Hour, http.MethodGet, "/api/v1/me")
 
@@ -282,7 +300,10 @@ func TestRequireProductKeyExemptsDriveCallback(t *testing.T) {
 // TestRequireProductKeyHTMLRedirectsToEntry: an unauthenticated HTML request is
 // redirected to /entry (not 401), and a valid one reaches next.
 func TestRequireProductKeyHTMLRedirectsToEntry(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 
 	// Unauthenticated → 302 to /entry.
@@ -306,7 +327,10 @@ func TestRequireProductKeyHTMLRedirectsToEntry(t *testing.T) {
 // probe is public, the API is gated (no bypass), the entry page is reachable without a
 // session (no redirect loop), and a magic-link cookie then opens the API.
 func TestGateRoutesIntegration(t *testing.T) {
-	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
+	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
+	// would make the bounded session born-expired once real time passes it (date rot).
+	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 	rec, _ := reg.Mint(context.Background(), "Ey3", 14*24*time.Hour)
 	h := New(Deps{ProductKey: g}).Routes()
