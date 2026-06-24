@@ -52,7 +52,10 @@ semantically, beyond NAICS/set-aside.
 
 ### E — Scoring upgrade
 Replace substring signals with map-driven matching; re-evaluate rubric/thresholds; A/B
-against the current scorer.
+against the current scorer. **Also resolve the SAM `description` field**: the v2 search
+API returns it as a `noticedesc` URL, not text, so the Scorer currently scores against a
+URL string. Resolve the URL → real solicitation text (for the eligible set, after the
+gate, to bound SAM-quota cost) so scoring + drafting use real content.
 
 ### Later (independent, fast)
 - **F** — opportunity-detail completeness (surface attachments; NAICS-description lookup;
@@ -67,3 +70,5 @@ is per-tenant — no cross-tenant leakage.
 
 ## Progress log
 - 2026-06-18: Goal created; decisions locked. Starting C1 (capability map core).
+- 2026-06-18: **C1 done** — `internal/capabilitymap` (schema + Deterministic + Gemini builders + JSON store; TDD). Committed on `feat/onboarding-wizard`.
+- 2026-06-18: **Quick wins (F + G) done + deployed** (pilot rev 00006-v69): expired opps dropped from the board (`ExcludeExpired`; 131→59 live), SAM `description` URL rendered as a link + attachments surfaced. Next: loop the spine (A/B → wire → D/E).
