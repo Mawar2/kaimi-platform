@@ -421,7 +421,16 @@ const detailContentTmpl = `{{define "content"}}
   </table>
 
   <div class="dr-sec-h">Description</div>
-  {{if .Opp.Description}}<pre class="detail-pre">{{.Opp.Description}}</pre>{{else}}<p>&mdash;</p>{{end}}
+  {{if isHTTPURL .Opp.Description}}<p><a href="{{.Opp.Description}}" target="_blank" rel="noopener noreferrer">View the full solicitation description on SAM.gov ↗</a></p>
+  {{else if .Opp.Description}}<pre class="detail-pre">{{.Opp.Description}}</pre>
+  {{else}}<p>&mdash;</p>{{end}}
+
+  {{if .Opp.Attachments}}
+  <div class="dr-sec-h">Solicitation documents</div>
+  <ul class="dr-attach">
+    {{range .Opp.Attachments}}<li><a href="{{.}}" target="_blank" rel="noopener noreferrer">{{.}}</a></li>{{end}}
+  </ul>
+  {{end}}
 
   <div class="dr-sec-h">Scoring</div>
   <table class="kv">
@@ -503,6 +512,12 @@ func (h *Handler) setupTemplates() {
 				return "—"
 			}
 			return s
+		},
+		// isHTTPURL reports whether a string is an http(s) URL — used to render the
+		// SAM.gov description (which the API returns as a noticedesc URL, not text) as
+		// a link rather than dumping the raw URL as prose.
+		"isHTTPURL": func(s string) bool {
+			return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 		},
 	}
 	h.listTmpl = template.Must(template.Must(
@@ -668,6 +683,9 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 	// Opportunities tab the moment it is pursued. Pursued opps still feed the
 	// pipeline counts below (computed from the unfiltered `all`).
 	opts.ExcludeSelected = true
+	// Drop solicitations whose response deadline has already passed — a tester can't
+	// bid them, so they're noise on the Opportunities board.
+	opts.ExcludeExpired = true
 
 	rows, err := h.svc.List(ctx, opts)
 	if err != nil {

@@ -101,6 +101,53 @@ func TestService_List_ExcludeSelected(t *testing.T) {
 	}
 }
 
+// TestService_List_ExcludeExpired proves the Opportunities board drops solicitations
+// whose response deadline has passed (relative to Now), keeps future ones, and keeps
+// opportunities with no deadline (we can't know they're closed). Without the option, all
+// are returned.
+func TestService_List_ExcludeExpired(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+
+	past := baseOpp("past", 0.8, &now)
+	past.ResponseDeadline = now.Add(-24 * time.Hour) // deadline already passed
+	future := baseOpp("future", 0.8, &now)
+	future.ResponseDeadline = now.Add(72 * time.Hour) // still biddable
+	noDeadline := baseOpp("nodeadline", 0.8, &now)    // zero deadline → never expired
+
+	for _, opp := range []*opportunity.Opportunity{past, future, noDeadline} {
+		if err := s.Save(ctx, opp); err != nil {
+			t.Fatalf("Save %s: %v", opp.ID, err)
+		}
+	}
+	svc := dashboard.NewService(s)
+
+	rows, err := svc.List(ctx, dashboard.ListOptions{Now: now, ExcludeExpired: true})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range rows {
+		got[r.ID] = true
+	}
+	if got["past"] {
+		t.Error("ExcludeExpired kept a past-deadline opportunity")
+	}
+	if !got["future"] || !got["nodeadline"] {
+		t.Errorf("ExcludeExpired dropped a biddable/undated opportunity: got %v", got)
+	}
+
+	// Without the option, all three are returned.
+	all, err := svc.List(ctx, dashboard.ListOptions{Now: now})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("no ExcludeExpired: expected 3 rows, got %d", len(all))
+	}
+}
+
 func TestService_List_StageFilter(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC)

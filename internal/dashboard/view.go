@@ -43,6 +43,11 @@ type ListOptions struct {
 	// disappears from the Opportunities tab the moment it is pursued
 	// (PIPELINE §1, issue #224).
 	ExcludeSelected bool
+	// ExcludeExpired drops opportunities whose response deadline has already passed
+	// (relative to Now), so the Opportunities board never shows dead solicitations a
+	// tester can no longer bid. Opportunities with no deadline are kept (we can't know
+	// they're closed). It requires a non-zero Now; with the zero value it is a no-op.
+	ExcludeExpired bool
 }
 
 // OpportunityRow is the view-model for a single row in the dashboard list view.
@@ -113,6 +118,9 @@ func (svc *Service) List(ctx context.Context, opts ListOptions) ([]OpportunityRo
 		if opts.ExcludeSelected && opp.Selected {
 			continue
 		}
+		if opts.ExcludeExpired && isExpired(opp, opts.Now) {
+			continue
+		}
 		stage := DeriveStage(opp)
 		if opts.Stage != nil && stage != *opts.Stage {
 			continue
@@ -135,6 +143,17 @@ func (svc *Service) List(ctx context.Context, opts ListOptions) ([]OpportunityRo
 	}
 
 	return rows, nil
+}
+
+// isExpired reports whether an opportunity's response deadline has passed relative to
+// now. An opportunity with no deadline (zero time) is never treated as expired — we
+// can't know it's closed. A zero now disables the check (callers gate on ExcludeExpired
+// + a real Now), so this never silently drops everything when Now is unset.
+func isExpired(opp *opportunity.Opportunity, now time.Time) bool {
+	if now.IsZero() || opp.ResponseDeadline.IsZero() {
+		return false
+	}
+	return opp.ResponseDeadline.Before(now)
 }
 
 // CountsByStage returns a map of stage counts across all opportunities in the store.
