@@ -235,8 +235,10 @@ func computeSignals(opp *opportunity.Opportunity, profile *CapabilityProfile) Si
 		}
 	}
 
-	// Competency tag overlap — case-insensitive substring match against title + description
-	searchText := strings.ToLower(opp.Title + " " + opp.Description)
+	// Competency tag overlap — case-insensitive substring match against title + description.
+	// EffectiveDescription is the resolved solicitation text when available (else the raw
+	// Description, which may be a noticedesc URL), so signals reflect real prose once resolved.
+	searchText := strings.ToLower(opp.Title + " " + opp.EffectiveDescription())
 	for _, tag := range profile.CompetencyTags {
 		if strings.Contains(searchText, strings.ToLower(tag)) {
 			signals.TagOverlapCount++
@@ -244,7 +246,7 @@ func computeSignals(opp *opportunity.Opportunity, profile *CapabilityProfile) Si
 	}
 
 	// Past performance overlap — keyword match in agency name or description
-	agencyAndDesc := strings.ToLower(opp.Agency + " " + opp.Description)
+	agencyAndDesc := strings.ToLower(opp.Agency + " " + opp.EffectiveDescription())
 	for _, term := range profile.PastPerformance {
 		if strings.Contains(agencyAndDesc, strings.ToLower(term)) {
 			signals.PastPerfOverlapCount++
@@ -279,7 +281,7 @@ func buildScoringPrompt(opp *opportunity.Opportunity, profile *CapabilityProfile
 	fmt.Fprintf(&sb, "NAICS: %s (%s)\n", opp.NAICSCode, opp.NAICSDescription)
 	fmt.Fprintf(&sb, "Set-Aside: %s\n", opp.SetAsideCode)
 	fmt.Fprintf(&sb, "Response Deadline: %s\n", opp.ResponseDeadline.Format("2006-01-02"))
-	fmt.Fprintf(&sb, "Description:\n%s\n\n", opp.Description)
+	fmt.Fprintf(&sb, "Description:\n%s\n\n", opp.EffectiveDescription())
 
 	sb.WriteString("## Capability Profile\n")
 	fmt.Fprintf(&sb, "Primary NAICS: %s\n", strings.Join(profile.PrimaryNAICS, ", "))
