@@ -103,6 +103,13 @@ func (s *JSONStore) Save(ctx context.Context, name, contentType string, raw []by
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Ensure the files directory exists on every save, not just at construction: on a
+	// network-backed store (gcsfuse) the directory can be absent if it was never
+	// materialized or was removed out-of-band, which would otherwise fail the write.
+	if err := os.MkdirAll(s.filesDir, 0o755); err != nil {
+		return Doc{}, fmt.Errorf("contextdoc: ensure store dir: %w", err)
+	}
+
 	// Persist the raw bytes first so the record never references a missing file.
 	if err := os.WriteFile(filepath.Join(s.filesDir, stored), raw, 0o644); err != nil {
 		return Doc{}, fmt.Errorf("contextdoc: write raw file: %w", err)

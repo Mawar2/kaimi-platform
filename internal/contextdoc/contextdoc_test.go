@@ -55,6 +55,27 @@ func TestJSONStoreSaveAndList(t *testing.T) {
 	}
 }
 
+// TestJSONStoreSaveRecreatesMissingDir: Save succeeds even if the files directory was
+// removed after construction (e.g. an out-of-band cleanup on a gcsfuse-backed store).
+func TestJSONStoreSaveRecreatesMissingDir(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewJSONStore(dir, fakeExtractor{text: "x"})
+	if err != nil {
+		t.Fatalf("NewJSONStore: %v", err)
+	}
+	// Remove the whole store dir out from under the store.
+	if err := os.RemoveAll(filepath.Join(dir, dirName)); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if _, err := s.Save(context.Background(), "doc.txt", "text/plain", []byte("data")); err != nil {
+		t.Fatalf("Save after dir removal should recreate the dir, got: %v", err)
+	}
+	docs, err := s.List()
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("expected 1 doc after recovery, got %d (err=%v)", len(docs), err)
+	}
+}
+
 func TestJSONStoreRejectsEmpty(t *testing.T) {
 	s, _ := NewJSONStore(t.TempDir(), fakeExtractor{})
 	ctx := context.Background()
