@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Mawar2/Kaimi/internal/capabilitymap"
@@ -82,6 +83,17 @@ type Handler struct {
 	// asyncRun dispatches background work (the capability-map rebuild) off the request
 	// path so onboarding saves return immediately. Defaults to `go fn()`; never nil.
 	asyncRun func(fn func())
+
+	// rebuildState serializes + coalesces capability-map rebuilds. Concurrent triggers
+	// (e.g. a profile save immediately followed by a doc upload) must not race — the
+	// last-finishing rebuild would otherwise clobber a fresher one. At most one rebuild
+	// runs at a time; a trigger arriving mid-run sets pending so a final rebuild runs
+	// afterward against the latest profile + docs.
+	rebuildState struct {
+		mu      sync.Mutex
+		running bool
+		pending bool
+	}
 
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
