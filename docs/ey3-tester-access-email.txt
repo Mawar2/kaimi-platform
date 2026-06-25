@@ -1,0 +1,69 @@
+Subject: Your Kaimi access is ready — federal BD pilot for Ey3 Technologies
+
+Hi [First name],
+
+Thank you for partnering with us as Kaimi's first design partner. Your private
+pilot is live and ready for you to use end to end.
+
+WHAT KAIMI DOES
+Kaimi is your automated federal BD analyst. It hunts SAM.gov for opportunities,
+scores each one for fit against YOUR business, and helps you draft proposals —
+with you in control and approving every step. The more it learns about your
+company, the sharper it gets.
+
+GET STARTED (about 5 minutes)
+
+  1) Click your private access link:
+
+     https://pilot-kaimi-api-1098973371312.us-east4.run.app/access?key=KAIMI-C79Z-HBSU-Q7Y2
+
+     This link is unique to you. One click logs you in — there is no password to
+     create or remember.
+
+  2) Complete the quick setup wizard:
+
+     • Company profile — your company name, NAICS codes, core competencies, and
+       small-business / set-aside status.
+
+     • SAM.gov API key — paste your own key so Kaimi searches on your quota. If
+       you don't have one yet, it's free: sign in at sam.gov, open Account
+       Details, and generate a Public API key. (Takes a minute.)
+
+     • Context documents — upload your capability statement, a past proposal, or
+       a CPARS. Kaimi reads these to understand your business. PDF, Word (.docx),
+       or text all work. This step is optional but makes everything better.
+
+  3) Done. Kaimi builds your "capability map" — a synthesized picture of what your
+     company does, grounded in your profile and documents — and begins scoring
+     opportunities for you.
+
+WHAT TO EXPLORE
+
+  • Your capability map — how Kaimi understands your business, with each strength
+    traced back to the document it came from.
+
+  • Opportunities board — SAM.gov opportunities scored for fit, each with a
+    "Why this fits your capabilities" explanation.
+
+  • Open any opportunity to see full details, deadlines, and attachments.
+
+A FEW NOTES
+
+  • Your access is active through July 31, 2026.
+
+  • Google Drive connection isn't enabled in this pilot yet — you can safely skip
+    that step during setup. Everything else works without it.
+
+  • Your data is private. Kaimi runs on infrastructure isolated to your pilot; your
+    profile, documents, and bid decisions are not shared with anyone else.
+
+WE'D LOVE YOUR FEEDBACK
+This is an early pilot and your input shapes where it goes. Tell us what's useful,
+what's confusing, and what would make Kaimi a daily tool for your team. Just reply
+to this email, or write to malik@bluemetatech.com anytime.
+
+Thanks again — excited to have you with us.
+
+Malik Warren
+BlueMeta Technologies
+malik@bluemetatech.com
