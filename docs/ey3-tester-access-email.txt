@@ -15,7 +15,10 @@ GET STARTED (about 5 minutes)
 
   1) Click your private access link:
 
-     https://pilot-kaimi-api-1098973371312.us-east4.run.app/access?key=KAIMI-C79Z-HBSU-Q7Y2
+     https://pilot-kaimi-api-1098973371312.us-east4.run.app/access?key=KAIMI-XXXX-XXXX-XXXX
+
+     [TEMPLATE: paste the tester's actual magic link here before sending. The live
+     key is delivered out-of-band, never committed to source control.]
 
      This link is unique to you. One click logs you in — there is no password to
      create or remember.
