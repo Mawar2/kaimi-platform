@@ -272,3 +272,64 @@ func TestRunZone1_MissingDeps_Error(t *testing.T) {
 		}
 	}
 }
+
+// recordingResolver records the URLs it is asked to resolve and returns fixed text.
+type recordingResolver struct {
+	calls []string
+	text  string
+}
+
+func (r *recordingResolver) Resolve(_ context.Context, descURL string) (string, error) {
+	r.calls = append(r.calls, descURL)
+	return r.text, nil
+}
+
+// TestRunZone1_ResolvesEligibleDescriptions: when a Resolver is wired, RunZone1 resolves
+// the description text for ELIGIBLE opportunities whose Description is a URL — and only
+// those (not ineligible ones, not ones already in prose) — and persists the resolved text.
+func TestRunZone1_ResolvesEligibleDescriptions(t *testing.T) {
+	st, err := store.NewJSONStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSONStore: %v", err)
+	}
+	opps := []*opportunity.Opportunity{
+		{ID: "elig-url", Title: "Cloud Migration", NAICSCode: "541512", Description: "https://api.sam.gov/noticedesc?x=1"},
+		{ID: "elig-text", Title: "Cloud Migration", NAICSCode: "541512", Description: "already prose"},
+		{ID: "inelig-8a", Title: "Reserved", NAICSCode: "541512", SetAsideCode: "8A", Description: "https://api.sam.gov/noticedesc?x=2"},
+	}
+	res := &recordingResolver{text: "resolved solicitation text"}
+
+	report, err := RunZone1(context.Background(), &Zone1Deps{
+		Sam:         &mockSam{opps: opps},
+		Scorer:      scorer.NewDeterministicScorer(),
+		Store:       st,
+		Profile:     testScoringProfile(),
+		Eligibility: testEligibilityProfile(),
+		Resolver:    res,
+	})
+	if err != nil {
+		t.Fatalf("RunZone1: %v", err)
+	}
+
+	if report.Resolved != 1 {
+		t.Errorf("Resolved = %d, want 1", report.Resolved)
+	}
+	if len(res.calls) != 1 || !strings.Contains(res.calls[0], "x=1") {
+		t.Errorf("resolver should be called only for the eligible URL opp, got %v", res.calls)
+	}
+
+	got, err := st.Get(context.Background(), "elig-url")
+	if err != nil {
+		t.Fatalf("Get elig-url: %v", err)
+	}
+	if got.ResolvedDescription != "resolved solicitation text" {
+		t.Errorf("eligible URL opp not resolved: %q", got.ResolvedDescription)
+	}
+	gotText, err := st.Get(context.Background(), "elig-text")
+	if err != nil {
+		t.Fatalf("Get elig-text: %v", err)
+	}
+	if gotText.ResolvedDescription != "" {
+		t.Errorf("non-URL description should not be resolved, got %q", gotText.ResolvedDescription)
+	}
+}

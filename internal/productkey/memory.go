@@ -23,6 +23,15 @@ func NewMemoryRegistry() *MemoryRegistry {
 	return &MemoryRegistry{m: make(map[string]Record), now: time.Now}
 }
 
+// SetClock overrides the clock the registry uses to stamp IssuedAt/ExpiresAt on Mint.
+// It exists so tests (including those in other packages, e.g. the access gate) can
+// exercise key expiry deterministically; production uses the default time.Now.
+func (r *MemoryRegistry) SetClock(now func() time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.now = now
+}
+
 // Mint generates a unique key for tester valid for ttl and stores it.
 func (r *MemoryRegistry) Mint(_ context.Context, tester string, ttl time.Duration) (Record, error) {
 	r.mu.Lock()

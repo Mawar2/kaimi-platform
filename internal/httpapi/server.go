@@ -45,6 +45,15 @@ type Deps struct {
 	// the WS-B5 RequireSession middleware via ParseSession.
 	Auth *AuthHandler
 
+	// ProductKey is the pilot access gate (product-key mode). When non-nil it REPLACES
+	// Workspace OAuth as the access control: every app and /api/v1 route is guarded by
+	// RequireProductKey/RequireProductKeyHTML, and the gate's own /entry + /access
+	// routes are registered unauthenticated. It takes PRECEDENCE over Auth in the
+	// fail-closed switch (a deployment runs exactly one gate). In this mode Auth is
+	// expected to be nil — Google OAuth is used only for the customer-Drive connect
+	// (Deps.Drive), never for sign-in.
+	ProductKey *ProductKeyGate
+
 	// AllowInsecureNoAuth is an EXPLICIT, dev-only opt-in to run the /api/v1 API
 	// WITHOUT authentication when no OAuth is configured (Auth == nil). It defaults
 	// to false so the server FAILS CLOSED: a production deploy with a missing or
@@ -150,27 +159,32 @@ func (s *Server) Routes() http.Handler {
 	apiMux.HandleFunc("GET /api/v1/integrations/drive/status", s.handleDriveStatus)
 	apiMux.HandleFunc("PUT /api/v1/integrations/drive/target", s.handleDriveSetTarget)
 
-	// WS-B5 auth seam: wrap ONLY this group with RequireSession so /api/v1/* demands
-	// a valid session, while rootMux's own routes (/healthz, /auth/*) stay public.
+	// WS-B5 auth seam: wrap ONLY this group with the access middleware so /api/v1/*
+	// demands a valid session, while rootMux's own routes (/healthz, /auth/*, and the
+	// product-key /entry + /access) stay public.
 	//
-	// The wrap decision FAILS CLOSED by default. There are exactly three cases:
+	// The wrap decision FAILS CLOSED by default. The cases, in precedence order:
 	//
-	//   1. Auth configured (Deps.Auth != nil) → always wrap with RequireSession.
-	//      This is the production path; OAuth always takes precedence.
-	//   2. Auth nil AND AllowInsecureNoAuth == true → skip the wrap and log a loud
+	//   1. ProductKey configured (Deps.ProductKey != nil) → wrap with RequireProductKey.
+	//      The pilot access gate; a deployment runs exactly one gate, and the product
+	//      key takes precedence over OAuth when both are somehow wired.
+	//   2. Auth configured (Deps.Auth != nil) → wrap with RequireSession (WS-B4 OAuth).
+	//   3. Neither, AND AllowInsecureNoAuth == true → skip the wrap and log a loud
 	//      WARNING. This is the EXPLICIT local-dev opt-in for credential-less UI work.
-	//   3. Auth nil AND AllowInsecureNoAuth == false → PANIC. We refuse to serve an
-	//      open API by default, so a production deploy with a missing/typo'd OAuth
-	//      env var can never silently come up unauthenticated. A panic at wiring time
+	//   4. Neither, AND AllowInsecureNoAuth == false → PANIC. We refuse to serve an
+	//      open API by default, so a production deploy with a missing/typo'd gate
+	//      config can never silently come up unauthenticated. A panic at wiring time
 	//      is the desired backstop: the insecure server never starts.
 	var apiHandler http.Handler = apiMux
 	switch {
+	case s.deps.ProductKey != nil:
+		apiHandler = s.deps.ProductKey.RequireProductKey(apiHandler)
 	case s.deps.Auth != nil:
 		apiHandler = s.RequireSession(apiHandler)
 	case s.deps.AllowInsecureNoAuth:
-		log.Printf("WARNING: Workspace OAuth not configured; the /api/v1 API is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
+		log.Printf("WARNING: no access gate configured; the /api/v1 API is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
 	default:
-		panic("httpapi: refusing to serve an unauthenticated API: configure Workspace OAuth, or set AllowInsecureNoAuth for local dev only")
+		panic("httpapi: refusing to serve an unauthenticated API: configure a gate (Workspace OAuth or product key), or set AllowInsecureNoAuth for local dev only")
 	}
 
 	rootMux := http.NewServeMux()
@@ -191,6 +205,16 @@ func (s *Server) Routes() http.Handler {
 		rootMux.HandleFunc("GET /auth/login", s.deps.Auth.handleLogin)
 		rootMux.HandleFunc("GET /auth/callback", s.deps.Auth.handleCallback)
 		rootMux.HandleFunc("POST /auth/logout", s.deps.Auth.handleLogout)
+	}
+
+	// Product-key gate entry points (product-key mode). They MUST be reachable without
+	// a session — they are how a tester gets one — so they are registered on rootMux,
+	// OUTSIDE the RequireProductKey wrap, exactly like /healthz and /auth/*. /access
+	// consumes a magic link (?key=); /entry renders/handles the manual key form.
+	if s.deps.ProductKey != nil {
+		rootMux.HandleFunc("GET /access", s.deps.ProductKey.handleAccess)
+		rootMux.HandleFunc("GET /entry", s.deps.ProductKey.handleEntry)
+		rootMux.HandleFunc("POST /entry", s.deps.ProductKey.handleEntrySubmit)
 	}
 
 	// Wrap the JSON surface (rootMux) so its built-in plain-text 404/405 responses
@@ -226,12 +250,14 @@ func (s *Server) Routes() http.Handler {
 	if s.deps.DashboardHTML != nil {
 		var htmlHandler http.Handler = s.deps.DashboardHTML
 		switch {
+		case s.deps.ProductKey != nil:
+			htmlHandler = s.deps.ProductKey.RequireProductKeyHTML(htmlHandler)
 		case s.deps.Auth != nil:
 			htmlHandler = s.RequireSessionHTML(htmlHandler)
 		case s.deps.AllowInsecureNoAuth:
-			log.Printf("WARNING: Workspace OAuth not configured; the SSR dashboard is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
-			// default: unreachable — the /api/v1 switch panicked when Auth is nil and
-			// the insecure opt-in is absent, so Routes() never reaches here open.
+			log.Printf("WARNING: no access gate configured; the SSR dashboard is UNAUTHENTICATED (insecure local/dev mode opted in via AllowInsecureNoAuth). Do NOT use this configuration in production.")
+			// default: unreachable — the /api/v1 switch panicked when no gate is wired
+			// and the insecure opt-in is absent, so Routes() never reaches here open.
 		}
 
 		outerMux := http.NewServeMux()
@@ -242,6 +268,15 @@ func (s *Server) Routes() http.Handler {
 		outerMux.Handle("/healthz", handler)
 		if s.deps.Auth != nil {
 			outerMux.Handle("/auth/", handler)
+		}
+		// Product-key gate pages route to the PUBLIC handler, never the gated "/"
+		// catch-all. This is essential: if /entry fell through to the dashboard's "/"
+		// mount it would be wrapped by RequireProductKeyHTML and redirect to /entry —
+		// an infinite loop. Routing them here keeps the way IN reachable without a
+		// session. ("/access" is an exact path; "/entry" covers GET form + POST submit.)
+		if s.deps.ProductKey != nil {
+			outerMux.Handle("/access", handler)
+			outerMux.Handle("/entry", handler)
 		}
 		// HTML catch-all.
 		outerMux.Handle("/", htmlHandler)

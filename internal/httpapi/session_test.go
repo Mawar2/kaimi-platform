@@ -218,3 +218,48 @@ func flipChar(b byte) string {
 	}
 	return "A"
 }
+
+// TestSetSessionBoundedCapsAtHardCap proves the product-key gate's bounded session can
+// never outlive the key: when the key expires sooner than the TTL, the signed Expiry
+// and cookie Max-Age track the key's expiry; when the TTL is sooner, the TTL wins.
+func TestSetSessionBoundedCapsAtHardCap(t *testing.T) {
+	sm := newSessionManager(testSessionSecret, 12*time.Hour)
+
+	// Hard cap (key expiry) sooner than the 12h TTL → capped at the key expiry.
+	hardCap := time.Now().Add(2 * time.Hour)
+	w := httptest.NewRecorder()
+	sm.SetSessionBounded(w, Session{KeyID: "KAIMI-7F3A-9C2E-B1D4"}, hardCap)
+
+	var c *http.Cookie
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == sessionCookieName {
+			c = ck
+		}
+	}
+	if c == nil {
+		t.Fatal("SetSessionBounded set no session cookie")
+	}
+	// Max-Age should be ~2h (capped), not ~12h (the TTL). Allow generous slack.
+	if c.MaxAge > int((3 * time.Hour).Seconds()) {
+		t.Errorf("Max-Age = %d, want capped near 2h (key expiry), not the 12h TTL", c.MaxAge)
+	}
+	sess, err := sm.verify(c.Value)
+	if err != nil {
+		t.Fatalf("bounded session does not verify: %v", err)
+	}
+	if sess.Expiry > hardCap.Unix()+1 {
+		t.Errorf("signed Expiry %d exceeds key hard cap %d", sess.Expiry, hardCap.Unix())
+	}
+
+	// Hard cap LATER than the TTL → the 12h TTL bounds it instead.
+	w2 := httptest.NewRecorder()
+	farCap := time.Now().Add(100 * time.Hour)
+	sm.SetSessionBounded(w2, Session{KeyID: "KAIMI-7F3A-9C2E-B1D4"}, farCap)
+	for _, ck := range w2.Result().Cookies() {
+		if ck.Name == sessionCookieName {
+			if ck.MaxAge > int((13 * time.Hour).Seconds()) {
+				t.Errorf("Max-Age = %d, want bounded by the 12h TTL when the key outlives it", ck.MaxAge)
+			}
+		}
+	}
+}

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Mawar2/Kaimi/internal/capabilitymap"
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/profile"
@@ -34,6 +36,7 @@ type Handler struct {
 	submittedTmpl  *template.Template
 	editorTmpl     *template.Template
 	onboardingTmpl *template.Template
+	capMapTmpl     *template.Template
 	notFoundTmpl   *template.Template
 	Now            func() time.Time
 
@@ -53,6 +56,32 @@ type Handler struct {
 	// nil = the change-destination control is hidden (no parallel write path is
 	// invented when Drive connect is not wired). See WithDriveTargetSaver.
 	driveTargetSaver DriveTargetSaver
+
+	// samKeySaver persists the tenant's SAM.gov API key from the onboarding "Connect"
+	// step to Secret Manager (see SAMKeySaver). nil = the key field is hidden and the
+	// page shows the deployment-secret note. cmd/api wires it via WithSAMKeySaver.
+	samKeySaver SAMKeySaver
+
+	// contextDocs stores the context documents (capability statements, CPARS, past
+	// proposals) a tester uploads on the onboarding "Connect" step; their extracted
+	// text feeds the capability map. nil = the upload control is hidden. cmd/api wires
+	// it via WithContextDocs.
+	contextDocs contextdoc.Store
+
+	// rebuildMap (re)builds the tenant's capability map from the saved profile + uploaded
+	// docs. The onboarding profile-save and doc-upload handlers call it best-effort after
+	// a successful write — a build failure must never fail the save/upload. nil = no map
+	// is built (the capability-map view shows "not built yet"). cmd/api wires it via
+	// WithCapabilityMapRebuild.
+	rebuildMap func(ctx context.Context) error
+
+	// capMap reads the tenant's capability map for the "Your capability map" view. nil =
+	// the view reports the feature is unavailable. cmd/api wires it via WithCapabilityMap.
+	capMap capabilitymap.Store
+
+	// asyncRun dispatches background work (the capability-map rebuild) off the request
+	// path so onboarding saves return immediately. Defaults to `go fn()`; never nil.
+	asyncRun func(fn func())
 
 	// insecureNoAuth records whether running WITHOUT authentication is an explicit
 	// operator opt-in (the same -insecure-no-auth / KAIMI_INSECURE_NO_AUTH signal
@@ -108,6 +137,9 @@ func NewHandler(svc *Service, opts ...Option) *Handler {
 		svc: svc,
 		mux: http.NewServeMux(),
 		Now: time.Now,
+		// Default dispatcher runs background work in a goroutine so the capability-map
+		// rebuild doesn't block onboarding saves (the Gemini build takes ~15s).
+		asyncRun: func(fn func()) { go fn() },
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -139,6 +171,15 @@ func (h *Handler) setupRoutes() {
 	// editing files. POST-only and CSRF-gated like the profile write; it persists via
 	// the SAME drivetoken target store the JSON PUT endpoint uses (no parallel store).
 	h.mux.HandleFunc("/onboarding/drive/target", postOnly(h.handleOnboardingDriveTarget))
+	// SAM.gov API key entry (onboarding "Connect" step). POST-only and CSRF-gated like
+	// the profile write; it persists to Secret Manager via the injected SAMKeySaver so
+	// each tenant supplies their own key (per-tenant SAM quota isolation).
+	h.mux.HandleFunc("/onboarding/samgov", postOnly(h.handleOnboardingSAMKey))
+	// Context-document upload (onboarding "Connect" step). POST-only, multipart,
+	// CSRF-gated; persists via the contextdoc store whose text feeds the capability map.
+	h.mux.HandleFunc("/onboarding/docs", postOnly(h.handleOnboardingDocUpload))
+	// "Your capability map" view — how Kaimi understands the tenant's business.
+	h.mux.HandleFunc("GET /capability-map", h.handleCapabilityMap)
 	// #246 B3: the working draft is downloadable as Markdown from the workspace.
 	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
@@ -386,6 +427,20 @@ const detailContentTmpl = `{{define "content"}}
   </div>
   {{end}}
 
+  {{if .HasCapMatch}}
+  <div class="dr-sec-h">Why this fits your capabilities</div>
+  {{if .CapMatch.Coverage}}
+  <p class="cap-lead">Matched against your capability map:</p>
+  <div class="cap-chips">
+    {{range .CapMatch.Competencies}}<span class="cap-chip cap-chip--strong">{{.}}</span>{{end}}
+    {{range .CapMatch.Domains}}<span class="cap-chip cap-chip--dom">{{.}}</span>{{end}}
+    {{range .CapMatch.Keywords}}<span class="cap-chip">{{.}}</span>{{end}}
+  </div>
+  {{else}}
+  <p class="cap-lead">No direct capability matches in the listing summary. Kaimi will assess fit more deeply against the full solicitation text.</p>
+  {{end}}
+  {{end}}
+
   <div class="dr-sec-h">Identification</div>
   <table class="kv">
     <tr><td>ID</td><td>{{.Opp.ID}}</td></tr>
@@ -412,7 +467,16 @@ const detailContentTmpl = `{{define "content"}}
   </table>
 
   <div class="dr-sec-h">Description</div>
-  {{if .Opp.Description}}<pre class="detail-pre">{{.Opp.Description}}</pre>{{else}}<p>&mdash;</p>{{end}}
+  {{if isHTTPURL .Opp.Description}}<p><a href="{{.Opp.Description}}" target="_blank" rel="noopener noreferrer">View the full solicitation description on SAM.gov ↗</a></p>
+  {{else if .Opp.Description}}<pre class="detail-pre">{{.Opp.Description}}</pre>
+  {{else}}<p>&mdash;</p>{{end}}
+
+  {{if .Opp.Attachments}}
+  <div class="dr-sec-h">Solicitation documents</div>
+  <ul class="dr-attach">
+    {{range .Opp.Attachments}}<li><a href="{{.}}" target="_blank" rel="noopener noreferrer">{{.}}</a></li>{{end}}
+  </ul>
+  {{end}}
 
   <div class="dr-sec-h">Scoring</div>
   <table class="kv">
@@ -442,6 +506,11 @@ const detailContentTmpl = `{{define "content"}}
   .kv td:first-child { color: var(--ink-3); width: 200px; background: var(--surface-2); }
   .detail-pre { white-space: pre-wrap; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--s-3); font: var(--t-small); margin: 0; }
   .deadline-soon { background: var(--st-failed-bg); color: var(--st-failed); font-weight: bold; }
+  .cap-lead { font: var(--t-small); color: var(--ink-3); margin: 0 0 var(--s-2); }
+  .cap-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+  .cap-chip { font: var(--t-small); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-pill, 999px); padding: 3px 10px; color: var(--ink-2); }
+  .cap-chip--strong { background: var(--st-ok-bg, #e7f7ee); color: var(--st-ok, #1a7f4b); border-color: transparent; font-weight: 600; }
+  .cap-chip--dom { background: var(--st-progress-bg, #e7eeff); color: var(--st-progress, #2563eb); border-color: transparent; }
 </style>
 {{end}}
 `
@@ -495,6 +564,12 @@ func (h *Handler) setupTemplates() {
 			}
 			return s
 		},
+		// isHTTPURL reports whether a string is an http(s) URL — used to render the
+		// SAM.gov description (which the API returns as a noticedesc URL, not text) as
+		// a link rather than dumping the raw URL as prose.
+		"isHTTPURL": func(s string) bool {
+			return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+		},
 	}
 	h.listTmpl = template.Must(template.Must(
 		template.New("list").Funcs(funcMap).Parse(shellTmpl)).Parse(listContentTmpl))
@@ -509,6 +584,7 @@ func (h *Handler) setupTemplates() {
 	// The editor is a standalone full-page surface — no app shell.
 	h.editorTmpl = template.Must(template.New("editor").Funcs(funcMap).Parse(editorPageTmpl))
 	h.onboardingTmpl = onboardingTemplate(funcMap)
+	h.capMapTmpl = capabilityMapTemplate(funcMap)
 	h.notFoundTmpl = template.Must(template.New("notfound").Funcs(funcMap).Parse(notFoundTmplStr))
 }
 
@@ -659,6 +735,9 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 	// Opportunities tab the moment it is pursued. Pursued opps still feed the
 	// pipeline counts below (computed from the unfiltered `all`).
 	opts.ExcludeSelected = true
+	// Drop solicitations whose response deadline has already passed — a tester can't
+	// bid them, so they're noise on the Opportunities board.
+	opts.ExcludeExpired = true
 
 	rows, err := h.svc.List(ctx, opts)
 	if err != nil {
@@ -811,6 +890,12 @@ type DetailData struct {
 	DeadlineDays                                                          int
 	DeadlineSoon                                                          bool
 	PostedDateStr, CreatedAtStr, UpdatedAtStr, ScoredAtStr, SelectedAtStr string
+
+	// HasCapMatch is true when a capability map is wired and was read; CapMatch holds
+	// which of the tenant's competencies/keywords/domains appear in this solicitation —
+	// the "why this fits your capabilities" rationale (additive; does not change the score).
+	HasCapMatch bool
+	CapMatch    capabilitymap.Match
 }
 
 func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
@@ -862,6 +947,22 @@ func (h *Handler) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if !opp.ResponseDeadline.IsZero() {
 		data.DeadlineStr = opp.ResponseDeadline.Format("2006-01-02")
 		data.DeadlineLabel, data.DeadlineDays = deadlineDisplay(opp.ResponseDeadline, now)
+	}
+
+	// Capability-aware qualification (additive, does not change the score): match the
+	// tenant's capability map against this solicitation's text and show the rationale.
+	// Best-effort — a missing/unbuilt map simply omits the section.
+	if h.capMap != nil {
+		if cm, mErr := h.capMap.Load(); mErr == nil && cm != nil {
+			text := opp.Title + " " + opp.Agency + " " + opp.NAICSDescription
+			// opp.Description is often a SAM noticedesc URL (not text); only include it
+			// when it's real prose (resolving the URL to text is the scoring phase).
+			if !strings.HasPrefix(opp.Description, "http") {
+				text += " " + opp.Description
+			}
+			data.CapMatch = cm.Match(text)
+			data.HasCapMatch = true
+		}
 	}
 
 	// Shell counts for the sidebar — same grouping as every other screen.

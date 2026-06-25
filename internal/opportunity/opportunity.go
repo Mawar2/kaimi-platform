@@ -45,6 +45,12 @@ type Opportunity struct {
 	URL         string   `json:"url"`         // Link to SAM.gov opportunity page
 	Attachments []string `json:"attachments"` // URLs to attached documents (RFPs, etc.)
 
+	// ResolvedDescription is the solicitation's full description TEXT. The SAM v2 search
+	// API returns Description as a `noticedesc` URL, not prose; a resolver fetches that
+	// URL → text and stores it here for the eligible set only (SAM-quota-bounded). Additive
+	// and omitempty: older records simply omit it. Use EffectiveDescription to read.
+	ResolvedDescription string `json:"resolved_description,omitempty"`
+
 	// Scoring (populated by Scorer in Phase 1)
 	Score          float64    `json:"score"`                    // Bid/no-bid score (0.0-1.0)
 	ScoreReasoning string     `json:"score_reasoning"`          // LLM's reasoning for the score
@@ -84,6 +90,17 @@ type Opportunity struct {
 	TenantID  string    `json:"tenant_id,omitempty"` // owning deployment/org; empty on legacy records
 	CreatedAt time.Time `json:"created_at"`          // When opportunity was first saved
 	UpdatedAt time.Time `json:"updated_at"`          // Last update timestamp
+}
+
+// EffectiveDescription returns the resolved solicitation text when it has been fetched,
+// otherwise the raw Description. The Scorer (and capability-match) read this so they work
+// against real prose rather than the SAM `noticedesc` URL that the search API returns in
+// Description. Behavior is unchanged for records that have no resolved text yet.
+func (o *Opportunity) EffectiveDescription() string {
+	if o.ResolvedDescription != "" {
+		return o.ResolvedDescription
+	}
+	return o.Description
 }
 
 // SolicitationDoc records one solicitation attachment after it has been ingested:
