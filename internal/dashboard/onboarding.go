@@ -153,26 +153,54 @@ func WithCapabilityMapRebuild(fn func(ctx context.Context) error) Option {
 // slow part). Generous headroom, not a tight estimate.
 const mapRebuildTimeout = 3 * time.Minute
 
-// triggerMapRebuild runs the capability-map rebuild hook best-effort and ASYNCHRONOUSLY:
-// it dispatches the rebuild off the request path (via h.asyncRun) so the onboarding save
-// returns immediately rather than blocking ~15s on the Gemini build. The background work
-// uses a fresh, bounded context — NOT the request's, which is canceled once the handler
-// returns. A nil hook is a no-op; failures are logged, never surfaced to the user.
+// triggerMapRebuild runs the capability-map rebuild hook best-effort, ASYNCHRONOUSLY, and
+// COALESCED: it dispatches off the request path (via h.asyncRun) so onboarding saves return
+// immediately, and serializes rebuilds so concurrent triggers (a profile save then an
+// immediate doc upload) can't race — the worker loops once more whenever a trigger arrived
+// mid-run, so the final map always reflects the latest profile + docs. The work uses a
+// fresh, bounded context (NOT the request's, which is canceled when the handler returns).
+// A nil hook is a no-op; failures and panics are logged, never surfaced to the user.
 func (h *Handler) triggerMapRebuild() {
 	if h.rebuildMap == nil {
 		return
 	}
+
+	h.rebuildState.mu.Lock()
+	if h.rebuildState.running {
+		// A rebuild is in flight; mark pending so it runs once more with the latest data.
+		h.rebuildState.pending = true
+		h.rebuildState.mu.Unlock()
+		return
+	}
+	h.rebuildState.running = true
+	h.rebuildState.mu.Unlock()
+
 	h.asyncRun(func() {
-		// Recover: a panic in the background rebuild must never crash the API process.
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("dashboard: capability-map rebuild panicked (recovered): %v", r)
+		for {
+			// Each rebuild reads the current profile + docs, so the last run reflects the
+			// latest state. Wrapped so a panic can't crash the process or wedge the loop.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("dashboard: capability-map rebuild panicked (recovered): %v", r)
+					}
+				}()
+				ctx, cancel := context.WithTimeout(context.Background(), mapRebuildTimeout)
+				defer cancel()
+				if err := h.rebuildMap(ctx); err != nil {
+					log.Printf("dashboard: capability-map rebuild failed (non-fatal): %v", err)
+				}
+			}()
+
+			h.rebuildState.mu.Lock()
+			if h.rebuildState.pending {
+				h.rebuildState.pending = false
+				h.rebuildState.mu.Unlock()
+				continue // a trigger arrived during the run — rebuild once more.
 			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), mapRebuildTimeout)
-		defer cancel()
-		if err := h.rebuildMap(ctx); err != nil {
-			log.Printf("dashboard: capability-map rebuild failed (non-fatal): %v", err)
+			h.rebuildState.running = false
+			h.rebuildState.mu.Unlock()
+			return
 		}
 	})
 }

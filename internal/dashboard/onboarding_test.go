@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,6 +132,54 @@ func TestOnboardingTriggersMapRebuild(t *testing.T) {
 		t.Fatalf("doc upload status = %d, want 303", urec.Code)
 	}
 	waitRebuild(t, uploadFired, "doc upload")
+}
+
+// TestMapRebuildCoalescesConcurrentTriggers proves the rebuild is serialized + coalesced:
+// triggers arriving while a rebuild is in flight collapse into exactly ONE follow-up run
+// (against the latest data), so a profile-save-then-immediate-doc-upload can't leave the
+// map reflecting only the earlier state.
+func TestMapRebuildCoalescesConcurrentTriggers(t *testing.T) {
+	const token = "coalesce-csrf"
+	var calls int32
+	enter := make(chan struct{}, 16)
+	release := make(chan struct{})
+	h := newOnboardingHandler(t,
+		dashboard.WithProfileStore(&memProfileStore{}),
+		identityOpt("u@example.com", token),
+		dashboard.WithCapabilityMapRebuild(func(context.Context) error {
+			atomic.AddInt32(&calls, 1)
+			enter <- struct{}{}
+			<-release
+			return nil
+		}))
+
+	post := func() {
+		form := url.Values{"company": {"Acme"}, "naics": {"541512"}, "csrf_token": {token}}
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/profile", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("profile save status = %d, want 303", rec.Code)
+		}
+	}
+
+	post()  // trigger #1 → rebuild #1 starts
+	<-enter // rebuild #1 is running (blocked on release)
+	post()  // trigger #2 while #1 runs → pending
+	post()  // trigger #3 while #1 runs → still just pending (coalesced)
+	release <- struct{}{}
+	<-enter // exactly one follow-up rebuild runs (covers #2 and #3)
+	release <- struct{}{}
+
+	select {
+	case <-enter:
+		t.Fatal("a third rebuild ran; concurrent triggers should have coalesced into one")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("rebuild ran %d times, want 2 (initial + one coalesced follow-up)", got)
+	}
 }
 
 // newEmptyService builds a dashboard.Service over a fresh empty JSON store so the app
