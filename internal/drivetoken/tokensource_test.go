@@ -8,9 +8,10 @@ import (
 )
 
 // TestOAuthConfigCarriesDriveScopes verifies the OAuth config built for the
-// connect flow requests EXACTLY the minimal scopes: drive.file and documents — and
-// NOT the full-drive scope. Minimal scope is a security requirement (WS-C2): the
-// app may only touch files it creates, never the customer's whole Drive.
+// connect flow requests EXACTLY the minimal drive.file scope — and NOT the
+// sensitive `documents` scope nor the broad full-drive scope. Minimal,
+// non-sensitive scope is a security requirement (WS-C2): the app may only touch
+// files it creates, never the customer's whole Drive or arbitrary Docs.
 func TestOAuthConfigCarriesDriveScopes(t *testing.T) {
 	oc := NewOAuthConfig("client-id", "client-secret", "https://app.example.com/api/v1/integrations/drive/callback")
 
@@ -22,11 +23,14 @@ func TestOAuthConfigCarriesDriveScopes(t *testing.T) {
 	if !got[ScopeDriveFile] {
 		t.Errorf("scopes %v missing drive.file scope %q", oc.Scopes, ScopeDriveFile)
 	}
-	if !got[ScopeDocuments] {
-		t.Errorf("scopes %v missing documents scope %q", oc.Scopes, ScopeDocuments)
-	}
 	if got[scopeFullDrive] {
 		t.Errorf("scopes %v must NOT include the full-drive scope %q", oc.Scopes, scopeFullDrive)
+	}
+	// Regression guard: the sensitive Docs scope must never be requested now that
+	// Doc creation goes through Drive (HTML upload + conversion), not the Docs API.
+	const docsScope = "https://www.googleapis.com/auth/documents"
+	if got[docsScope] {
+		t.Errorf("scopes %v must NOT include the sensitive documents scope %q", oc.Scopes, docsScope)
 	}
 }
 

@@ -6,19 +6,19 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
 )
 
-// OAuth scopes requested for the customer-Drive connection. These are MINIMAL by
-// design (a WS-C2 security requirement): the app may only touch files it creates
-// and the Docs it writes — it can NEVER see or modify the customer's whole Drive.
+// OAuth scopes requested for the customer-Drive connection. We request ONLY
+// drive.file: a minimal, non-sensitive scope that needs no Google verification.
+// The app may only touch files it creates itself — it can NEVER see or modify
+// the customer's existing Drive contents. Doc creation no longer uses the Docs
+// API (Docs are created by uploading rendered HTML via Drive with conversion),
+// so the sensitive `documents` scope is deliberately not requested.
 const (
 	// ScopeDriveFile lets the app create and manage ONLY files it creates itself
 	// (drive.file), not the user's existing Drive contents.
 	ScopeDriveFile = drive.DriveFileScope
-	// ScopeDocuments lets the app read/write Google Docs content (documents).
-	ScopeDocuments = docs.DocumentsScope
 
 	// scopeFullDrive is the broad full-Drive scope we deliberately do NOT request.
 	// It is named only so tests can assert its absence.
@@ -38,9 +38,9 @@ type OAuthClient struct {
 }
 
 // NewOAuthConfig builds the oauth2.Config for the customer-Drive connect flow. It
-// requests the minimal Drive scopes against Google's endpoint with the given client
-// credentials and this service's callback URL. The same config is used both to
-// build the consent URL and to exchange/refresh tokens, so the scopes stay
+// requests the minimal drive.file scope against Google's endpoint with the given
+// client credentials and this service's callback URL. The same config is used both
+// to build the consent URL and to exchange/refresh tokens, so the scope stays
 // consistent across connect, callback, and auto-refresh.
 func NewOAuthConfig(clientID, clientSecret, redirectURL string) *oauth2.Config {
 	return &oauth2.Config{
@@ -48,7 +48,7 @@ func NewOAuthConfig(clientID, clientSecret, redirectURL string) *oauth2.Config {
 		ClientSecret: clientSecret,
 		RedirectURL:  redirectURL,
 		Endpoint:     google.Endpoint,
-		Scopes:       []string{ScopeDriveFile, ScopeDocuments},
+		Scopes:       []string{ScopeDriveFile},
 	}
 }
 

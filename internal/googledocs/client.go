@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"strings"
 
 	"golang.org/x/oauth2"
-	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -108,11 +109,11 @@ type Config struct {
 //
 // If config.UseCached is true, returns a client that returns deterministic fixture
 // data with no network calls. Otherwise, returns a live client that creates and
-// populates real Docs via the Drive and Docs APIs, authenticating with either a
-// service-account JSON key (CredentialsJSON) or Application Default Credentials
-// (UseADC).
+// populates real Docs via the Drive API alone (uploading rendered HTML with
+// conversion), authenticating with either a service-account JSON key
+// (CredentialsJSON) or Application Default Credentials (UseADC).
 //
-// NewClient takes a context because building live Drive/Docs services requires one.
+// NewClient takes a context because building the live Drive service requires one.
 func NewClient(ctx context.Context, cfg Config) (Client, error) {
 	if cfg.UseCached {
 		return newCachedClient()
@@ -193,16 +194,16 @@ func (c *cachedClient) CreateDoc(_ context.Context, doc Document) (*CreatedDoc, 
 	}, nil
 }
 
-// liveClient implements Client using real Drive and Docs API calls.
+// liveClient implements Client using real Drive API calls.
 type liveClient struct {
 	driveSvc      *drive.Service
-	docsSvc       *docs.Service
 	destinationID string
 }
 
 // newLiveClient creates a client that creates and populates real Docs via the
-// Drive and Docs APIs. It authenticates with a service-account JSON key
-// (cfg.CredentialsJSON) or Application Default Credentials (cfg.UseADC).
+// Drive API alone (uploading rendered HTML with conversion). It authenticates
+// with a service-account JSON key (cfg.CredentialsJSON) or Application Default
+// Credentials (cfg.UseADC).
 func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
 	if cfg.DestinationID == "" {
 		return nil, fmt.Errorf("destination folder ID is required for live mode")
@@ -220,14 +221,8 @@ func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
 		return nil, fmt.Errorf("failed to create Drive service: %w", err)
 	}
 
-	docsSvc, err := docs.NewService(ctx, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Docs service: %w", err)
-	}
-
 	return &liveClient{
 		driveSvc:      driveSvc,
-		docsSvc:       docsSvc,
 		destinationID: cfg.DestinationID,
 	}, nil
 }
@@ -235,8 +230,9 @@ func newLiveClient(ctx context.Context, cfg Config) (*liveClient, error) {
 // authClientOptions resolves the Google API client options from a Config's
 // credential fields. Authentication precedence: a per-user OAuth TokenSource wins
 // over a service-account key, which wins over ADC. The TokenSource path is the
-// WS-C2 customer-Drive seam: when set, the services authenticate as the customer's
-// own Workspace user, so Docs are created in their Drive. option.WithTokenSource
+// WS-C2 customer-Drive seam: when set, the Drive service authenticates as the
+// customer's own Workspace user, so Docs are created in their Drive.
+// option.WithTokenSource
 // uses the source's token and lets it auto-refresh.
 //
 // It returns nil (no options) for the ADC case AND for the no-credential case;
@@ -321,21 +317,24 @@ func EnsureFolder(ctx context.Context, ts oauth2.TokenSource, name string) (fold
 // CreateDoc creates a Google Doc inside the configured Shared Drive and populates
 // it with the given title and sections.
 //
-// The Docs API cannot create a document directly inside a folder or Shared Drive,
-// so this happens in two steps: create the file via the Drive API with the Shared
-// Drive as its parent, then populate its content via the Docs API.
+// It uses the Drive API ALONE: the Document is rendered to HTML and uploaded as
+// the file's media with conversion (uploading text/html against the Google Doc
+// MIME type makes Drive convert it into a native Doc). This deliberately avoids
+// the Docs API and its sensitive `documents` OAuth scope — a single Drive
+// Files.Create with the Shared Drive as the parent does both create and populate.
 func (l *liveClient) CreateDoc(ctx context.Context, doc Document) (*CreatedDoc, error) {
 	if err := validateDocument(doc); err != nil {
 		return nil, err
 	}
 
-	file := &drive.File{
+	htmlBody := renderDocumentHTML(doc)
+
+	created, err := l.driveSvc.Files.Create(&drive.File{
 		Name:     doc.Title,
 		MimeType: "application/vnd.google-apps.document",
 		Parents:  []string{l.destinationID},
-	}
-
-	created, err := l.driveSvc.Files.Create(file).
+	}).
+		Media(strings.NewReader(htmlBody), googleapi.ContentType("text/html")).
 		SupportsAllDrives(true).
 		Fields("id").
 		Context(ctx).
@@ -344,71 +343,56 @@ func (l *liveClient) CreateDoc(ctx context.Context, doc Document) (*CreatedDoc, 
 		return nil, fmt.Errorf("failed to create Doc in Shared Drive: %w", err)
 	}
 
-	if reqs := buildRequests(doc); len(reqs) > 0 {
-		_, err := l.docsSvc.Documents.
-			BatchUpdate(created.Id, &docs.BatchUpdateDocumentRequest{Requests: reqs}).
-			Context(ctx).
-			Do()
-		if err != nil {
-			return nil, fmt.Errorf("failed to populate Doc content: %w", err)
-		}
-	}
-
 	return &CreatedDoc{
 		ID:  created.Id,
 		URL: docURL(created.Id),
 	}, nil
 }
 
-// buildRequests converts a Document's sections into an ordered list of Docs API
-// batchUpdate requests: each section inserts its heading text, styles that text
-// as HEADING_1, then inserts its body text below.
+// renderDocumentHTML renders a Document to a minimal HTML document that Drive can
+// convert into a native Google Doc on upload. The title becomes an <h1>; each
+// section's heading (when present) becomes an <h2>, and each of its body
+// paragraphs becomes a <p>.
 //
-// Requests insert text at a running cursor index that starts at 1 (the first
-// character position of a Doc's body) and advances by the length of each
-// inserted string.
-//
-// NOTE: Docs API indices are UTF-16 code units, not byte or rune counts. This
-// cursor arithmetic assumes ASCII-range text, which holds for the section
-// headings and rationale Outline currently generates. If solicitation-derived
-// text containing characters outside the Basic Multilingual Plane's single-unit
-// range is ever rendered here, this will need to switch to counting UTF-16 code
-// units (e.g. via utf16.Encode) instead of len().
-func buildRequests(doc Document) []*docs.Request {
-	var reqs []*docs.Request
-	index := int64(1)
+// All text is escaped with html.EscapeString to prevent any HTML/script in the
+// content from being interpreted. Note html.EscapeString does NOT touch '[',
+// ']', or ':', so "[GAP: …]" markers survive verbatim into the converted Doc.
+func renderDocumentHTML(doc Document) string {
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>`)
+	b.WriteString("<h1>")
+	b.WriteString(html.EscapeString(doc.Title))
+	b.WriteString("</h1>")
 
 	for _, sec := range doc.Sections {
-		headingText := sec.Heading + "\n"
-		reqs = append(reqs,
-			&docs.Request{
-				InsertText: &docs.InsertTextRequest{
-					Text:     headingText,
-					Location: &docs.Location{Index: index},
-				},
-			},
-			&docs.Request{
-				UpdateParagraphStyle: &docs.UpdateParagraphStyleRequest{
-					Range: &docs.Range{
-						StartIndex: index,
-						EndIndex:   index + int64(len(headingText)),
-					},
-					ParagraphStyle: &docs.ParagraphStyle{NamedStyleType: "HEADING_1"},
-					Fields:         "namedStyleType",
-				},
-			},
-		)
-		index += int64(len(headingText))
-
-		bodyText := sec.Body + "\n\n"
-		reqs = append(reqs, &docs.Request{
-			InsertText: &docs.InsertTextRequest{
-				Text:     bodyText,
-				Location: &docs.Location{Index: index},
-			},
-		})
-		index += int64(len(bodyText))
+		if sec.Heading != "" {
+			b.WriteString("<h2>")
+			b.WriteString(html.EscapeString(sec.Heading))
+			b.WriteString("</h2>")
+		}
+		for _, para := range splitParagraphs(sec.Body) {
+			b.WriteString("<p>")
+			b.WriteString(html.EscapeString(para))
+			b.WriteString("</p>")
+		}
 	}
 
-	return reqs
+	b.WriteString("</body></html>")
+	return b.String()
+}
+
+// splitParagraphs splits a section body into paragraphs. Outline bodies use a
+// SINGLE "\n" between lines (not blank-line-separated paragraphs), so it splits
+// on every "\n" after normalizing Windows "\r\n" line endings. Each resulting
+// line is trimmed, and empty lines are dropped.
+func splitParagraphs(body string) []string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	var paras []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			paras = append(paras, line)
+		}
+	}
+	return paras
 }
