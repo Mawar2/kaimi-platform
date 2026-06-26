@@ -28,7 +28,9 @@ import (
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
+	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
+	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
 	"github.com/Mawar2/Kaimi/internal/hunttrigger"
 	"github.com/Mawar2/Kaimi/internal/ingest"
@@ -164,6 +166,10 @@ func run() error {
 	}
 	var driveHandler *httpapi.DriveHandler
 	var customerDriveOAuth *drivetoken.OAuthClient
+	// proposalDriveSaver writes a finished proposal into the tenant's connected Drive as an
+	// editable Google Doc (the workspace "Save to Google Drive" action). nil when Drive
+	// connect is not configured. Uses the EXISTING Docs/Drive client — no new API.
+	var proposalDriveSaver dashboard.ProposalDriveSaver
 	if driveEnabled {
 		driveTokenStore, err := drivetoken.NewJSONTokenStore(*storePath)
 		if err != nil {
@@ -176,6 +182,39 @@ func run() error {
 		driveHandler, err = httpapi.NewDriveHandler(driveOAuthCfg, driveTokenStore, driveTargetStore)
 		if err != nil {
 			return fmt.Errorf("build drive handler: %w", err)
+		}
+		// Build the saver over the same stores: refresh the customer's token, resolve their
+		// target folder, and create the Doc as that user (so it lands in THEIR Drive).
+		driveOC := drivetoken.NewOAuthConfig(driveOAuthCfg.ClientID, driveOAuthCfg.ClientSecret, driveOAuthCfg.RedirectURL)
+		tokStore, tgtStore := driveTokenStore, driveTargetStore
+		proposalDriveSaver = func(ctx context.Context, doc *document.Document) (string, error) {
+			ts, terr := drivetoken.TokenSourceFromStore(ctx, tokStore, driveOC)
+			if terr != nil {
+				if errors.Is(terr, drivetoken.ErrNotConnected) {
+					return "", dashboard.ErrDriveNotConnected
+				}
+				return "", terr
+			}
+			tgt, gerr := tgtStore.Load()
+			if gerr != nil {
+				if errors.Is(gerr, drivetoken.ErrNotConnected) {
+					return "", dashboard.ErrDriveNotConnected
+				}
+				return "", gerr
+			}
+			client, cerr := googledocs.NewClient(ctx, googledocs.Config{TokenSource: ts, DestinationID: tgt.DriveID})
+			if cerr != nil {
+				return "", cerr
+			}
+			gdoc := googledocs.Document{Title: doc.Title}
+			for i := range doc.Sections {
+				gdoc.Sections = append(gdoc.Sections, googledocs.DocSection{Heading: doc.Sections[i].Heading, Body: doc.Sections[i].Body})
+			}
+			created, derr := client.CreateDoc(ctx, gdoc)
+			if derr != nil {
+				return "", derr
+			}
+			return created.URL, nil
 		}
 		// Same client credentials let the proposal pipeline refresh the stored token
 		// so Docs land in the customer's Drive once connected.
@@ -457,6 +496,11 @@ func run() error {
 				return rec.Key, rec.ExpiresAt, nil
 			}))
 		log.Printf("Self-serve team invites enabled (invite TTL %s)", inviteTTL)
+	}
+
+	if proposalDriveSaver != nil {
+		dashboardOpts = append(dashboardOpts, dashboard.WithProposalDriveSaver(proposalDriveSaver))
+		log.Printf("Workspace 'Save to Google Drive' enabled (writes editable Docs to the connected Drive)")
 	}
 
 	dashboardHTML := dashboard.NewHandler(dashboardSvc, dashboardOpts...)

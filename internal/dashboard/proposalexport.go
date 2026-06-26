@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -10,6 +12,57 @@ import (
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/export"
 )
+
+// ErrDriveNotConnected is returned by a ProposalDriveSaver when the tenant has not connected
+// their Google Drive yet, so the handler can redirect them to the Connect step instead of
+// erroring. cmd/api maps the drivetoken "not connected" error to this.
+var ErrDriveNotConnected = errors.New("dashboard: customer Google Drive is not connected")
+
+// ProposalDriveSaver writes the finished proposal into the tenant's connected Google Drive as
+// an editable Google Doc and returns the Doc's URL. cmd/api implements it over the existing
+// customer-Drive token + target folder + the googledocs client (no new API).
+type ProposalDriveSaver func(ctx context.Context, doc *document.Document) (docURL string, err error)
+
+// WithProposalDriveSaver enables the workspace "Save to Google Drive" action. Without it, the
+// action is hidden.
+func WithProposalDriveSaver(fn ProposalDriveSaver) Option {
+	return func(h *Handler) { h.saveToDrive = fn }
+}
+
+// handleSaveToDrive serves POST /workspace/{id}/save-to-drive: it creates an editable Google
+// Doc of the proposal in the tenant's connected Drive and redirects them straight into that
+// Doc (to tweak + share). FAILS CLOSED on auth + CSRF. When Drive isn't connected it sends
+// them to the onboarding Connect step instead of erroring.
+func (h *Handler) handleSaveToDrive(w http.ResponseWriter, r *http.Request) {
+	if h.saveToDrive == nil {
+		http.Error(w, "Google Drive save is not available on this server", http.StatusServiceUnavailable)
+		return
+	}
+	// Session-gated like the other workspace POSTs (approve/changes/submit); the __Host-
+	// session cookie's SameSite=Lax is the cross-site-POST defense, so no separate CSRF token.
+	id := r.PathValue("id")
+	if !opportunityIDPattern.MatchString(id) {
+		h.renderNotFound(w, id)
+		return
+	}
+	doc, err := h.proposals.Document(id)
+	if err != nil {
+		h.renderNotFound(w, id)
+		return
+	}
+	url, err := h.saveToDrive(r.Context(), doc)
+	if err != nil {
+		if errors.Is(err, ErrDriveNotConnected) {
+			http.Redirect(w, r, onboardingPath+"?step=connect", http.StatusSeeOther)
+			return
+		}
+		log.Printf("dashboard: save proposal to Drive failed: %v", err)
+		http.Error(w, "failed to save to Google Drive", http.StatusInternalServerError)
+		return
+	}
+	// Land the tenant directly in their new editable Doc in Drive.
+	http.Redirect(w, r, url, http.StatusSeeOther)
+}
 
 // handleProposalDOCX serves the proposal as a Microsoft Word (.docx) download — the editable
 // copy a tenant shares with teammates/partners and revises before submission. It renders from
