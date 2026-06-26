@@ -129,6 +129,7 @@ const teamContentTmpl = `{{define "content"}}
 .team-link{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; color:var(--ink-2); }
 .team-note{ font-size:13px; color:var(--ink-soft); margin-top:18px; line-height:1.5; }
 </style>
+<div class="page">
 <div class="page-head">
   <div class="eyebrow">Account</div>
   <h1>Team</h1>
@@ -137,7 +138,7 @@ const teamContentTmpl = `{{define "content"}}
 {{if .Enabled}}
 <div class="team-panel">
   <h3>Invite a teammate</h3>
-  <p class="team-sub">Enter their email and we'll create a private access link that signs them straight into this workspace — no Google sign-in or allow-list needed.</p>
+  <p class="team-sub">Enter their email and we'll create a private access link that signs them straight into this workspace, with no Google sign-in or allow-list needed.</p>
   {{if .FormErr}}<div class="team-err">{{.FormErr}}</div>{{end}}
   <form method="POST" action="/team/invite" class="team-form">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
@@ -147,7 +148,7 @@ const teamContentTmpl = `{{define "content"}}
   {{if .InviteLink}}
   <div class="team-result">
     <div class="team-result-h">` + iconCheck + `Invite ready for {{.InvitedEmail}}</div>
-    <p class="team-sub">Send them this private link — it signs them straight in. Access expires {{.InviteExpiry}}; you can revoke it anytime.</p>
+    <p class="team-sub">Send them this private link; it signs them straight in. Access expires {{.InviteExpiry}}; you can revoke it anytime.</p>
     <div class="team-link-row">
       <input type="text" readonly value="{{.InviteLink}}" id="team-link" class="team-input team-link" onclick="this.select()">
       <button type="button" class="team-btn team-copy" onclick="navigator.clipboard.writeText(document.getElementById('team-link').value);this.textContent='Copied ✓'">Copy link</button>
@@ -159,4 +160,5 @@ const teamContentTmpl = `{{define "content"}}
 {{else}}
 <div class="empty2"><div class="g">` + iconTeam + `</div><h3>Team invites aren't enabled</h3><p>This deployment isn't configured to mint teammate access. Contact your administrator.</p></div>
 {{end}}
+</div>
 {{end}}`

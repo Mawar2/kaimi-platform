@@ -432,11 +432,16 @@ const appStylesCSS = `
 
 body{ background: var(--app-bg); color: var(--ink); }
 
-.app{ display:grid; grid-template-columns: var(--sidebar) 1fr; min-height:100vh; }
+/* Fixed app shell: the grid is exactly the viewport height and never scrolls itself;
+   the sidebar and the main column each scroll internally. This avoids the Firefox bug
+   where a position:sticky grid item with height:100vh prevents the document from
+   scrolling at all (Chrome tolerates it; Firefox/Zen do not). Mobile reverts to normal
+   document scroll in the @media block below. */
+.app{ display:grid; grid-template-columns: var(--sidebar) 1fr; height:100vh; overflow:hidden; }
 
 /* ---------------- sidebar ---------------- */
 .side{ border-right:1px solid var(--line); padding:22px 16px; display:flex; flex-direction:column; gap:6px;
-  position:sticky; top:0; height:100vh; background:#fff; }
+  height:100vh; overflow-y:auto; background:#fff; }
 .side .logo{ display:flex; align-items:center; gap:11px; padding:6px 8px 20px; }
 .side .logo .mk{ width:34px;height:34px;border-radius:10px;flex:none;
   background:linear-gradient(150deg,var(--blue-600),var(--blue-900)); display:grid;place-items:center; }
@@ -464,7 +469,7 @@ body{ background: var(--app-bg); color: var(--ink); }
 .side .me .who span{ font-size:11.5px; color:var(--ink-4); }
 
 /* ---------------- main ---------------- */
-.main{ min-width:0; }
+.main{ min-width:0; height:100vh; overflow-y:auto; }
 .page{ max-width:1080px; margin:0 auto; padding:38px 44px 80px; }
 .page-head{ margin-bottom:30px; }
 .page-head .eyebrow{ font:600 12px/1 var(--font-sans); letter-spacing:0.1em; text-transform:uppercase; color:var(--accent); }
@@ -705,8 +710,11 @@ body{ background: var(--app-bg); color: var(--ink); }
 .empty2 h3{ font:650 18px/1.2 var(--font-sans); } .empty2 p{ color:var(--ink-soft); font-size:14px; max-width:38ch; }
 
 @media (max-width:860px){
-  .app{ grid-template-columns:1fr; }
-  .side{ position:static; height:auto; flex-direction:row; align-items:center; flex-wrap:wrap; }
+  /* On narrow screens revert to normal document scroll: the sidebar becomes a top bar
+     and the page (body) scrolls, so the fixed-shell internal-scroll does not apply. */
+  .app{ grid-template-columns:1fr; height:auto; overflow:visible; }
+  .side{ position:static; height:auto; overflow:visible; flex-direction:row; align-items:center; flex-wrap:wrap; }
+  .main{ height:auto; overflow:visible; }
   .side .spacer, .side .me, .side .nav-h{ display:none; }
 }
 
