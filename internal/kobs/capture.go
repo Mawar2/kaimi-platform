@@ -24,22 +24,22 @@ type Capture struct {
 // previously installed emitter and shuts the capture emitter down; callers
 // should defer it so a failed assertion never leaks capture state into another
 // test. Read recorded events with Drain (which flushes first).
-func NewCapture() (*Capture, func()) {
-	c := &Capture{}
+func NewCapture() (capture *Capture, restore func()) {
+	capture = &Capture{}
 	// A single worker keeps delivery order deterministic for assertions.
-	c.em = emit.New(c, emit.Config{Workers: 1})
-	prev := handle.Swap(c.em)
-	restore := func() {
+	capture.em = emit.New(capture, emit.Config{Workers: 1})
+	prev := handle.Swap(capture.em)
+	restore = func() {
 		handle.Store(prev)
 		// Shutdown drains and closes the capture emitter; the error is ignored
 		// because this is teardown of a test-only emitter.
-		_ = c.em.Shutdown(context.Background())
+		_ = capture.em.Shutdown(context.Background())
 	}
-	return c, restore
+	return capture, restore
 }
 
 // Emit records ev. It satisfies sink.EventSink.
-func (c *Capture) Emit(_ context.Context, ev event.Event) error {
+func (c *Capture) Emit(_ context.Context, ev event.Event) error { //nolint:gocritic // Event passed by value to satisfy sink.EventSink.Emit
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.events = append(c.events, ev)

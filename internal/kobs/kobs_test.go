@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/kaimi-telemetry/emit"
 	"github.com/Mawar2/kaimi-telemetry/event"
+
+	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
 func TestTenantIDPrecedence(t *testing.T) {
@@ -74,7 +75,7 @@ func TestEmitUninitializedIsNoOp(t *testing.T) {
 // installed emitter.
 type recordingSink struct{ events []event.Event }
 
-func (s *recordingSink) Emit(_ context.Context, ev event.Event) error {
+func (s *recordingSink) Emit(_ context.Context, ev event.Event) error { //nolint:gocritic // Event passed by value to satisfy sink.EventSink.Emit
 	s.events = append(s.events, ev)
 	return nil
 }
@@ -167,13 +168,13 @@ func TestProposalErrorOfNilIsEmpty(t *testing.T) {
 // TestEmitProposalEnvelope asserts EmitProposal stamps the trace, span, agent
 // Actor, and duration onto the event exactly as the proposal lifecycle needs.
 func TestEmitProposalEnvelope(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	EmitProposal("proposal.outline.completed", "acme", "zta-1", "outline", AgentOutline, 1500,
 		ProposalID("zta-1"), ProposalStage("outline"), ProposalStatus("success"))
 
-	events := cap.Drain()
+	events := capture.Drain()
 	if len(events) != 1 {
 		t.Fatalf("captured %d events, want 1", len(events))
 	}
@@ -204,12 +205,12 @@ func TestEmitProposalEnvelope(t *testing.T) {
 // TestEmitProposalPointEvent confirms a point event (no span, no agent, no
 // duration) omits those fields.
 func TestEmitProposalPointEvent(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	EmitProposal("proposal.selected", "acme", "zta-1", "", "", 0, ProposalID("zta-1"))
 
-	events := cap.Drain()
+	events := capture.Drain()
 	if len(events) != 1 {
 		t.Fatalf("captured %d events, want 1", len(events))
 	}

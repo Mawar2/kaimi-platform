@@ -31,7 +31,7 @@ func Init(em *emit.Emitter) {
 // caller and silently drops the event if the emitter's buffer is full. The
 // drop signal is intentionally discarded here because telemetry must never alter
 // the host's behavior or control flow.
-func Emit(ev event.Event) {
+func Emit(ev event.Event) { //nolint:gocritic // Event passed by value to mirror sink.EventSink.Emit
 	em := handle.Load()
 	if em == nil {
 		return

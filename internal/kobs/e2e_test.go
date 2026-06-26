@@ -305,7 +305,10 @@ func collapseLifecycle(in []string) []string {
 // opportunity ID) and tenant_id.
 func assertTraceAndTenant(t *testing.T, label string, events []event.Event, oppID, tenant string) {
 	t.Helper()
-	for _, e := range events {
+	// Iterate by index: event.Event is large (240 bytes), so a range value copy
+	// is wasteful and trips gocritic's rangeValCopy.
+	for i := range events {
+		e := events[i]
 		if e.TraceID != oppID {
 			t.Errorf("%s: event %q TraceID = %q, want %q", label, e.Name, e.TraceID, oppID)
 		}

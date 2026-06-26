@@ -11,7 +11,7 @@ import (
 
 // attrValue returns the value of the named attribute on ev, failing the test if
 // it is absent. It keeps the assertions below terse.
-func attrValue(t *testing.T, ev event.Event, key string) any {
+func attrValue(t *testing.T, ev event.Event, key string) any { //nolint:gocritic // Event passed by value; test helper mirrors the by-value sink contract
 	t.Helper()
 	v, ok := event.Attrs(ev.Attributes).Get(key)
 	if !ok {
@@ -194,7 +194,7 @@ func TestBuildLLMCompletedEvent(t *testing.T) {
 }
 
 // attrClass returns the redaction class of the named attribute on ev.
-func attrClass(t *testing.T, ev event.Event, key string) event.Class {
+func attrClass(t *testing.T, ev event.Event, key string) event.Class { //nolint:gocritic // Event passed by value; test helper mirrors the by-value sink contract
 	t.Helper()
 	for _, a := range ev.Attributes {
 		if a.Key == key {
@@ -289,13 +289,13 @@ func TestEstimateCostUSD(t *testing.T) {
 // not exercised here (it needs a live client); the event builders are unit-tested
 // above. This guards that both emits reach the sink with the right names.
 func TestLLMEventPairThroughCapture(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	Emit(buildLLMStartedEvent("gemini-2.5-pro", nil, nil))
 	Emit(buildLLMCompletedEvent("gemini-2.5-pro", nil, 5*time.Millisecond))
 
-	events := cap.Drain()
+	events := capture.Drain()
 	if len(events) != 2 {
 		t.Fatalf("captured %d events, want 2", len(events))
 	}

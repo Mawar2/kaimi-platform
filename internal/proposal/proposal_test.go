@@ -248,7 +248,7 @@ func (failingOutline) Run(_ context.Context, _ *opportunity.Opportunity, _ map[s
 // non-negative duration on every closed span. trace_id and tenant_id must ride
 // every event.
 func TestProposalLifecycleTelemetry_FullSuccessPath(t *testing.T) {
-	cap, restore := kobs.NewCapture()
+	capture, restore := kobs.NewCapture()
 	defer restore()
 
 	dir := t.TempDir()
@@ -303,7 +303,7 @@ func TestProposalLifecycleTelemetry_FullSuccessPath(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 
-	events := cap.Drain()
+	events := capture.Drain()
 	if len(events) == 0 {
 		t.Fatal("no telemetry captured")
 	}
@@ -384,7 +384,7 @@ func TestProposalLifecycleTelemetry_FullSuccessPath(t *testing.T) {
 // outline failure emits proposal.outline.failed (with Noa as actor) and that no
 // writer-phase telemetry follows.
 func TestProposalLifecycleTelemetry_OutlineFailureEmitsNoWriterEvents(t *testing.T) {
-	cap, restore := kobs.NewCapture()
+	capture, restore := kobs.NewCapture()
 	defer restore()
 
 	dir := t.TempDir()
@@ -411,7 +411,7 @@ func TestProposalLifecycleTelemetry_OutlineFailureEmitsNoWriterEvents(t *testing
 	}
 	svc.Wait()
 
-	events := cap.Drain()
+	events := capture.Drain()
 	seen := map[string]bool{}
 	for _, e := range events {
 		seen[e.Name] = true
@@ -444,7 +444,7 @@ func TestProposalLifecycleTelemetry_OutlineFailureEmitsNoWriterEvents(t *testing
 // needs_human verdict emits proposal.finalreview.needs_human (Vera) and not
 // proposal.finalreview.completed.
 func TestProposalLifecycleTelemetry_NeedsHumanPath(t *testing.T) {
-	cap, restore := kobs.NewCapture()
+	capture, restore := kobs.NewCapture()
 	defer restore()
 
 	svc, opps := newTestService(t)
@@ -461,7 +461,7 @@ func TestProposalLifecycleTelemetry_NeedsHumanPath(t *testing.T) {
 	}
 	svc.Wait()
 
-	events := cap.Drain()
+	events := capture.Drain()
 	seen := map[string]bool{}
 	for _, e := range events {
 		seen[e.Name] = true

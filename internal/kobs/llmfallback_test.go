@@ -23,9 +23,11 @@ func freshCtx(t *testing.T) context.Context {
 // fallbackEvents returns only the llm.fallback.triggered events from evs.
 func fallbackEvents(evs []event.Event) []event.Event {
 	var out []event.Event
-	for _, ev := range evs {
-		if ev.Name == EventLLMFallbackTriggered {
-			out = append(out, ev)
+	// Iterate by index: event.Event is large (240 bytes), so a range value copy
+	// is wasteful and trips gocritic's rangeValCopy.
+	for i := range evs {
+		if evs[i].Name == EventLLMFallbackTriggered {
+			out = append(out, evs[i])
 		}
 	}
 	return out
@@ -37,7 +39,7 @@ func fallbackEvents(evs []event.Event) []event.Event {
 // exactly one llm.fallback.triggered carrying both model names and the
 // triggering reason.
 func TestFallbackTriggeredOnPrimaryFailThenFallbackSuccess(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	ctx := freshCtx(t)
@@ -54,7 +56,7 @@ func TestFallbackTriggeredOnPrimaryFailThenFallbackSuccess(t *testing.T) {
 	noteFallbackStart(ctx, "gemini-2.5-flash")
 	noteFallbackResult(ctx, "gemini-2.5-flash", nil)
 
-	got := fallbackEvents(cap.Drain())
+	got := fallbackEvents(capture.Drain())
 	if len(got) != 1 {
 		t.Fatalf("llm.fallback.triggered count = %d, want 1", len(got))
 	}
@@ -84,14 +86,14 @@ func TestFallbackTriggeredOnPrimaryFailThenFallbackSuccess(t *testing.T) {
 // TestFallbackNotTriggeredOnAllSuccess confirms a sequence with no failures
 // emits no llm.fallback.triggered event.
 func TestFallbackNotTriggeredOnAllSuccess(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	ctx := freshCtx(t)
 	noteFallbackStart(ctx, "gemini-3.1-pro-preview")
 	noteFallbackResult(ctx, "gemini-3.1-pro-preview", nil)
 
-	if got := fallbackEvents(cap.Drain()); len(got) != 0 {
+	if got := fallbackEvents(capture.Drain()); len(got) != 0 {
 		t.Fatalf("llm.fallback.triggered count = %d, want 0", len(got))
 	}
 }
@@ -99,7 +101,7 @@ func TestFallbackNotTriggeredOnAllSuccess(t *testing.T) {
 // TestFallbackNotTriggeredOnSameModelRecovery confirms a transient failure that
 // recovers on the SAME model (a plain retry, not a failover) emits nothing.
 func TestFallbackNotTriggeredOnSameModelRecovery(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	ctx := freshCtx(t)
@@ -108,7 +110,7 @@ func TestFallbackNotTriggeredOnSameModelRecovery(t *testing.T) {
 	noteFallbackStart(ctx, "gemini-3.1-pro-preview")
 	noteFallbackResult(ctx, "gemini-3.1-pro-preview", nil)
 
-	if got := fallbackEvents(cap.Drain()); len(got) != 0 {
+	if got := fallbackEvents(capture.Drain()); len(got) != 0 {
 		t.Fatalf("llm.fallback.triggered count = %d, want 0", len(got))
 	}
 }
@@ -117,7 +119,7 @@ func TestFallbackNotTriggeredOnSameModelRecovery(t *testing.T) {
 // concurrent operations: a failure on one operation never makes a different-model
 // call on an UNRELATED operation look like a failover.
 func TestFallbackIsolatedAcrossContexts(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	ctxA := freshCtx(t)
@@ -131,7 +133,7 @@ func TestFallbackIsolatedAcrossContexts(t *testing.T) {
 	noteFallbackStart(ctxB, "gemini-2.5-flash")
 	noteFallbackResult(ctxB, "gemini-2.5-flash", nil)
 
-	if got := fallbackEvents(cap.Drain()); len(got) != 0 {
+	if got := fallbackEvents(capture.Drain()); len(got) != 0 {
 		t.Fatalf("llm.fallback.triggered count = %d, want 0 (cross-context leak)", len(got))
 	}
 }
@@ -139,7 +141,7 @@ func TestFallbackIsolatedAcrossContexts(t *testing.T) {
 // TestFallbackStaleFailureIgnored confirms a leftover failure older than the
 // staleness window does not correlate with a much-later different-model call.
 func TestFallbackStaleFailureIgnored(t *testing.T) {
-	cap, restore := NewCapture()
+	capture, restore := NewCapture()
 	defer restore()
 
 	orig := fallbackStaleAfter
@@ -155,7 +157,7 @@ func TestFallbackStaleFailureIgnored(t *testing.T) {
 	noteFallbackStart(ctx, "gemini-2.5-flash")
 	noteFallbackResult(ctx, "gemini-2.5-flash", nil)
 
-	if got := fallbackEvents(cap.Drain()); len(got) != 0 {
+	if got := fallbackEvents(capture.Drain()); len(got) != 0 {
 		t.Fatalf("llm.fallback.triggered count = %d, want 0 (stale failure)", len(got))
 	}
 }
