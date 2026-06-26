@@ -1,8 +1,11 @@
 package proposal
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -377,6 +380,92 @@ func TestProposalLifecycleTelemetry_FullSuccessPath(t *testing.T) {
 		if strings.HasSuffix(e.Name, ".started") && e.DurationMS != 0 {
 			t.Errorf("%s duration_ms = %d, want 0 at span open", e.Name, e.DurationMS)
 		}
+	}
+}
+
+// TestProposalFailure_LogsAndPersistsReason is the regression guard for #56: a
+// Zone-2 stage failure must (a) log the cause at ERROR with the opp id + status to
+// stdout and (b) persist a short reason on the opportunity so the dashboard/API can
+// show WHY, instead of swallowing the error behind a bare "outline:failed".
+func TestProposalFailure_LogsAndPersistsReason(t *testing.T) {
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	svc := NewService(&Deps{
+		Opportunities: opps,
+		Documents:     docs,
+		Outline:       failingOutline{}, // Run returns errors.New("outline boom")
+		Writer:        &recordingWriter{},
+		Review:        &recordingReviewer{},
+		Profile:       &scorer.CapabilityProfile{},
+	})
+	seedOpp(t, opps)
+
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+
+	// (b) The failure reason is persisted on the record, carrying the actual cause.
+	got, err := opps.Get(context.Background(), "zta-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ProposalStatus != "outline:failed" {
+		t.Fatalf("ProposalStatus = %q, want %q", got.ProposalStatus, "outline:failed")
+	}
+	if !strings.Contains(got.ProposalStatusReason, "outline boom") {
+		t.Errorf("ProposalStatusReason = %q, want it to carry the cause %q", got.ProposalStatusReason, "outline boom")
+	}
+
+	// (a) The cause is logged at ERROR with the opp id and status for live diagnosis.
+	logOut := logBuf.String()
+	if !strings.Contains(logOut, "ERROR") || !strings.Contains(logOut, "zta-1") ||
+		!strings.Contains(logOut, "outline:failed") || !strings.Contains(logOut, "outline boom") {
+		t.Errorf("expected an ERROR log line with opp id + status + cause, got: %q", logOut)
+	}
+}
+
+// TestProposalSuccess_ClearsStaleReason verifies a forward transition clears any
+// failure reason from a prior attempt, so a recovered proposal doesn't show a stale
+// "why it failed" note.
+func TestProposalSuccess_ClearsStaleReason(t *testing.T) {
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	svc := NewService(&Deps{Opportunities: opps, Documents: docs, Profile: &scorer.CapabilityProfile{}})
+
+	seedOpp(t, opps)
+	// Simulate a prior failed attempt that left a reason on the record.
+	if err := svc.persistStatus(context.Background(), "zta-1", "writer:failed", "model timeout"); err != nil {
+		t.Fatalf("persistStatus: %v", err)
+	}
+	// A forward transition must clear it.
+	if err := svc.setStatus(context.Background(), "zta-1", StatusWriterRunning); err != nil {
+		t.Fatalf("setStatus: %v", err)
+	}
+	got, err := opps.Get(context.Background(), "zta-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ProposalStatusReason != "" {
+		t.Errorf("ProposalStatusReason = %q, want it cleared on a forward transition", got.ProposalStatusReason)
 	}
 }
 

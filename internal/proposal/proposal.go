@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -341,7 +342,11 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 		kobs.EmitProposal("proposal.outline.failed", tenant, oppID, "outline", kobs.AgentOutline,
 			s.Now().Sub(outlineStart).Milliseconds(),
 			kobs.ProposalID(oppID), kobs.ProposalStage("outline"), kobs.ProposalStatus("failed"), kobs.ProposalErrorOf(err))
-		s.failStatus(ctx, oppID, "outline:failed")
+		resErr := ""
+		if res != nil {
+			resErr = res.Error
+		}
+		s.failStatus(ctx, oppID, "outline:failed", failCause(err, resErr, "outline produced no usable result"))
 		return
 	}
 
@@ -355,7 +360,7 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 		kobs.EmitProposal("proposal.outline.failed", tenant, oppID, "outline", kobs.AgentOutline,
 			s.Now().Sub(outlineStart).Milliseconds(),
 			kobs.ProposalID(oppID), kobs.ProposalStage("outline"), kobs.ProposalStatus("failed"), kobs.ProposalErrorOf(err))
-		s.failStatus(ctx, oppID, "outline:failed")
+		s.failStatus(ctx, oppID, "outline:failed", fmt.Errorf("persisting outline skeleton: %w", err))
 		return
 	}
 
@@ -418,7 +423,7 @@ func (s *Service) runRevision(ctx context.Context, oppID string) {
 	}
 	doc, err := s.deps.Documents.Get(oppID)
 	if err != nil {
-		s.failStatus(ctx, oppID, "writer:failed")
+		s.failStatus(ctx, oppID, "writer:failed", fmt.Errorf("loading document for revision: %w", err))
 		return
 	}
 	// Reuse the document text cached at draft time (revisions never re-ingest).
@@ -476,7 +481,12 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 				s.Now().Sub(writerStart).Milliseconds(),
 				kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalStatus("failed"),
 				kobs.ProposalRevision(revision), kobs.ProposalErrorOf(err))
-			s.failStatus(ctx, oppID, "writer:failed")
+			resErr := ""
+			if res != nil {
+				resErr = res.Error
+			}
+			s.failStatus(ctx, oppID, "writer:failed",
+				failCause(err, resErr, fmt.Sprintf("writer produced no usable draft for section %q", section.Title)))
 			return
 		}
 		bodies := splitDraft(draft, single)
@@ -489,7 +499,7 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 				s.Now().Sub(writerStart).Milliseconds(),
 				kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalStatus("failed"),
 				kobs.ProposalRevision(revision), kobs.ProposalErrorOf(err))
-			s.failStatus(ctx, oppID, "writer:failed")
+			s.failStatus(ctx, oppID, "writer:failed", fmt.Errorf("applying drafted section %q: %w", section.Title, err))
 			return
 		}
 		// Telemetry: one section landed. The title is content-class.
@@ -516,7 +526,7 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 	}
 	doc, err := s.deps.Documents.Get(oppID)
 	if err != nil {
-		s.failStatus(ctx, oppID, "final-review:failed")
+		s.failStatus(ctx, oppID, "final-review:failed", fmt.Errorf("loading document for final review: %w", err))
 		return
 	}
 
@@ -533,7 +543,7 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 		Documents:   s.cachedDocText(oppID),
 	})
 	if err != nil || res == nil {
-		s.failStatus(ctx, oppID, "final-review:failed")
+		s.failStatus(ctx, oppID, "final-review:failed", failCause(err, "", "final review returned no result"))
 		return
 	}
 
@@ -564,25 +574,64 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 			s.Now().Sub(reviewStart).Milliseconds(),
 			kobs.ProposalID(oppID), kobs.ProposalStage("finalreview"), kobs.ProposalStatus("needs_human"))
 	default:
-		s.failStatus(ctx, oppID, "final-review:failed")
+		s.failStatus(ctx, oppID, "final-review:failed", fmt.Errorf("unexpected final-review status %q", res.Status))
 	}
 }
 
-// setStatus persists a ProposalStatus transition.
+// setStatus persists a forward ProposalStatus transition and clears any stale
+// failure reason left by a previous attempt.
 func (s *Service) setStatus(ctx context.Context, oppID, status string) error {
+	return s.persistStatus(ctx, oppID, status, "")
+}
+
+// persistStatus writes the ProposalStatus (and its optional failure reason) onto
+// the stored Opportunity. reason is "" for normal transitions.
+func (s *Service) persistStatus(ctx context.Context, oppID, status, reason string) error {
 	opp, err := s.deps.Opportunities.Get(ctx, oppID)
 	if err != nil {
 		return err
 	}
 	opp.ProposalStatus = status
+	opp.ProposalStatusReason = reason
 	opp.UpdatedAt = s.Now()
 	return s.deps.Opportunities.Save(ctx, opp)
 }
 
-// failStatus persists a failure status; the error itself was already
-// recorded by the agent's Result and the stage halts here.
-func (s *Service) failStatus(ctx context.Context, oppID, status string) {
-	_ = s.setStatus(ctx, oppID, status)
+// failStatus halts a stage: it logs the cause at ERROR with the opportunity id and
+// status (so a live failure is diagnosable from stdout/Cloud Run logs, #56) and
+// persists a short, single-line reason on the proposal so the dashboard/API can
+// show WHY a proposal stalled instead of a bare "failed".
+func (s *Service) failStatus(ctx context.Context, oppID, status string, cause error) {
+	reason := shortReason(cause)
+	log.Printf("ERROR: proposal %s %s: %s", oppID, status, reason)
+	_ = s.persistStatus(ctx, oppID, status, reason)
+}
+
+// shortReason renders an error as a single-line, length-capped string safe to
+// store on the record and surface in the UI. A nil cause yields a generic note.
+func shortReason(cause error) string {
+	if cause == nil {
+		return "stage failed without a reported reason"
+	}
+	r := strings.Join(strings.Fields(cause.Error()), " ") // collapse newlines/runs of whitespace
+	const maxLen = 240
+	if len(r) > maxLen {
+		r = r[:maxLen-1] + "…"
+	}
+	return r
+}
+
+// failCause picks the most informative cause for a failed stage: the returned
+// error if any, else the agent Result's recorded error, else a stage fallback.
+func failCause(err error, resultErr, fallback string) error {
+	switch {
+	case err != nil:
+		return err
+	case strings.TrimSpace(resultErr) != "":
+		return errors.New(resultErr)
+	default:
+		return errors.New(fallback)
+	}
 }
 
 // sectionsFromOutline converts the Outline agent's sections into document
