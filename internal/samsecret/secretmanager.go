@@ -6,6 +6,8 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // SecretManagerWriter is the production Writer: it adds a new version to a tenant's
@@ -42,6 +44,26 @@ func NewSecretManagerWriter(ctx context.Context, projectID, secretID string) (*S
 
 // Close releases the Secret Manager client.
 func (w *SecretManagerWriter) Close() error { return w.client.Close() }
+
+// Exists reports whether the deployment's SAM secret has an accessible current version —
+// i.e. a key is configured, whether entered during onboarding OR provided by the
+// deployment. It accesses the "latest" version and IMMEDIATELY DISCARDS the payload (never
+// logged, never returned); a NotFound means no key is configured yet. This is what lets
+// onboarding show the true SAM state on a return visit instead of assuming "not saved".
+// Requires the runtime SA's secretAccessor role (already granted).
+func (w *SecretManagerWriter) Exists(ctx context.Context) (bool, error) {
+	_, err := w.client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
+		Name: w.parent + "/versions/latest",
+	})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		// Don't include the secret name path beyond what's already non-sensitive.
+		return false, fmt.Errorf("samsecret: check secret version: %w", err)
+	}
+	return true, nil
+}
 
 // Save validates the key and adds it as a new secret version (which becomes the new
 // "latest"). It never logs the key. The bytes are the raw key with surrounding

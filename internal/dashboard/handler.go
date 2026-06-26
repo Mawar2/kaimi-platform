@@ -63,6 +63,13 @@ type Handler struct {
 	// page shows the deployment-secret note. cmd/api wires it via WithSAMKeySaver.
 	samKeySaver SAMKeySaver
 
+	// samKeyConfigured reports whether a SAM key is already configured for the deployment
+	// (a secret version exists). Onboarding uses it so a returning tester sees the true
+	// "Connect" state instead of being asked to re-enter a key they already saved. nil =
+	// fall back to the per-session query param only. cmd/api wires it via
+	// WithSAMKeyConfiguredCheck.
+	samKeyConfigured func() bool
+
 	// contextDocs stores the context documents (capability statements, CPARS, past
 	// proposals) a tester uploads on the onboarding "Connect" step; their extracted
 	// text feeds the capability map. nil = the upload control is hidden. cmd/api wires

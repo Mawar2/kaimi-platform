@@ -287,6 +287,12 @@ func run() error {
 		}
 		defer func() { _ = samWriter.Close() }()
 		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeySaver(samWriter.Save))
+		// Let onboarding reflect whether a key is already configured (entered earlier OR
+		// deployment-provided), so a returning tester isn't blocked re-entering it.
+		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeyConfiguredCheck(func() bool {
+			ok, eerr := samWriter.Exists(context.Background())
+			return eerr == nil && ok
+		}))
 		log.Printf("Onboarding SAM.gov key entry enabled (writes to Secret Manager secret %q)", samSecretName)
 	}
 

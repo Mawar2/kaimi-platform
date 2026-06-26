@@ -134,6 +134,14 @@ func WithSAMKeySaver(fn SAMKeySaver) Option {
 	return func(h *Handler) { h.samKeySaver = fn }
 }
 
+// WithSAMKeyConfiguredCheck wires a check reporting whether a SAM key is already stored for
+// the deployment (a secret version exists). Onboarding's "Connect" step uses it so a return
+// visit reflects the true state — no false "SAM key required" / disabled Continue after a
+// key was saved earlier or pre-provisioned by the deployment.
+func WithSAMKeyConfiguredCheck(fn func() bool) Option {
+	return func(h *Handler) { h.samKeyConfigured = fn }
+}
+
 // WithContextDocs wires the context-document store so the onboarding "Connect" step can
 // accept uploads (capability statements, CPARS, past proposals) whose text feeds the
 // capability map. Without it the upload control is hidden.
@@ -659,6 +667,12 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 	data.Saved = r.URL.Query().Get("saved") == "1"
 	data.DriveSaved = r.URL.Query().Get("drive_saved") == "1"
 	data.SAMKeySaved = r.URL.Query().Get("sam_saved") == "1"
+	// Also reflect a key already configured for the deployment (entered in an earlier
+	// session OR provided by the deployment), so a returning tester is not falsely told
+	// "SAM key required" and blocked from finishing onboarding.
+	if !data.SAMKeySaved && h.samKeyConfigured != nil && h.samKeyConfigured() {
+		data.SAMKeySaved = true
+	}
 	data.DocsSaved = r.URL.Query().Get("docs_saved") == "1"
 	// Resume at the requested step after a PRG redirect; ignore an unknown value.
 	if s := r.URL.Query().Get("step"); validStep(s) {
