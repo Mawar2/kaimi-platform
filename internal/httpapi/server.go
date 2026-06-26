@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Mawar2/kaimi-telemetry/httpstream"
+
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/profile"
 )
@@ -79,6 +81,15 @@ type Deps struct {
 	// Drive is an authenticated action — even though the consent handshake itself
 	// bounces through Google.
 	Drive *DriveHandler
+
+	// LiveSource is the read side of the telemetry live event stream — the subset
+	// of the telemetry *sink.LiveSink (Replay + Subscribe) the SSE handler needs.
+	// cmd/api injects the running LiveSink so the (next-ticket) live-stream route
+	// can tail it. It may be nil when telemetry is disabled
+	// (KAIMI_TELEMETRY_ENABLED=false), in which case the live-stream route is not
+	// served. The field type is the decoupled httpstream.Source interface so the
+	// HTTP layer never depends on the concrete sink.
+	LiveSource httpstream.Source
 
 	// AllowedOrigins is the CORS allow-list (WS-B6). It is EMPTY by default, in which
 	// case CORS is a no-op and the API is same-origin only (the preferred
@@ -283,6 +294,22 @@ func (s *Server) Routes() http.Handler {
 		handler = outerMux
 	}
 
+	// T2.1: live telemetry SSE stream. The core httpstream handler tails the running
+	// LiveSink and must keep flushing frames as they arrive, so it is mounted on an
+	// OUTER mux that sits OUTSIDE jsonErrorResponder — the JSON envelope shim buffers
+	// the first WriteHeader and would defeat the stream. It is also OUTSIDE the
+	// /api/v1 group: this is an operator/monitor view, gated like the dashboard (HTML
+	// session/product-key), not a JSON API endpoint. The route is wired only when a
+	// LiveSource is injected (telemetry enabled); otherwise the surface is unchanged.
+	if s.deps.LiveSource != nil {
+		streamMux := http.NewServeMux()
+		streamMux.Handle("GET /v1/events/stream", s.liveStreamHandler(s.deps.LiveSource))
+		// Everything else delegates to the surface built above (JSON API, dashboard,
+		// probes), preserving its routing and error handling unchanged.
+		streamMux.Handle("/", handler)
+		handler = streamMux
+	}
+
 	// CORS is applied at the ROOT level — OUTSIDE jsonErrorResponder's routing — so
 	// it also covers the public /auth and /healthz routes and so an allowed-origin
 	// OPTIONS preflight is answered (204) BEFORE the mux's per-path method dispatch
@@ -297,6 +324,26 @@ func (s *Server) Routes() http.Handler {
 // or agents are reachable.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Service: serviceName})
+}
+
+// liveStreamHandler builds the authorized SSE handler for the live telemetry
+// stream (T2.1). It wraps the core httpstream handler with the SAME operator gate
+// the SSR dashboard uses — RequireProductKeyHTML in product-key mode or
+// RequireSessionHTML in Workspace-OAuth mode — so one credential authorizes both
+// surfaces and a browser EventSource that loses its session is redirected to sign
+// in rather than handed a 401 JSON body. When no gate is configured the stream is
+// served open, mirroring the dashboard's insecure-dev case; Routes() has already
+// panicked for a credential-less production deploy before reaching here, so this
+// only ever serves open under the explicit AllowInsecureNoAuth opt-in.
+func (s *Server) liveStreamHandler(src httpstream.Source) http.Handler {
+	var h http.Handler = httpstream.NewHandler(src)
+	switch {
+	case s.deps.ProductKey != nil:
+		h = s.deps.ProductKey.RequireProductKeyHTML(h)
+	case s.deps.Auth != nil:
+		h = s.RequireSessionHTML(h)
+	}
+	return h
 }
 
 // jsonErrorResponder wraps an http.Handler (the route mux) so the stdlib
