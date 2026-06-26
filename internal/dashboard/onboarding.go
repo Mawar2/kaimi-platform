@@ -326,9 +326,15 @@ type OnboardingData struct {
 
 	// SAM.gov key entry. SAMKeyConfigured is true when a write path is wired
 	// (WithSAMKeySaver); when false the Connect step shows the deployment-secret note
-	// instead of a key field. SAMKeySaved drives the success treatment after a save.
+	// instead of a key field. SAMKeySaved means a key is configured (entered here OR
+	// provided by the deployment) — it unblocks Continue and shows "connected" on the
+	// summary. SAMKeyJustSaved is true ONLY right after the user saves a key this request
+	// (the ?sam_saved=1 redirect), so the "SAM.gov key saved" success banner does not
+	// appear on first load just because the deployment already has a key (which read as
+	// the license being confused for SAM).
 	SAMKeyConfigured bool
 	SAMKeySaved      bool
+	SAMKeyJustSaved  bool
 
 	// Context-document upload (Connect step). ContextDocsEnabled is true when a store is
 	// wired (WithContextDocs); ContextDocs lists what's been uploaded; DocsSaved drives
@@ -489,7 +495,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
 
     {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
     {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
-    {{if .SAMKeySaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved. Your next hunt will use it.</span></div>{{end}}
+    {{if .SAMKeyJustSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved. Your next hunt will use it.</span></div>{{end}}
     {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded. Kaimi will use them to understand your business.</span></div>{{end}}
     {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
 
@@ -565,8 +571,10 @@ const onboardingContentTmpl = `<!DOCTYPE html>
         <p>Upload your capability statement, CPARS, or recent proposals. Kaimi reads them to understand your business and sharpen how it qualifies and scores opportunities. Tip: keep a Google Drive folder of BD context your team maintains over time, and you can point Kaimi at it later.</p>
         <form class="wz-form" method="POST" action="/onboarding/docs" enctype="multipart/form-data">
           {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-          <input type="file" name="docs" multiple accept=".pdf,.docx,.doc,.txt,.md">
-          <div><button class="btn btn-primary" type="submit">` + iconCheck + `Upload documents</button></div>
+          <!-- One button: it opens the file picker, and selecting a file submits the form
+               (uploads) immediately — no separate "Browse…" control + submit button. -->
+          <input type="file" name="docs" id="wz-docinput" multiple accept=".pdf,.docx,.doc,.txt,.md" hidden onchange="this.form.submit()">
+          <div><button class="btn btn-primary" type="button" onclick="document.getElementById('wz-docinput').click()">` + iconUpload + `Upload document</button></div>
         </form>
         {{if .ContextDocs}}
         <ul class="doc-list">
@@ -666,7 +674,10 @@ func (h *Handler) handleOnboarding(w http.ResponseWriter, r *http.Request) {
 	data := h.newOnboardingData(r)
 	data.Saved = r.URL.Query().Get("saved") == "1"
 	data.DriveSaved = r.URL.Query().Get("drive_saved") == "1"
-	data.SAMKeySaved = r.URL.Query().Get("sam_saved") == "1"
+	// JustSaved is the success signal for THIS request (the PRG redirect after a save);
+	// it alone drives the "SAM.gov key saved" banner so first load never shows it.
+	data.SAMKeyJustSaved = r.URL.Query().Get("sam_saved") == "1"
+	data.SAMKeySaved = data.SAMKeyJustSaved
 	// Also reflect a key already configured for the deployment (entered in an earlier
 	// session OR provided by the deployment), so a returning tester is not falsely told
 	// "SAM key required" and blocked from finishing onboarding.
