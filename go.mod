@@ -2,11 +2,18 @@ module github.com/Mawar2/Kaimi
 
 go 1.25.1
 
+// kaimi-telemetry is the privacy-first observability core, developed in-tree
+// under ./telemetry and consumed by Kaimi as its first customer. The replace
+// points the module at that local directory; when the core is split into its
+// own repository this directive is dropped in favor of a tagged version.
+replace github.com/Mawar2/kaimi-telemetry => ./telemetry
+
 require (
 	cloud.google.com/go/documentai v1.42.0
 	cloud.google.com/go/firestore v1.22.0
 	cloud.google.com/go/secretmanager v1.20.0
 	cloud.google.com/go/storage v1.56.1
+	github.com/Mawar2/kaimi-telemetry v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/adk v1.4.0
