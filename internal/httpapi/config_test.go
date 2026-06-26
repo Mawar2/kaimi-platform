@@ -103,21 +103,43 @@ func TestLoadOAuthConfigEnabledFull(t *testing.T) {
 // set (the enable signal), omitting another required value errors, naming the missing
 // var and wrapping ErrMissingRequired.
 func TestLoadOAuthConfigClientIDSetMissingRequired(t *testing.T) {
-	t.Setenv(envOAuthClientID, "cid") // enable signal
-	t.Setenv(envOAuthClientSecret, "csecret")
+	t.Setenv(envOAuthClientID, "cid")  // enable signal
+	t.Setenv(envOAuthClientSecret, "") // required, missing
 	t.Setenv(envOAuthRedirectURL, "https://app/auth/callback")
-	t.Setenv(envOAuthAllowedDomain, "") // required, missing
+	t.Setenv(envOAuthAllowedDomain, "example.com")
 	t.Setenv(envOAuthSessionSecret, "a-long-enough-session-secret-1234567890")
 
 	_, _, err := LoadOAuthConfig()
 	if err == nil {
-		t.Fatal("LoadOAuthConfig (client id set, domain missing): want error, got nil")
+		t.Fatal("LoadOAuthConfig (client id set, client secret missing): want error, got nil")
 	}
 	if !errors.Is(err, ErrMissingRequired) {
 		t.Errorf("error = %v, want wrap of ErrMissingRequired", err)
 	}
-	if got := err.Error(); !strings.Contains(got, envOAuthAllowedDomain) {
-		t.Errorf("error %q should name the missing var %q", got, envOAuthAllowedDomain)
+	if got := err.Error(); !strings.Contains(got, envOAuthClientSecret) {
+		t.Errorf("error %q should name the missing var %q", got, envOAuthClientSecret)
+	}
+}
+
+// TestLoadOAuthConfigEmptyAllowedDomainEnabled verifies AllowedDomain is OPTIONAL: with
+// the client id + other required values set but no domain, OAuth is enabled (any verified
+// Google account may sign in — no per-user whitelist, no domain restriction).
+func TestLoadOAuthConfigEmptyAllowedDomainEnabled(t *testing.T) {
+	t.Setenv(envOAuthClientID, "cid")
+	t.Setenv(envOAuthClientSecret, "csecret")
+	t.Setenv(envOAuthRedirectURL, "https://app/auth/callback")
+	t.Setenv(envOAuthAllowedDomain, "") // optional — empty = any verified account
+	t.Setenv(envOAuthSessionSecret, "a-long-enough-session-secret-1234567890")
+
+	cfg, enabled, err := LoadOAuthConfig()
+	if err != nil {
+		t.Fatalf("LoadOAuthConfig (no domain): want nil error, got %v", err)
+	}
+	if !enabled {
+		t.Fatal("OAuth should be enabled with client id set and no domain")
+	}
+	if cfg.AllowedDomain != "" {
+		t.Errorf("AllowedDomain = %q, want empty", cfg.AllowedDomain)
 	}
 }
 

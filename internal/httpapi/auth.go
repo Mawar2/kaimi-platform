@@ -160,13 +160,17 @@ func (a *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// hd constrains the chooser to the Workspace domain; it is a HINT, not a
-	// security control — the callback re-checks hd from the verified ID token.
-	authURL := a.oauth.AuthCodeURL(
-		state,
+	// security control — the callback re-checks hd from the verified ID token. When no
+	// domain is configured (any-Google-account mode) the hint is omitted so the chooser
+	// is not restricted.
+	opts := []oauth2.AuthCodeOption{
 		oauth2.AccessTypeOnline,
 		oauth2.S256ChallengeOption(verifier),
-		oauth2.SetAuthURLParam("hd", a.cfg.AllowedDomain),
-	)
+	}
+	if a.cfg.AllowedDomain != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("hd", a.cfg.AllowedDomain))
+	}
+	authURL := a.oauth.AuthCodeURL(state, opts...)
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
@@ -232,15 +236,20 @@ func (a *AuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: enforce the Workspace domain and that the email is verified. The hd
-	// claim is lowercased to match the already-lowercased AllowedDomain (DNS domains
-	// are case-insensitive); the compare stays constant-time for consistency.
+	// Step 4: enforce that the email is verified always, and the Workspace domain only
+	// when one is configured. When AllowedDomain is set (single-Workspace deploy), the hd
+	// claim is lowercased to match the already-lowercased AllowedDomain (DNS domains are
+	// case-insensitive) and compared constant-time. When AllowedDomain is empty
+	// (any-Google-account mode — e.g. Google sign-in layered on the product-key gate), the
+	// domain check is skipped so any verified Google account is accepted, no whitelist.
 	hd, _ := payload.Claims["hd"].(string)
 	hd = strings.ToLower(hd)
-	if hd == "" || subtle.ConstantTimeCompare([]byte(hd), []byte(a.cfg.AllowedDomain)) != 1 {
-		// Wrong/absent Workspace domain — outside the tenant. Never mint a session.
-		http.Error(w, "account is not in the allowed Workspace domain", http.StatusForbidden)
-		return
+	if a.cfg.AllowedDomain != "" {
+		if hd == "" || subtle.ConstantTimeCompare([]byte(hd), []byte(a.cfg.AllowedDomain)) != 1 {
+			// Wrong/absent Workspace domain — outside the tenant. Never mint a session.
+			http.Error(w, "account is not in the allowed Workspace domain", http.StatusForbidden)
+			return
+		}
 	}
 	if verified, _ := payload.Claims["email_verified"].(bool); !verified {
 		http.Error(w, "email is not verified", http.StatusForbidden)

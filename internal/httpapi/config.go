@@ -120,13 +120,15 @@ func LoadOAuthConfig() (OAuthConfig, bool, error) {
 	}
 
 	// The client id is set, so the operator intends auth. Demand every other required
-	// value, keyed by its env var so the error can name the missing one.
+	// value, keyed by its env var so the error can name the missing one. AllowedDomain is
+	// deliberately NOT required: when set it restricts sign-in to that one Workspace
+	// domain; when empty, any verified Google account may sign in (e.g. Google sign-in
+	// layered on the product-key gate, where the key — not the domain — bounds access).
 	required := []struct {
 		env, val string
 	}{
 		{envOAuthClientSecret, cfg.ClientSecret},
 		{envOAuthRedirectURL, cfg.RedirectURL},
-		{envOAuthAllowedDomain, cfg.AllowedDomain},
 		{envOAuthSessionSecret, cfg.SessionSecret},
 	}
 	for _, r := range required {
