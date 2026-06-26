@@ -279,6 +279,20 @@ resource "google_secret_manager_secret_version" "placeholder" {
   }
 }
 
+# Resource-scoped write grant for the onboarding SAM.gov key path. The runtime SA
+# already holds project-wide secretAccessor (section 3, for reads); onboarding's
+# samsecret.Writer additionally needs secretVersionAdder to append a new version
+# when a tester enters their key. We bind it ONLY to the samgov-api-key secret —
+# not project-wide — so the write capability is least-privilege and cannot touch
+# the OAuth/session secrets. secretVersionAdder allows adding versions but NOT
+# reading existing ones, so it widens write scope without widening read scope.
+resource "google_secret_manager_secret_iam_member" "samgov_key_adder" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.secrets["${local.prefix}samgov-api-key"].secret_id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 # -----------------------------------------------------------------------------
 # 7. Cloud Run Job — Zone-1 pipeline (cmd/pipeline)
 #    Mirrors setup-gcp.sh Step 10 (lines 229-245): live mode, GCS volume mount,
@@ -555,6 +569,18 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.documentai_location
       }
 
+      # --- Onboarding SAM.gov key write-path ---
+      # The secret's short ID (not its value) so cmd/api can wire a Secret Manager
+      # writer for the onboarding "Connect" step: a tester's key is saved as a new
+      # version of the same samgov-api-key secret the pipeline reads. Without this
+      # env, onboarding degrades to the "managed by your administrator" note and a
+      # client can never enter their own key. The runtime SA's secretVersionAdder
+      # grant on this secret (section 6) is what makes the write succeed.
+      env {
+        name  = "SAM_SECRET_NAME"
+        value = google_secret_manager_secret.secrets["${local.prefix}samgov-api-key"].secret_id
+      }
+
       # --- Secrets from Secret Manager (values added out-of-band) ---
       # Map keys carry local.prefix to match the prefixed secret_ids above.
       env {
@@ -603,6 +629,9 @@ resource "google_cloud_run_v2_service" "api" {
     # placeholder versions (samgov / oauth / session / drive-oauth) exist before
     # the Service is created.
     google_secret_manager_secret_version.placeholder,
+    # The onboarding key-write path needs the version-adder grant in place before
+    # the Service starts accepting key entries.
+    google_secret_manager_secret_iam_member.samgov_key_adder,
   ]
 }
 
