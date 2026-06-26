@@ -87,3 +87,29 @@ func TestRequireAPIKey(t *testing.T) {
 		t.Error("empty key should error")
 	}
 }
+
+// TestResolveRejectsNonSAMHost: the resolver must refuse to fetch (and never attach the
+// api_key) when the description URL points anywhere other than https://api.sam.gov.
+func TestResolveRejectsNonSAMHost(t *testing.T) {
+	for _, bad := range []string{
+		"https://attacker.tld/noticedesc?noticeid=1",
+		"http://api.sam.gov/x?noticeid=1",           // wrong scheme
+		"https://api.sam.gov.evil.tld/x?noticeid=1", // look-alike host
+		"https://evil.tld@api.sam.gov.evil.tld/x",
+	} {
+		rt := &fakeRT{status: 200, body: `{"description":"x"}`}
+		_, err := newTestResolver(t, rt).Resolve(context.Background(), bad)
+		if err == nil {
+			t.Errorf("Resolve(%q) should be rejected (non-SAM host)", bad)
+		}
+		if rt.gotURL != "" {
+			t.Errorf("Resolve(%q) must NOT make a request (key could leak); got URL %q", bad, rt.gotURL)
+		}
+	}
+
+	// Sanity: the real SAM host is accepted.
+	rt := &fakeRT{status: 200, body: `{"description":"ok"}`}
+	if _, err := newTestResolver(t, rt).Resolve(context.Background(), "https://api.sam.gov/opportunities/v2/noticedesc?noticeid=1"); err != nil {
+		t.Errorf("real SAM host should be accepted: %v", err)
+	}
+}

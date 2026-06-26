@@ -17,6 +17,25 @@ import (
 // not large files; 2 MiB is generous headroom while bounding memory on a hostile response.
 const maxDescBytes = 2 << 20
 
+// samAPIHost is the only host the SAM api_key may ever be sent to. The description URL
+// comes from the SAM search response, but a spoofed/MITM'd response (or an off-host
+// redirect) must never cause the key to be attached to an attacker-controlled host.
+const samAPIHost = "api.sam.gov"
+
+// requireSAMHost rejects any URL that is not https on api.sam.gov, so the SAM api_key is
+// only ever attached to the real SAM API. Returns an error (the caller skips the fetch)
+// rather than silently proceeding.
+func requireSAMHost(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("samgov: unparseable description URL")
+	}
+	if u.Scheme != "https" || !strings.EqualFold(u.Hostname(), samAPIHost) {
+		return fmt.Errorf("samgov: refusing to resolve description from non-SAM host %q", u.Hostname())
+	}
+	return nil
+}
+
 // DescriptionResolver fetches an opportunity's full description TEXT from the SAM.gov
 // `noticedesc` URL that the v2 search API returns in the Description field — that field is
 // a URL, not prose, so the Scorer otherwise scores a link. Resolving requires the SAM API
@@ -32,7 +51,23 @@ func NewDescriptionResolver(apiKey string) (*DescriptionResolver, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("samgov: API key is required to resolve descriptions")
 	}
-	return &DescriptionResolver{apiKey: apiKey, client: &http.Client{Timeout: 30 * time.Second}}, nil
+	return &DescriptionResolver{
+		apiKey: apiKey,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			// Re-validate the host on every redirect hop so a 30x cannot bounce the
+			// key-bearing request off api.sam.gov to an attacker host.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return fmt.Errorf("samgov: stopped after too many redirects")
+				}
+				if req.URL.Scheme != "https" || !strings.EqualFold(req.URL.Hostname(), samAPIHost) {
+					return fmt.Errorf("samgov: refusing redirect to non-SAM host %q", req.URL.Hostname())
+				}
+				return nil
+			},
+		},
+	}, nil
 }
 
 // WithHTTPClient overrides the HTTP client (tests inject a fake transport). Returns the
@@ -50,6 +85,11 @@ func (r *DescriptionResolver) WithHTTPClient(c *http.Client) *DescriptionResolve
 func (r *DescriptionResolver) Resolve(ctx context.Context, descURL string) (string, error) {
 	if strings.TrimSpace(descURL) == "" {
 		return "", fmt.Errorf("samgov: empty description URL")
+	}
+	// Host allowlist: only ever attach the api_key to the real SAM API over HTTPS, so a
+	// spoofed description URL can never receive the key. Checked BEFORE withAPIKey.
+	if err := requireSAMHost(descURL); err != nil {
+		return "", err
 	}
 	reqURL := withAPIKey(descURL, r.apiKey)
 

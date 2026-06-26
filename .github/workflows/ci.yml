@@ -68,6 +68,36 @@ jobs:
         version: v2.12.2  # Pinned for reproducible lint (was 'latest' — nondeterministic staticcheck)
         args: --timeout=5m
 
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+        cache: false
+
+    # govulncheck (official Go team scanner): known CVEs in dependencies, filtered to the
+    # reachable call graph. Blocking — it is high-signal and low-noise.
+    - name: govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+    # gosec static security analysis. Informational on initial rollout (continue-on-error)
+    # so the pilot is not blocked by a flood of pre-existing findings; review the report and
+    # promote to blocking once triaged. Excludes the Wails-embed-only cmd/desktop.
+    - name: gosec
+      continue-on-error: true
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec -severity medium -confidence medium -exclude-dir=cmd/desktop ./...
+
   terraform-lint:
     name: Terraform Lint
     runs-on: ubuntu-latest
