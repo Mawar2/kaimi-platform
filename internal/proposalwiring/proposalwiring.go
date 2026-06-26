@@ -102,6 +102,11 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	// example template plus an explicit logged warning. ResolveProfileWithStore
 	// reports which source was used.
 	scorerProfile := &scorer.CapabilityProfile{}
+	// profileProvider re-resolves the company profile FRESH per draft so a profile saved
+	// via onboarding AFTER this long-lived service starts is honored (the proposal service
+	// is built once at startup, so a static profile would otherwise pin a tenant to the
+	// boot-time/fallback profile — e.g. proposals branded with the wrong company).
+	var profileProvider func() *scorer.CapabilityProfile
 	if cfg.Profile.WriterPath != "" {
 		// The profile store roots at the SAME base path as the document/opportunity
 		// stores so the tenant profile persists alongside them and the API and the
@@ -110,13 +115,22 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		if err != nil {
 			return nil, fmt.Errorf("profile store: %w", err)
 		}
-		companyProfile, profileSource, err := profile.ResolveProfileWithStore(profileStore, cfg.Profile.WriterPath)
+		writerPath := cfg.Profile.WriterPath
+		companyProfile, profileSource, err := profile.ResolveProfileWithStore(profileStore, writerPath)
 		if err != nil {
 			return nil, fmt.Errorf("load profile: %w", err)
 		}
 		log.Printf("Company profile source: %s", profileSource)
 		derived := scorer.FromProfile(companyProfile)
 		scorerProfile = &derived
+		profileProvider = func() *scorer.CapabilityProfile {
+			cp, _, perr := profile.ResolveProfileWithStore(profileStore, writerPath)
+			if perr != nil {
+				return nil // fall back to the startup-resolved scorerProfile
+			}
+			d := scorer.FromProfile(cp)
+			return &d
+		}
 	}
 
 	// The live agents share one Vertex AI region. The Gemini 3.x family —
@@ -228,13 +242,14 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	}
 
 	return proposal.NewService(&proposal.Deps{
-		Opportunities: opts.Store,
-		Documents:     docs,
-		Outline:       ol,
-		Writer:        w,
-		Review:        review,
-		Profile:       scorerProfile,
-		Ingest:        ingestor,
+		Opportunities:   opts.Store,
+		Documents:       docs,
+		Outline:         ol,
+		Writer:          w,
+		Review:          review,
+		Profile:         scorerProfile,
+		ProfileProvider: profileProvider,
+		Ingest:          ingestor,
 	}), nil
 }
 
