@@ -21,8 +21,12 @@ import "net/http"
 //   - Referrer-Policy: strict-origin-when-cross-origin so full paths/query (which could
 //     carry an access link) never leak to third-party hosts via the Referer header.
 func SecurityHeaders(next http.Handler) http.Handler {
+	// img-src and font-src allow data: URIs because the SSR dashboard embeds its icons and
+	// its web fonts inline as data: URIs (no external asset hosting). Without font-src the
+	// fonts fall back to default-src 'self' and the browser blocks them, silently degrading
+	// the UI to system fonts (caught in browser QA).
 	const csp = "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; " +
-		"object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
+		"object-src 'none'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
 		"script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
