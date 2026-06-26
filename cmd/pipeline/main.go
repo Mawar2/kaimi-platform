@@ -172,7 +172,12 @@ func buildBackends(ctx context.Context, cfg *config.Config) (samgov.Client, scor
 		}
 		return samClient, scorer.NewDeterministicScorer(), nil, nil
 	case "live":
-		samClient, err := samgov.NewClient(samgov.Config{APIKey: cfg.SAM.APIKey, UseCached: false})
+		samClient, err := samgov.NewClient(samgov.Config{
+			APIKey:            cfg.SAM.APIKey,
+			UseCached:         false,
+			LookbackDays:      cfg.SAM.LookbackDays,
+			MaxSearchRequests: cfg.SAM.MaxSearchRequests,
+		})
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to create live SAM.gov client: %w", err)
 		}
