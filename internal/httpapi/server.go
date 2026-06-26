@@ -156,6 +156,8 @@ func (s *Server) Routes() http.Handler {
 	apiMux.HandleFunc("GET /api/v1/opportunities", s.handleListOpportunities)
 	apiMux.HandleFunc("GET /api/v1/opportunities/{id}", s.handleGetOpportunity)
 	apiMux.HandleFunc("GET /api/v1/stages/counts", s.handleStageCounts)
+	// NAICS typeahead for onboarding (official 2022 taxonomy → valid ncode filter).
+	apiMux.HandleFunc("GET /api/v1/naics", s.handleSearchNAICS)
 
 	// WS-B3 action + proposal-status endpoints. The select POST is the Zone-1 →
 	// Zone-2 bridge; the proposal GET composes the read layer with the draft.
