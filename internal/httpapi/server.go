@@ -312,6 +312,9 @@ func (s *Server) Routes() http.Handler {
 		// the RAW dashboard handler — NOT the RequireProductKeyHTML-wrapped one — so a tester
 		// can reach the instructions before or without a session. handleHelp needs no auth.
 		outerMux.Handle("/help", s.deps.DashboardHTML)
+		// /privacy is the public privacy policy — also ungated (Google's OAuth verification
+		// requires a publicly reachable privacy-policy URL on the app's own domain).
+		outerMux.Handle("/privacy", s.deps.DashboardHTML)
 		// HTML catch-all.
 		outerMux.Handle("/", htmlHandler)
 		handler = outerMux
