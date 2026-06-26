@@ -18,7 +18,9 @@ func TestTeamInvite(t *testing.T) {
 		return "KAIMI-AAAA-BBBB-CCCC", time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), nil
 	}
 	mk := func(opts ...dashboard.Option) *dashboard.Handler {
-		base := []dashboard.Option{dashboard.WithProfileStore(&memProfileStore{}), identityOpt("owner@ey3.com", token)}
+		// A saved profile is required to reach any dashboard page (the onboarding gate); the
+		// Team page is one, so seed a profile here.
+		base := []dashboard.Option{dashboard.WithProfileStore(&memProfileStore{p: validProfile()}), identityOpt("owner@ey3.com", token)}
 		return newOnboardingHandler(t, append(base, opts...)...)
 	}
 

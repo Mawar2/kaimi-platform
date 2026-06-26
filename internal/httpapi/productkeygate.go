@@ -48,6 +48,10 @@ const driveCallbackPath = "/api/v1/integrations/drive/callback"
 const (
 	entryPath  = "/entry"
 	accessPath = "/access"
+	// loggedOutPath is where a missing/invalid session sends a browser: the public homepage
+	// (the "main site"), which has the sign-in / enter-access-link call to action. It is
+	// served ungated, so there is no redirect loop.
+	loggedOutPath = "/home"
 )
 
 // Static, operator-controlled messages shown on the entry page. They are deliberately
@@ -214,8 +218,9 @@ func (g *ProductKeyGate) RequireProductKey(next http.Handler) http.Handler {
 
 // RequireProductKeyHTML guards the server-rendered dashboard ("/"): same check as
 // RequireProductKey, but a missing/invalid session REDIRECTS the browser (302) to the
-// /entry page so a human can paste their key, rather than answering 401 JSON. On success
-// it injects the verified Session into the context and serves the page.
+// public homepage (the main site), which carries the sign-in / enter-access-link CTA,
+// rather than answering 401 JSON. On success it injects the verified Session into the
+// context and serves the page.
 func (g *ProductKeyGate) RequireProductKeyHTML(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == driveCallbackPath {
@@ -224,7 +229,7 @@ func (g *ProductKeyGate) RequireProductKeyHTML(next http.Handler) http.Handler {
 		}
 		sess, ok := g.authenticate(r)
 		if !ok {
-			http.Redirect(w, r, entryPath, http.StatusFound)
+			http.Redirect(w, r, loggedOutPath, http.StatusFound)
 			return
 		}
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, sess)
