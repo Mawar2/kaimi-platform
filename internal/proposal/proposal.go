@@ -73,6 +73,13 @@ type Deps struct {
 	// when it returns a non-nil value; otherwise Profile is the fallback. Without this, a
 	// tenant who onboards after boot would get proposals grounded on the boot-time profile.
 	ProfileProvider func() *scorer.CapabilityProfile
+	// ContextDocsProvider, when set, resolves the client's onboarding context documents
+	// (uploaded capability statements / past-performance text, name->text) FRESH at draft
+	// time, so documents uploaded after this long-lived service started are honored — the
+	// same late-binding rationale as ProfileProvider. The Writer grounds the draft in this
+	// evidence in addition to the profile. nil (or a nil/empty return) simply means the
+	// draft is grounded on the profile and solicitation alone.
+	ContextDocsProvider func() map[string]string
 	// Ingest is optional. When set, the draft pipeline ingests the solicitation
 	// attachments before outlining, attaches the resulting SolicitationDocs to the
 	// Opportunity, and threads the extracted text into the Writer and Final Review
@@ -112,6 +119,17 @@ func (s *Service) currentProfile() *scorer.CapabilityProfile {
 		}
 	}
 	return s.deps.Profile
+}
+
+// currentContextDocs returns the client's onboarding context documents (name->extracted
+// text) to ground the Writer on, resolved fresh via ContextDocsProvider so uploads made
+// after this service started are honored. Returns nil when no provider is wired or none
+// are stored — the Writer then drafts from the profile and solicitation alone.
+func (s *Service) currentContextDocs() map[string]string {
+	if s.deps.ContextDocsProvider != nil {
+		return s.deps.ContextDocsProvider()
+	}
+	return nil
 }
 
 // NewService validates deps and returns a Service.
@@ -482,11 +500,12 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 			GeneratedAt:     out.GeneratedAt,
 		}
 		draft, res, err := s.deps.Writer.Run(ctx, writer.Input{
-			Opportunity:  opp,
-			Outline:      single,
-			Profile:      s.currentProfile(),
-			Documents:    documents,
-			RevisionNote: revisionNote,
+			Opportunity:      opp,
+			Outline:          single,
+			Profile:          s.currentProfile(),
+			Documents:        documents,
+			ContextDocuments: s.currentContextDocs(),
+			RevisionNote:     revisionNote,
 		})
 		if err != nil || res == nil || res.IsFailed() {
 			// Keep whatever sections already landed; surface the failure.

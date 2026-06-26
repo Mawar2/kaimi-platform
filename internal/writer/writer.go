@@ -84,6 +84,13 @@ type Input struct {
 	// (populated by the Manager's ingest stage). When present it is additional
 	// grounded source material the model may use; it is never required.
 	Documents map[string]string
+	// ContextDocuments maps an onboarding-uploaded context document name to its
+	// extracted text — the CLIENT's own evidence (capability statements,
+	// past-performance write-ups, prior proposals). Unlike Documents, which is the
+	// solicitation's RFP text, these describe the bidding company and let the draft
+	// ground claims in the client's real, documented capabilities rather than the
+	// flat profile fields alone. Optional; never required.
+	ContextDocuments map[string]string
 	// RevisionNote carries the human reviewer's change request when this run is a
 	// revision (Request changes at the gate). When present the writer must
 	// address it in the new draft; empty on a fresh draft.
@@ -154,7 +161,7 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 			return "", failed(in.Opportunity.ID, "draft generation cancelled", err.Error()), err
 		}
 
-		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules, in.Documents, in.RevisionNote)
+		prompt := buildSectionPrompt(in.Opportunity, in.Profile, section, in.Outline.FormattingRules, in.Documents, in.ContextDocuments, in.RevisionNote)
 		text, err := a.gen.GenerateSection(ctx, systemInstruction, prompt)
 		if err != nil {
 			return "", failed(
@@ -187,7 +194,7 @@ func (a *Agent) runGenerated(ctx context.Context, in Input) (string, *agent.Resu
 // only the facts present in the Opportunity, the Capability Profile, and the
 // ingested solicitation documents; the anti-fabrication rules are delivered
 // separately via systemInstruction.
-func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules, documents map[string]string, revisionNote string) string {
+func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, section outline.Section, rules *outline.FormattingRules, documents, contextDocuments map[string]string, revisionNote string) string {
 	var sb strings.Builder
 
 	// A human reviewer's change request takes priority: it is the reason this
@@ -229,6 +236,8 @@ func buildSectionPrompt(opp *opportunity.Opportunity, profile *scorer.Capability
 	}
 	sb.WriteString("\n")
 
+	writeCompanyDocuments(&sb, contextDocuments)
+
 	if rules != nil {
 		if rules.PageLimit != nil && rules.PageLimit.Specified {
 			fmt.Fprintf(&sb, "Formatting: respect the page limit (%s).\n", rules.PageLimit.Value)
@@ -262,6 +271,66 @@ func writeSolicitationDocuments(sb *strings.Builder, documents map[string]string
 			continue
 		}
 		fmt.Fprintf(sb, "### %s\n%s\n\n", name, text)
+	}
+}
+
+const (
+	// maxContextDocsPromptChars bounds the total extracted context-document text
+	// injected into a single section prompt. Context documents are client uploads
+	// of arbitrary size (capability statements, prior proposals), so without a cap
+	// one large file could blow the model's context budget or crowd out the
+	// solicitation facts. ~24k chars ≈ 6k tokens — generous grounding while leaving
+	// ample room for the rest of the prompt and the response.
+	maxContextDocsPromptChars = 24000
+	// contextDocTruncationMarker is appended in place of text dropped to honor the
+	// budget, so the model (and a human reading the prompt) can tell evidence was
+	// cut rather than that it simply ended.
+	contextDocTruncationMarker = "\n…[truncated to fit the prompt budget]"
+)
+
+// writeCompanyDocuments appends the client's onboarding context-document text to
+// the prompt as a labeled "Company evidence" block — the company's OWN documented
+// capabilities, kept distinct from the solicitation documents so the model knows
+// which is which. Documents are emitted in a stable filename order (deterministic
+// prompts) and the total injected text is capped at maxContextDocsPromptChars: once
+// the budget is reached the current document is truncated with a marker and the
+// rest are skipped. When no context documents are present it writes nothing, so the
+// prompt never implies source material that is not there.
+func writeCompanyDocuments(sb *strings.Builder, contextDocuments map[string]string) {
+	if len(contextDocuments) == 0 {
+		return
+	}
+	names := make([]string, 0, len(contextDocuments))
+	for name := range contextDocuments {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	wroteHeader := false
+	remaining := maxContextDocsPromptChars
+	for _, name := range names {
+		if remaining <= 0 {
+			break
+		}
+		text := strings.TrimSpace(contextDocuments[name])
+		if text == "" {
+			continue
+		}
+		if !wroteHeader {
+			sb.WriteString("## Company evidence (the client's own capability statements & past performance — ground your claims in these, never invent beyond them)\n")
+			wroteHeader = true
+		}
+		truncated := false
+		if len(text) > remaining {
+			text = text[:remaining]
+			truncated = true
+		}
+		remaining -= len(text)
+		fmt.Fprintf(sb, "### %s\n%s", name, text)
+		if truncated {
+			sb.WriteString(contextDocTruncationMarker)
+		}
+		sb.WriteString("\n\n")
 	}
 }
 
