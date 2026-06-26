@@ -217,7 +217,12 @@ func (s *Server) Routes() http.Handler {
 	rootMux.Handle("/api/v1/", apiHandler)
 
 	// Unauthenticated routes live on the root mux, outside the wrapped group.
+	// /health and /healthz both serve the liveness probe. /healthz is the conventional
+	// name, but Google Cloud Run's front end intercepts that EXACT path before it reaches
+	// the container (it returns its own 404), so /health is the externally reachable one
+	// on Cloud Run; /healthz is kept for other platforms / local runs.
 	rootMux.HandleFunc("GET /healthz", s.handleHealth)
+	rootMux.HandleFunc("GET /health", s.handleHealth)
 
 	// OAuth sign-in endpoints (WS-B4). They are registered on the root mux — OUTSIDE
 	// the protected /api/v1 group — because a user must be able to reach login and
@@ -288,6 +293,7 @@ func (s *Server) Routes() http.Handler {
 		// shadows them.
 		outerMux.Handle("/api/v1/", handler)
 		outerMux.Handle("/healthz", handler)
+		outerMux.Handle("/health", handler)
 		if s.deps.Auth != nil {
 			outerMux.Handle("/auth/", handler)
 		}
