@@ -18,16 +18,57 @@ func TestBuildSectionPrompt_IncludesRevisionNote(t *testing.T) {
 	section := outline.Section{Title: "Past Performance"}
 	const note = "Name a teaming partner for past performance at this scale."
 
-	withNote := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, note)
+	withNote := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, nil, note)
 	if !strings.Contains(withNote, note) {
 		t.Errorf("revision prompt must include the reviewer change request:\n%s", withNote)
 	}
 	if !strings.Contains(withNote, "change request") {
 		t.Errorf("revision prompt should label the change request block")
 	}
-	fresh := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, "")
+	fresh := buildSectionPrompt(opp, &scorer.CapabilityProfile{}, section, nil, nil, nil, "")
 	if strings.Contains(fresh, "change request") {
 		t.Errorf("a fresh draft must not carry a change-request block")
+	}
+}
+
+// TestBuildSectionPrompt_IncludesContextDocuments proves the client's onboarding
+// context documents (uploaded capability statements / past-performance write-ups)
+// are injected into the Writer prompt as a labeled "Company evidence" block —
+// distinct from the solicitation documents — and that the injected text is
+// length-bounded so a large upload cannot blow the prompt budget (#134).
+func TestBuildSectionPrompt_IncludesContextDocuments(t *testing.T) {
+	opp := &opportunity.Opportunity{ID: "x", Title: "T", Agency: "A"}
+	section := outline.Section{Title: "Past Performance"}
+	profile := &scorer.CapabilityProfile{}
+
+	docs := map[string]string{
+		"capability-statement.txt": "We delivered a zero-downtime cloud migration for the VA in 2024.",
+	}
+	got := buildSectionPrompt(opp, profile, section, nil, nil, docs, "")
+	if !strings.Contains(got, "Company evidence") {
+		t.Errorf("prompt must label the company-evidence block:\n%s", got)
+	}
+	if !strings.Contains(got, "zero-downtime cloud migration for the VA") {
+		t.Errorf("prompt must include the context document text:\n%s", got)
+	}
+	if !strings.Contains(got, "capability-statement.txt") {
+		t.Errorf("prompt should name the source document:\n%s", got)
+	}
+
+	// Absent context docs: no company-evidence block (never imply missing source).
+	none := buildSectionPrompt(opp, profile, section, nil, nil, nil, "")
+	if strings.Contains(none, "Company evidence") {
+		t.Errorf("a draft with no context docs must not carry a company-evidence block")
+	}
+
+	// Bounded: a huge upload is truncated so it cannot blow the prompt budget.
+	big := map[string]string{"big.txt": strings.Repeat("x", maxContextDocsPromptChars*2)}
+	bounded := buildSectionPrompt(opp, profile, section, nil, nil, big, "")
+	if len(bounded) > maxContextDocsPromptChars+2000 {
+		t.Errorf("context-doc injection must be bounded; prompt was %d chars", len(bounded))
+	}
+	if !strings.Contains(bounded, contextDocTruncationMarker) {
+		t.Errorf("an over-budget context doc must be marked truncated")
 	}
 }
 

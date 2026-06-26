@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/config"
+	"github.com/Mawar2/Kaimi/internal/contextdoc"
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/fallback"
@@ -133,6 +135,34 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		}
 	}
 
+	// contextDocsProvider re-resolves the client's onboarding context documents FRESH per
+	// draft (same late-binding rationale as profileProvider): the proposal service is built
+	// once at startup, but a client may upload capability statements / past-performance docs
+	// during onboarding afterward, and the Writer must ground on them. The store roots at the
+	// SAME base path as the profile/document stores so the API's onboarding uploads and this
+	// pipeline read the identical documents. The extractor is only used on write (uploads go
+	// through the API), so a PlainTextExtractor suffices for this read-only List path.
+	var contextDocsProvider func() map[string]string
+	if opts.BasePath != "" {
+		ctxDocStore, err := contextdoc.NewJSONStore(opts.BasePath, contextdoc.PlainTextExtractor{})
+		if err != nil {
+			return nil, fmt.Errorf("context-doc store: %w", err)
+		}
+		contextDocsProvider = func() map[string]string {
+			docs, lerr := ctxDocStore.List()
+			if lerr != nil || len(docs) == 0 {
+				return nil // best-effort grounding; never block drafting on context docs
+			}
+			out := make(map[string]string, len(docs))
+			for _, d := range docs {
+				if text := strings.TrimSpace(d.Text); text != "" {
+					out[d.Name] = d.Text
+				}
+			}
+			return out
+		}
+	}
+
 	// The live agents share one Vertex AI region. The Gemini 3.x family —
 	// gemini-3.1-pro-preview (drafting) and gemini-3.5-flash (outline structure) —
 	// is served only from the global endpoint, so that is the default
@@ -242,14 +272,15 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	}
 
 	return proposal.NewService(&proposal.Deps{
-		Opportunities:   opts.Store,
-		Documents:       docs,
-		Outline:         ol,
-		Writer:          w,
-		Review:          review,
-		Profile:         scorerProfile,
-		ProfileProvider: profileProvider,
-		Ingest:          ingestor,
+		Opportunities:       opts.Store,
+		Documents:           docs,
+		Outline:             ol,
+		Writer:              w,
+		Review:              review,
+		Profile:             scorerProfile,
+		ProfileProvider:     profileProvider,
+		ContextDocsProvider: contextDocsProvider,
+		Ingest:              ingestor,
 	}), nil
 }
 
