@@ -233,9 +233,11 @@ const workspaceContentTmpl = `{{define "content"}}
     <div class="r-body">
       {{if .Doc}}
       <div class="r-sec-h">What Tomás produced</div>
-      <div class="summary">Drafted {{len .Doc.Sections}} sections into the working draft. Download the full Markdown or edit it inline below.</div>
+      <div class="summary">Drafted {{len .Doc.Sections}} sections into the working draft. Export it for review, sharing, or submission — or edit it inline below.</div>
       <div class="art-row">
-        <a class="artifact2" href="/workspace/{{.Opp.ID}}/draft.md" download>` + iconDoc + `Download draft.md<span style="color:var(--ink-4);font-family:var(--font-mono);font-size:11px">{{.VersionLabel}}</span></a>
+        <a class="artifact2" href="/workspace/{{.Opp.ID}}/proposal.docx" download>` + iconDoc + `Word (.docx)<span style="color:var(--ink-4);font-size:11px">editable</span></a>
+        <a class="artifact2" href="/workspace/{{.Opp.ID}}/proposal.pdf" download>` + iconDoc + `PDF<span style="color:var(--ink-4);font-size:11px">for submission</span></a>
+        <a class="artifact2" href="/workspace/{{.Opp.ID}}/draft.md" download>` + iconDoc + `Markdown<span style="color:var(--ink-4);font-family:var(--font-mono);font-size:11px">{{.VersionLabel}}</span></a>
       </div>
 
       {{range .OpenFlags}}

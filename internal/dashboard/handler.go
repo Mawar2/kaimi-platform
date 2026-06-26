@@ -220,6 +220,9 @@ func (h *Handler) setupRoutes() {
 	h.mux.HandleFunc("GET /capability-map", h.handleCapabilityMap)
 	// #246 B3: the working draft is downloadable as Markdown from the workspace.
 	h.mux.HandleFunc("GET /workspace/{id}/draft.md", h.handleDraftDownload)
+	// Proposal exports: editable Word (.docx) for revision/sharing + locked PDF for submission.
+	h.mux.HandleFunc("GET /workspace/{id}/proposal.docx", h.handleProposalDOCX)
+	h.mux.HandleFunc("GET /workspace/{id}/proposal.pdf", h.handleProposalPDF)
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
 	h.mux.HandleFunc("/workspace/{id}/approve", postOnly(h.handleAction("approve")))
 	h.mux.HandleFunc("/workspace/{id}/changes", postOnly(h.handleAction("changes")))
