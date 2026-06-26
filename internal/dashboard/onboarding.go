@@ -453,6 +453,8 @@ const onboardingContentTmpl = `<!DOCTYPE html>
   input:focus,textarea:focus{outline:2px solid var(--accent);border-color:var(--accent);}
   .row{display:flex;gap:14px;}.row label{flex:1;}
   .hint{font-weight:400;color:var(--ink3);font-size:12px;}
+  .help-link{font-size:12px;font-weight:600;color:#7cb3ff;text-decoration:none;margin-left:6px;}
+  .help-link:hover{text-decoration:underline;}
   input.mono{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.4px;}
   input.mono:not(:placeholder-shown):invalid{border-color:#7a3b46;}
   /* Google connect — design-system treatment (dark Focus surface + G glyph),
@@ -470,6 +472,22 @@ const onboardingContentTmpl = `<!DOCTYPE html>
   legend{font-size:12px;font-weight:700;color:var(--ink3);padding:0 6px;}
   .chips{display:flex;flex-wrap:wrap;gap:8px;}
   .chk{display:inline-flex;align-items:center;gap:7px;font-weight:500;font-size:13px;}
+  /* NAICS picker */
+  .naics-hidden{display:block;}
+  body.naics-js .naics-hidden{display:none;}
+  .naics-picker{position:relative;}
+  .naics-results{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);max-height:260px;overflow-y:auto;background:var(--surface,#0e1525);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.45);}
+  .naics-result{display:block;width:100%;text-align:left;padding:9px 12px;background:none;border:0;border-bottom:1px solid var(--border);color:var(--ink,#e8eefc);font-size:13px;cursor:pointer;}
+  .naics-result:last-child{border-bottom:0;}
+  .naics-result:hover{background:rgba(59,130,246,.16);}
+  .naics-result b{color:#7cb3ff;margin-right:8px;font-variant-numeric:tabular-nums;}
+  .naics-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+  .naics-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.03);font-size:13px;}
+  .naics-chip b{color:#7cb3ff;font-variant-numeric:tabular-nums;}
+  .naics-chip-title{color:var(--ink3);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .naics-chip-tier{font-size:12px;padding:2px 4px;border-radius:6px;}
+  .naics-chip-rm{border:0;background:none;color:var(--ink3);font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
+  .naics-chip-rm:hover{color:#ff6b6b;}
   .wz-nav{display:flex;align-items:center;justify-content:space-between;margin-top:26px;gap:12px;}
   .btn{border:0;border-radius:9px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;}
   .btn svg{width:16px;height:16px;}
@@ -502,10 +520,9 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     </div>
 
     {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
-    {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
-    {{if .SAMKeyJustSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved. Your next hunt will use it.</span></div>{{end}}
-    {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded. Kaimi will use them to understand your business.</span></div>{{end}}
-    {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
+    <!-- Success ("saved") banners removed: they rendered above the step sections and so
+         persisted across the whole wizard. The wizard advancing + the visible state change
+         (chips, doc list, connected status) already confirm a successful save. -->
 
     <!-- 1. Welcome -->
     <section class="wz-step" data-step="welcome">
@@ -542,8 +559,15 @@ const onboardingContentTmpl = `<!DOCTYPE html>
           <label>UEI <span class="hint">(optional)</span><input type="text" name="uei" value="{{.UEI}}"></label>
           <label>CAGE <span class="hint">(optional)</span><input type="text" name="cage" value="{{.CAGE}}"></label>
         </div>
-        <label>NAICS codes <span class="hint">· one per line: code|description|tier (primary|secondary|tertiary)</span>
-          <textarea name="naics" rows="4" placeholder="541512|Computer Systems Design|primary">{{.NAICS}}</textarea></label>
+        <label>NAICS codes <span class="hint">· search and select your industry codes — this drives which solicitations Kaimi hunts</span></label>
+        <div class="naics-picker">
+          <input type="text" id="naics-search" autocomplete="off" spellcheck="false" placeholder="Search by keyword or code — e.g. &#34;computer systems&#34; or 541512">
+          <div id="naics-results" class="naics-results" hidden></div>
+          <div id="naics-chips" class="naics-chips" aria-live="polite"></div>
+        </div>
+        <!-- Canonical value carrier (one "code|title|tier" per line), kept in sync by the
+             picker JS so the existing server parser is unchanged. Hidden when JS runs. -->
+        <textarea name="naics" id="naics-input" class="naics-hidden" aria-hidden="true" tabindex="-1" placeholder="541512|Computer Systems Design Services|primary">{{.NAICS}}</textarea>
         <fieldset><legend>Set-aside eligibility</legend><div class="chips">
           <label class="chk"><input type="checkbox" name="sa_small_business"{{if .SetAside.SmallBusiness}} checked{{end}}> Small business</label>
           <label class="chk"><input type="checkbox" name="sa_sdb"{{if .SetAside.SDB}} checked{{end}}> SDB</label>
@@ -565,13 +589,13 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       {{if .SAMKeyConfigured}}
       <form class="wz-form" method="POST" action="/onboarding/samgov">
         {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-        <label>SAM.gov API key <span class="hint">· from your SAM.gov account → Account Details → API Key (about 40 characters)</span>
+        <label>SAM.gov API key <span class="hint">· about 40 characters, from your SAM.gov account</span> <a href="/help" target="_blank" rel="noopener" class="help-link">How to get your key →</a>
           <input type="text" name="sam_api_key" class="mono" maxlength="64" pattern="[A-Za-z0-9._-]{30,64}" inputmode="latin" autocomplete="off" spellcheck="false" autocapitalize="off" required title="Paste your SAM.gov API key. Letters, digits, and - _ . (about 40 characters)." placeholder="e.g. AbCd1234-EfGh5678-IjKl9012-MnOp3456-Qr78"></label>
         <p class="sub" style="margin:0">Your key is stored encrypted in Secret Manager. It's never shown, logged, or shared, and it's yours alone, so your daily quota is never shared with another tester.</p>
         <div><button class="btn btn-primary" type="submit">` + iconCheck + `Save SAM.gov key</button></div>
       </form>
       {{else}}
-      <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>Managed by your administrator</h3><p>This deployment supplies the SAM.gov key as a server secret; you don't need to enter one.</p></div></div>
+      <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>SAM.gov key entry isn't enabled</h3><p>This deployment isn't set up for in-app key entry yet. You'll need your own SAM.gov API key to run hunts — <a href="/help" target="_blank" rel="noopener">see the guide</a> or contact your administrator.</p></div></div>
       {{end}}
       {{if .ContextDocsEnabled}}
       <div class="card" style="margin-top:14px"><span class="ic" style="background:#8b5cf6">+</span><div style="flex:1">
@@ -661,6 +685,74 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     if(back){ev.preventDefault();show(back.getAttribute("data-back"));}
   });
   show(initial);
+})();
+
+// NAICS picker: typeahead over /api/v1/naics (official 2022 taxonomy) → chips with a tier
+// selector, kept in sync with the hidden "naics" textarea (one "code|title|tier" per line)
+// so the server parser is unchanged. Falls back to the plain textarea if JS is unavailable.
+(function(){
+  var input=document.getElementById("naics-input");
+  var search=document.getElementById("naics-search");
+  var results=document.getElementById("naics-results");
+  var chipsEl=document.getElementById("naics-chips");
+  if(!input||!search||!results||!chipsEl){return;}
+  document.body.classList.add("naics-js");
+  var tiers=["primary","secondary","tertiary"];
+  var model=[];
+  function esc(s){var d=document.createElement("div");d.textContent=(s==null?"":s);return d.innerHTML;}
+  function sync(){input.value=model.map(function(m){return m.code+"|"+m.title+"|"+m.tier;}).join("\n");}
+  function add(code,title){
+    for(var i=0;i<model.length;i++){if(model[i].code===code){return;}}
+    model.push({code:code,title:title,tier:"primary"});renderChips();sync();
+  }
+  function renderChips(){
+    chipsEl.innerHTML="";
+    model.forEach(function(m,i){
+      var chip=document.createElement("span");chip.className="naics-chip";
+      var b=document.createElement("b");b.textContent=m.code;
+      var t=document.createElement("span");t.className="naics-chip-title";t.textContent=m.title;
+      var sel=document.createElement("select");sel.className="naics-chip-tier";
+      tiers.forEach(function(tr){var o=document.createElement("option");o.value=tr;o.textContent=tr;if(tr===m.tier){o.selected=true;}sel.appendChild(o);});
+      sel.addEventListener("change",function(){model[i].tier=sel.value;sync();});
+      var rm=document.createElement("button");rm.type="button";rm.className="naics-chip-rm";rm.setAttribute("aria-label","Remove "+m.code);rm.textContent="×";
+      rm.addEventListener("click",function(){model.splice(i,1);renderChips();sync();});
+      chip.appendChild(b);chip.appendChild(t);chip.appendChild(sel);chip.appendChild(rm);
+      chipsEl.appendChild(chip);
+    });
+  }
+  function hideResults(){results.hidden=true;results.innerHTML="";}
+  function renderResults(items){
+    results.innerHTML="";
+    if(!items.length){hideResults();return;}
+    items.forEach(function(it){
+      var row=document.createElement("button");row.type="button";row.className="naics-result";
+      row.innerHTML="<b>"+esc(it.code)+"</b> "+esc(it.title);
+      row.addEventListener("click",function(){add(it.code,it.title);search.value="";hideResults();search.focus();});
+      results.appendChild(row);
+    });
+    results.hidden=false;
+  }
+  var timer=null,last=0;
+  search.addEventListener("input",function(){
+    var q=search.value.trim();
+    if(timer){clearTimeout(timer);}
+    if(q.length<2){hideResults();return;}
+    timer=setTimeout(function(){
+      var id=++last;
+      fetch("/api/v1/naics?q="+encodeURIComponent(q)+"&limit=12",{credentials:"same-origin",headers:{"Accept":"application/json"}})
+        .then(function(r){return r.ok?r.json():{results:[]};})
+        .then(function(d){if(id===last){renderResults((d&&d.results)||[]);}})
+        .catch(function(){hideResults();});
+    },180);
+  });
+  document.addEventListener("click",function(ev){if(!ev.target.closest||!ev.target.closest(".naics-picker")){hideResults();}});
+  // Seed chips from any pre-saved value (edit case).
+  (input.value||"").split(/\r?\n/).forEach(function(line){
+    line=line.trim();if(!line){return;}
+    var p=line.split("|");var code=(p[0]||"").trim();if(!code){return;}
+    model.push({code:code,title:(p[1]||"").trim(),tier:(p[2]||"primary").trim()});
+  });
+  renderChips();sync();
 })();
 </script>
 </body>

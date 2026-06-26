@@ -933,13 +933,17 @@ func TestOnboardingDriveTargetRoundTrip(t *testing.T) {
 // path is wired: with NO saver it shows the "managed by your administrator" note and no
 // input; with a saver wired it offers the key field that posts to /onboarding/samgov.
 func TestOnboardingSAMKeyEntry(t *testing.T) {
-	// No saver → admin note, no input.
+	// No saver → an HONEST "key entry isn't enabled" note (NOT "you don't need a key" —
+	// in the BYO-key model every tenant must enter their own), no input.
 	h := newOnboardingHandler(t, dashboard.WithProfileStore(&memProfileStore{}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/onboarding", http.NoBody))
 	body := rec.Body.String()
-	if !strings.Contains(body, "Managed by your administrator") {
-		t.Errorf("SAM.gov section missing the no-saver administrator note")
+	if !strings.Contains(body, "SAM.gov key entry isn't enabled") {
+		t.Errorf("SAM.gov section missing the honest no-saver note")
+	}
+	if strings.Contains(body, "you don't need to enter one") {
+		t.Errorf("SAM.gov section still claims the key is managed and not needed (the lie)")
 	}
 	if strings.Contains(body, `name="sam_api_key"`) {
 		t.Errorf("SAM.gov key field must be hidden when no saver is wired")

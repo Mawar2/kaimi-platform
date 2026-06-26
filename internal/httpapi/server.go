@@ -156,6 +156,8 @@ func (s *Server) Routes() http.Handler {
 	apiMux.HandleFunc("GET /api/v1/opportunities", s.handleListOpportunities)
 	apiMux.HandleFunc("GET /api/v1/opportunities/{id}", s.handleGetOpportunity)
 	apiMux.HandleFunc("GET /api/v1/stages/counts", s.handleStageCounts)
+	// NAICS typeahead for onboarding (official 2022 taxonomy → valid ncode filter).
+	apiMux.HandleFunc("GET /api/v1/naics", s.handleSearchNAICS)
 
 	// WS-B3 action + proposal-status endpoints. The select POST is the Zone-1 →
 	// Zone-2 bridge; the proposal GET composes the read layer with the draft.
@@ -306,6 +308,10 @@ func (s *Server) Routes() http.Handler {
 			outerMux.Handle("/access", handler)
 			outerMux.Handle("/entry", handler)
 		}
+		// /help is the public setup guide (how to get a SAM.gov API key, etc.). It routes to
+		// the RAW dashboard handler — NOT the RequireProductKeyHTML-wrapped one — so a tester
+		// can reach the instructions before or without a session. handleHelp needs no auth.
+		outerMux.Handle("/help", s.deps.DashboardHTML)
 		// HTML catch-all.
 		outerMux.Handle("/", htmlHandler)
 		handler = outerMux

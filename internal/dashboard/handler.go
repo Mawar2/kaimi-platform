@@ -191,6 +191,9 @@ func (h *Handler) setupRoutes() {
 	h.mux.HandleFunc("GET /editor/{id}", h.handleEditor)
 	// WS-C3 onboarding: the in-product setup flow. GET renders the checklist; the
 	// profile POST is method-guarded so a stray GET 405s instead of falling through.
+	// Public setup guide. Mounted UNGATED by the server (outside the product-key wrap) so
+	// a tester can read it before/without a session; handleHelp requires no auth or profile.
+	h.mux.HandleFunc("GET /help", h.handleHelp)
 	h.mux.HandleFunc("GET /onboarding", h.handleOnboarding)
 	h.mux.HandleFunc("/onboarding/profile", postOnly(h.handleOnboardingProfile))
 	// WS-C5b: change the Drive destination from the onboarding/settings page without

@@ -42,26 +42,26 @@ func TestOnboardingReflectsConfiguredSAMKey(t *testing.T) {
 // because the deployment already has a key configured. The first-load banner read as the
 // license being mistaken for a SAM key (a tester reported "it says SAM.gov key saved but
 // that's my license key"). The "connected" summary state is unaffected (asserted above).
-func TestSAMSavedBannerOnlyAfterSave(t *testing.T) {
-	const banner = "SAM.gov key saved. Your next hunt will use it."
+// TestNoGreenSuccessBanners proves the green "saved" banners are gone from the onboarding
+// flow entirely — they rendered above the step sections and persisted across the whole
+// wizard, which read as noise. The wizard advancing + visible state changes confirm a save.
+func TestNoGreenSuccessBanners(t *testing.T) {
 	noopSaver := func(context.Context, string) error { return nil }
-
 	render := func(target string) string {
 		h := newOnboardingHandler(t,
 			dashboard.WithProfileStore(&memProfileStore{}),
 			dashboard.WithSAMKeySaver(noopSaver),
-			// Key IS configured for the deployment — the case that previously showed the
-			// banner on first load.
 			dashboard.WithSAMKeyConfiguredCheck(func() bool { return true }))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, http.NoBody))
 		return rec.Body.String()
 	}
-
-	if got := render("/onboarding"); strings.Contains(got, banner) {
-		t.Errorf("first load with a configured key must NOT show the 'key saved' success banner")
-	}
-	if got := render("/onboarding?sam_saved=1"); !strings.Contains(got, banner) {
-		t.Errorf("after a save (?sam_saved=1) the success banner must show")
+	// No green success-banner DIV should render in any state. We match the banner's class
+	// attribute combo (note the space) so we don't hit the leftover CSS rule (".wz-banner--ok{")
+	// or the legitimate done-step summary row ("Company profile saved" with a checkmark).
+	for _, target := range []string{"/onboarding", "/onboarding?sam_saved=1", "/onboarding?saved=1", "/onboarding?docs_saved=1"} {
+		if got := render(target); strings.Contains(got, "wz-banner wz-banner--ok") {
+			t.Errorf("%s still renders a green success banner div; the persistent banners were removed", target)
+		}
 	}
 }
