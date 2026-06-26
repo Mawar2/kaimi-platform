@@ -209,6 +209,8 @@ func (h *Handler) setupRoutes() {
 	// Public setup guide. Mounted UNGATED by the server (outside the product-key wrap) so
 	// a tester can read it before/without a session; handleHelp requires no auth or profile.
 	h.mux.HandleFunc("GET /help", h.handleHelp)
+	// Public, ungated privacy policy (required for Google OAuth consent-screen verification).
+	h.mux.HandleFunc("GET /privacy", h.handlePrivacy)
 	h.mux.HandleFunc("GET /onboarding", h.handleOnboarding)
 	h.mux.HandleFunc("/onboarding/profile", postOnly(h.handleOnboardingProfile))
 	// WS-C5b: change the Drive destination from the onboarding/settings page without
