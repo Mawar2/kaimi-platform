@@ -63,8 +63,9 @@ type Options struct {
 // way.
 //
 // The three live toggles in opts switch each agent independently:
-//   - Outline: cached Google Docs client always; live Gemini section planner
-//     when opts.LiveWriter is set, deterministic planner otherwise.
+//   - Outline: Google Docs client resolved per draft (customer Drive when
+//     connected, cached otherwise — #73); live Gemini section planner when
+//     opts.LiveWriter is set, deterministic planner otherwise.
 //   - Writer: live Gemini drafting when opts.LiveWriter is set, stub otherwise.
 //   - Final Review: live Gemini compliance pass when opts.LiveReview is set,
 //     deterministic checks only otherwise.
@@ -78,16 +79,19 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	if err != nil {
 		return nil, fmt.Errorf("document store: %w", err)
 	}
-	// Build the Google Docs client. WS-C2: when the deployment has connected the
-	// CUSTOMER's own Drive (a token is stored at BasePath and a target Drive id is
-	// set) and OAuth client credentials are supplied to refresh it, the Outline
-	// agent writes Docs into the customer's Drive via that token source. Otherwise
-	// the Docs client is unchanged (cached today). resolveDocsClient logs which path
-	// it took and falls back to cached on any not-connected / config-missing case so
-	// a partial setup never breaks the proposal pipeline.
-	docsClient, err := resolveDocsClient(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("docs client: %w", err)
+	// Resolve the Google Docs client PER DRAFT, not once at boot. WS-C2: when the
+	// deployment has connected the CUSTOMER's own Drive (a token is stored at BasePath
+	// and a target Drive id is set) and OAuth client credentials are supplied to
+	// refresh it, the Outline agent writes Docs into the customer's Drive via that
+	// token source. Otherwise it falls back to the cached client.
+	//
+	// Resolving per draft (#73) means a Drive connected — or re-targeted — while this
+	// container is already warm takes effect on the very next draft, with no restart.
+	// resolveDocsClient logs which path it took and never errors on a not-connected /
+	// config-missing case (it falls back to cached), so a partial setup can't break a
+	// draft; the draft ctx is threaded through so the token store refresh uses it.
+	resolveDocs := func(ctx context.Context) (googledocs.Client, error) {
+		return resolveDocsClient(ctx, opts)
 	}
 
 	// One company profile feeds both the Hunter/Scorer and the Writer's grounding
@@ -126,8 +130,8 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 	// overridable only via GCP_AGENT_REGION).
 	region := cfg.GCP.AgentRegion
 
-	ol := outline.New(docsClient) // deterministic section planner (offline default)
-	w := writer.New()             // stub writer (offline default)
+	ol := outline.NewWithResolver(resolveDocs, nil) // deterministic section planner (offline default)
+	w := writer.New()                               // stub writer (offline default)
 	if opts.LiveWriter {
 		projectID := cfg.GCP.ProjectID
 		if projectID == "" {
@@ -150,7 +154,7 @@ func New(ctx context.Context, cfg *config.Config, opts Options) (*proposal.Servi
 		if err != nil {
 			return nil, fmt.Errorf("gemini outline planner (backup %s): %w", cfg.GCP.OutlineFallbackModel, err)
 		}
-		ol = outline.NewWithPlanner(docsClient, fallback.NewPlanner(planner, backupPlanner))
+		ol = outline.NewWithResolver(resolveDocs, fallback.NewPlanner(planner, backupPlanner))
 
 		gen, err := writer.NewGeminiGenerator(ctx,
 			projectID, region, cfg.GCP.WriterModel)
