@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -50,6 +51,7 @@ func newDriveSaveHandler(t *testing.T, saver dashboard.ProposalDriveSaver) *dash
 		Agency: "DHS CISA", NAICSCode: "541512", SolicitationNum: "SOL-2026-001",
 		Description: "Modernize zero trust architecture.", ResponseDeadline: now.Add(720 * time.Hour),
 		Score: 0.87, Recommendation: "BID", CreatedAt: now, UpdatedAt: now,
+		Requirements: []string{"continuous endpoint monitoring", "supply chain risk management plan"},
 	}
 	if err := opps.Save(context.Background(), opp); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -124,4 +126,31 @@ func TestSaveToDrive(t *testing.T) {
 			t.Errorf("status = %d, want 503 when no saver is wired", rr.Code)
 		}
 	})
+}
+
+// TestProposalComplianceCSV covers the workspace compliance-matrix download: after the proposal
+// is drafted, GET /workspace/{id}/compliance.csv returns a CSV attachment with rows for the
+// opportunity's extracted requirements.
+func TestProposalComplianceCSV(t *testing.T) {
+	h := newDriveSaveHandler(t, nil)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/workspace/zta-1/compliance.csv", http.NoBody))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/csv") {
+		t.Errorf("Content-Type = %q, want it to contain text/csv", ct)
+	}
+	cd := rr.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, ".csv") {
+		t.Errorf("Content-Disposition = %q, want an attachment with a .csv filename", cd)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Compliance matrix", "Requirement", "continuous endpoint monitoring"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("CSV body missing %q", want)
+		}
+	}
 }
