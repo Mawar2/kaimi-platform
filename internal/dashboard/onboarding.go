@@ -453,6 +453,8 @@ const onboardingContentTmpl = `<!DOCTYPE html>
   input:focus,textarea:focus{outline:2px solid var(--accent);border-color:var(--accent);}
   .row{display:flex;gap:14px;}.row label{flex:1;}
   .hint{font-weight:400;color:var(--ink3);font-size:12px;}
+  .help-link{font-size:12px;font-weight:600;color:#7cb3ff;text-decoration:none;margin-left:6px;}
+  .help-link:hover{text-decoration:underline;}
   input.mono{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.4px;}
   input.mono:not(:placeholder-shown):invalid{border-color:#7a3b46;}
   /* Google connect — design-system treatment (dark Focus surface + G glyph),
@@ -518,10 +520,9 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     </div>
 
     {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
-    {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
-    {{if .SAMKeyJustSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved. Your next hunt will use it.</span></div>{{end}}
-    {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded. Kaimi will use them to understand your business.</span></div>{{end}}
-    {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
+    <!-- Success ("saved") banners removed: they rendered above the step sections and so
+         persisted across the whole wizard. The wizard advancing + the visible state change
+         (chips, doc list, connected status) already confirm a successful save. -->
 
     <!-- 1. Welcome -->
     <section class="wz-step" data-step="welcome">
@@ -588,13 +589,13 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       {{if .SAMKeyConfigured}}
       <form class="wz-form" method="POST" action="/onboarding/samgov">
         {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-        <label>SAM.gov API key <span class="hint">· from your SAM.gov account → Account Details → API Key (about 40 characters)</span>
+        <label>SAM.gov API key <span class="hint">· about 40 characters, from your SAM.gov account</span> <a href="/help" target="_blank" rel="noopener" class="help-link">How to get your key →</a>
           <input type="text" name="sam_api_key" class="mono" maxlength="64" pattern="[A-Za-z0-9._-]{30,64}" inputmode="latin" autocomplete="off" spellcheck="false" autocapitalize="off" required title="Paste your SAM.gov API key. Letters, digits, and - _ . (about 40 characters)." placeholder="e.g. AbCd1234-EfGh5678-IjKl9012-MnOp3456-Qr78"></label>
         <p class="sub" style="margin:0">Your key is stored encrypted in Secret Manager. It's never shown, logged, or shared, and it's yours alone, so your daily quota is never shared with another tester.</p>
         <div><button class="btn btn-primary" type="submit">` + iconCheck + `Save SAM.gov key</button></div>
       </form>
       {{else}}
-      <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>Managed by your administrator</h3><p>This deployment supplies the SAM.gov key as a server secret; you don't need to enter one.</p></div></div>
+      <div class="card"><span class="ic" style="background:#2a3650">i</span><div><h3>SAM.gov key entry isn't enabled</h3><p>This deployment isn't set up for in-app key entry yet. You'll need your own SAM.gov API key to run hunts — <a href="/help" target="_blank" rel="noopener">see the guide</a> or contact your administrator.</p></div></div>
       {{end}}
       {{if .ContextDocsEnabled}}
       <div class="card" style="margin-top:14px"><span class="ic" style="background:#8b5cf6">+</span><div style="flex:1">

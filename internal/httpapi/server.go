@@ -308,6 +308,10 @@ func (s *Server) Routes() http.Handler {
 			outerMux.Handle("/access", handler)
 			outerMux.Handle("/entry", handler)
 		}
+		// /help is the public setup guide (how to get a SAM.gov API key, etc.). It routes to
+		// the RAW dashboard handler — NOT the RequireProductKeyHTML-wrapped one — so a tester
+		// can reach the instructions before or without a session. handleHelp needs no auth.
+		outerMux.Handle("/help", s.deps.DashboardHTML)
 		// HTML catch-all.
 		outerMux.Handle("/", htmlHandler)
 		handler = outerMux
