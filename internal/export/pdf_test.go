@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/go-pdf/fpdf"
+
+	"github.com/Mawar2/Kaimi/internal/document"
 )
 
 // sampleDoc builds a small but representative proposal: a title and two sections,

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/gomutex/godocx"
+
+	"github.com/Mawar2/Kaimi/internal/document"
 )
 
 // coverDateLayout is the human-friendly cover-page date format (e.g. "January 2, 2006").

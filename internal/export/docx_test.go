@@ -19,18 +19,19 @@ func readZipEntry(t *testing.T, data []byte, name string) []byte {
 		t.Fatalf("returned bytes are not a valid ZIP (.docx): %v", err)
 	}
 	for _, f := range zr.File {
-		if f.Name == name {
-			rc, err := f.Open()
-			if err != nil {
-				t.Fatalf("open zip entry %q: %v", name, err)
-			}
-			defer rc.Close()
-			b, err := io.ReadAll(rc)
-			if err != nil {
-				t.Fatalf("read zip entry %q: %v", name, err)
-			}
-			return b
+		if f.Name != name {
+			continue
 		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open zip entry %q: %v", name, err)
+		}
+		b, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatalf("read zip entry %q: %v", name, err)
+		}
+		return b
 	}
 	t.Fatalf("zip entry %q not found in .docx", name)
 	return nil
