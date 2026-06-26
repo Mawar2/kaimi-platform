@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -19,12 +22,13 @@ import (
 //
 // Token format (two base64url segments joined by a dot):
 //
-//	base64url(payloadJSON) "." base64url(HMAC-SHA256(secret, payloadSegment))
+//	base64url(AES-256-GCM(payloadJSON)) "." base64url(HMAC-SHA256(secret, payloadSegment))
 //
-// The signature covers the *encoded* payload segment (the exact bytes before the
-// dot), so verification re-encodes nothing it must trust: it splits on the dot,
-// recomputes the MAC over the first segment, and compares in constant time. Only
-// after the signature checks out is the payload decoded and the expiry enforced.
+// The payload is ENCRYPTED (AES-256-GCM, key derived from the secret) so the cookie never
+// exposes its claims — notably the product key carried in KeyID. The signature covers the
+// *encoded* (encrypted) payload segment, so verification recomputes the MAC over the first
+// segment and compares in constant time; only after the signature checks out is the payload
+// decrypted, decoded, and the expiry enforced.
 
 // sessionCookieName is the cookie that carries the signed session token. The
 // __Host- prefix is a browser-enforced hardening: a cookie with this prefix is
@@ -67,19 +71,56 @@ type Session struct {
 type sessionManager struct {
 	secret []byte        // HMAC-SHA256 key; never logged
 	ttl    time.Duration // session lifetime applied by SetSession
+	aead   cipher.AEAD   // AES-256-GCM over the payload; key derived from secret
 }
 
-// newSessionManager builds a sessionManager from the HMAC secret and session TTL.
+// newSessionManager builds a sessionManager from the HMAC secret and session TTL. It also
+// derives an AES-256-GCM key (SHA-256 of the secret) used to ENCRYPT the token payload, so
+// the cookie never exposes its claims (e.g. the product key in KeyID) to anyone who merely
+// captures the cookie — they'd also need the server secret. The signature still binds the
+// token to the server; GCM adds confidentiality + a second authenticity check.
 func newSessionManager(secret []byte, ttl time.Duration) *sessionManager {
-	return &sessionManager{secret: secret, ttl: ttl}
+	key := sha256.Sum256(secret) // 32-byte AES-256 key derived from the HMAC secret
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		// Unreachable: a 32-byte key is always valid for AES. Panic loudly at startup
+		// rather than run with a broken session cipher.
+		panic(fmt.Sprintf("httpapi: session AES cipher init: %v", err))
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(fmt.Sprintf("httpapi: session GCM init: %v", err))
+	}
+	return &sessionManager{secret: secret, ttl: ttl, aead: aead}
 }
 
-// sign encodes the session as JSON, base64url-encodes it, and appends a
-// base64url-encoded HMAC-SHA256 of that encoded payload. The returned token is
-// "<payload>.<sig>".
+// encrypt seals plaintext with AES-256-GCM, prepending the random nonce. A failure to read
+// randomness is catastrophic (no entropy), so it panics rather than mint a weak token.
+func (m *sessionManager) encrypt(plaintext []byte) []byte {
+	nonce := make([]byte, m.aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		panic(fmt.Sprintf("httpapi: session nonce: %v", err))
+	}
+	return m.aead.Seal(nonce, nonce, plaintext, nil)
+}
+
+// decrypt reverses encrypt: it splits the nonce and GCM-opens the payload. Any tampering
+// or wrong key fails the GCM authentication tag and returns an error.
+func (m *sessionManager) decrypt(ciphertext []byte) ([]byte, error) {
+	ns := m.aead.NonceSize()
+	if len(ciphertext) < ns {
+		return nil, errors.New("ciphertext too short")
+	}
+	return m.aead.Open(nil, ciphertext[:ns], ciphertext[ns:], nil)
+}
+
+// sign encodes the session as JSON, ENCRYPTS it (AES-256-GCM), base64url-encodes the
+// ciphertext, and appends a base64url-encoded HMAC-SHA256 of that encoded segment. The
+// returned token is "<payload>.<sig>". Encrypting the payload means the cookie never
+// exposes its claims (notably the product key in KeyID) to anyone who captures it.
 func (m *sessionManager) sign(s Session) string {
 	payloadJSON, _ := json.Marshal(s) // Session contains only strings/int64; cannot fail.
-	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	payload := base64.RawURLEncoding.EncodeToString(m.encrypt(payloadJSON))
 	sig := base64.RawURLEncoding.EncodeToString(m.mac(payload))
 	return payload + "." + sig
 }
@@ -102,10 +143,14 @@ func (m *sessionManager) verify(token string) (Session, error) {
 		return Session{}, fmt.Errorf("%w: signature mismatch", ErrInvalidSession)
 	}
 
-	// Signature is authentic; now it is safe to decode the payload.
-	payloadJSON, err := base64.RawURLEncoding.DecodeString(payload)
+	// Signature is authentic; now it is safe to decode + decrypt the payload.
+	ciphertext, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
 		return Session{}, fmt.Errorf("%w: bad payload encoding", ErrInvalidSession)
+	}
+	payloadJSON, err := m.decrypt(ciphertext)
+	if err != nil {
+		return Session{}, fmt.Errorf("%w: bad payload", ErrInvalidSession)
 	}
 	var s Session
 	if err := json.Unmarshal(payloadJSON, &s); err != nil {

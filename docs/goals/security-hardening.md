@@ -35,3 +35,4 @@ Never weaken the gate's fail-closed behavior or break the deployed onboarding/bo
 
 ## Progress log
 - 2026-06-26: Goal created. Starting tasks 1 (headers) + 2 (resolver allowlist).
+- 2026-06-26: Tasks 1+2 done (OWASP headers + resolver allowlist), committed. Moved to ISOLATED worktree (C:/Users/Owner/Kaimi-sec, branch feat/sec-hardening) after a collision with the UI agent in the shared tree. Tasks 3 (session payload AES-256-GCM encryption — product key no longer readable from the cookie) + 4 (CI: govulncheck blocking + gosec informational) done. Full gate green (only cmd/desktop). Next: independent security review of the diff, then merge + deploy + verify.
