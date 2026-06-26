@@ -142,6 +142,14 @@ func WithSAMKeyConfiguredCheck(fn func() bool) Option {
 	return func(h *Handler) { h.samKeyConfigured = fn }
 }
 
+// WithHuntTrigger wires a best-effort, non-blocking hook fired right after a tenant saves
+// their SAM.gov key, so a fresh hunt fills their board without waiting for the daily
+// schedule. cmd/api passes a debounced hunttrigger.Trigger's Fire method; the save succeeds
+// regardless of whether the hunt launches.
+func WithHuntTrigger(fn func()) Option {
+	return func(h *Handler) { h.onSAMKeySaved = fn }
+}
+
 // WithContextDocs wires the context-document store so the onboarding "Connect" step can
 // accept uploads (capability statements, CPARS, past proposals) whose text feeds the
 // capability map. Without it the upload control is hidden.
@@ -861,6 +869,13 @@ func (h *Handler) handleOnboardingSAMKey(w http.ResponseWriter, r *http.Request)
 		log.Printf("dashboard: onboarding SAM key save failed: %v", err)
 		http.Error(w, "failed to save the SAM.gov key", http.StatusInternalServerError)
 		return
+	}
+
+	// Kick off a fresh hunt now that the tenant has a key, so their board fills without
+	// waiting for the daily schedule. Best-effort + non-blocking (the trigger debounces and
+	// runs asynchronously); a save must never fail because a hunt couldn't start.
+	if h.onSAMKeySaved != nil {
+		h.onSAMKeySaved()
 	}
 
 	// PRG: advance to the final step with a success flag.

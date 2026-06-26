@@ -2,6 +2,7 @@ package hunttrigger
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -126,3 +127,26 @@ func TestTrigger_RecoversFromPanic(t *testing.T) {
 		t.Error("trigger stayed wedged after a Runner panic; running flag was not cleared")
 	}
 }
+
+// TestCloudRunJob_RunInvokesExecute verifies Run passes the resource name to execute and
+// wraps failures (the GCP call itself is covered at deploy, not in unit tests).
+func TestCloudRunJob_RunInvokesExecute(t *testing.T) {
+	var gotName string
+	j := &CloudRunJob{
+		name:    "projects/p/locations/us-east4/jobs/pilot-kaimi-pipeline",
+		execute: func(_ context.Context, name string) error { gotName = name; return nil },
+	}
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if gotName != "projects/p/locations/us-east4/jobs/pilot-kaimi-pipeline" {
+		t.Errorf("execute got name %q, want the full job resource name", gotName)
+	}
+
+	jErr := &CloudRunJob{name: "n", execute: func(context.Context, string) error { return errTest }}
+	if err := jErr.Run(context.Background()); err == nil {
+		t.Error("Run() = nil, want the execute error wrapped")
+	}
+}
+
+var errTest = fmt.Errorf("boom")

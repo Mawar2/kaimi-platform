@@ -70,6 +70,13 @@ type Handler struct {
 	// WithSAMKeyConfiguredCheck.
 	samKeyConfigured func() bool
 
+	// onSAMKeySaved fires a fresh opportunity hunt right after a tenant saves their SAM.gov
+	// key (so their board fills without waiting for the daily schedule). It is best-effort
+	// and non-blocking — the save always succeeds even if the trigger is unavailable or
+	// fails. nil = no hunt is triggered (the daily schedule still runs). cmd/api wires it
+	// via WithHuntTrigger to a debounced hunttrigger.Trigger.
+	onSAMKeySaved func()
+
 	// contextDocs stores the context documents (capability statements, CPARS, past
 	// proposals) a tester uploads on the onboarding "Connect" step; their extracted
 	// text feeds the capability map. nil = the upload control is hidden. cmd/api wires

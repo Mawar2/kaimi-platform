@@ -30,6 +30,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/dashboard"
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
+	"github.com/Mawar2/Kaimi/internal/hunttrigger"
 	"github.com/Mawar2/Kaimi/internal/ingest"
 	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/productkey"
@@ -338,6 +339,22 @@ func run() error {
 				return eerr == nil && ok
 			}))
 		log.Printf("Onboarding SAM.gov key entry enabled (writes to Secret Manager secret %q)", samSecretName)
+	}
+
+	// Fresh hunts: when HUNT_PIPELINE_JOB names the pipeline Cloud Run Job, fire a hunt right
+	// after a tenant saves their SAM key, so their board fills without waiting for the daily
+	// schedule. Debounced (at most one hunt per interval) so rapid re-saves or retries can't
+	// burn the tenant's daily SAM quota. The runtime SA needs run.jobs.run on that job
+	// (roles/run.developer, resource-scoped). Unset → no on-save hunt; the daily Cloud
+	// Scheduler run still fills the board.
+	if huntJob := os.Getenv("HUNT_PIPELINE_JOB"); huntJob != "" && cfg.GCP.ProjectID != "" {
+		runner, herr := hunttrigger.NewCloudRunJob(context.Background(), cfg.GCP.ProjectID, cfg.GCP.Region, huntJob)
+		if herr != nil {
+			return fmt.Errorf("build hunt trigger: %w", herr)
+		}
+		trigger := hunttrigger.New(runner, 3*time.Hour)
+		dashboardOpts = append(dashboardOpts, dashboard.WithHuntTrigger(func() { _ = trigger.Fire() }))
+		log.Printf("On-key-save hunt trigger enabled (job %q, region %s, min 3h between hunts)", huntJob, cfg.GCP.Region)
 	}
 
 	// Context-document uploads (onboarding "Connect" step) → their extracted text feeds
