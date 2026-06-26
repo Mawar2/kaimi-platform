@@ -357,11 +357,9 @@ func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string, bud
 	limit := 1000
 	offset := 0
 
-	for {
-		// Stop before exceeding the hunt's request budget (quota safety net).
-		if !budget.take() {
-			break
-		}
+	// Each iteration draws one request from the shared budget; the loop ends when the
+	// budget is exhausted (quota safety net) or a short page is returned (below).
+	for budget.take() {
 		// Calculate the search window: postedFrom = now - lookback, postedTo = now.
 		now := time.Now()
 		postedTo := now.Format("01/02/2006")
