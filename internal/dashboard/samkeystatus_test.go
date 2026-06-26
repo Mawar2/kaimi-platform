@@ -56,14 +56,12 @@ func TestNoGreenSuccessBanners(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, http.NoBody))
 		return rec.Body.String()
 	}
-	// None of the success-banner texts should appear, in any state (the banners were removed).
-	phrases := []string{"Company profile saved", "SAM.gov key saved", "Documents uploaded", "Drive destination updated"}
+	// No green success-banner DIV should render in any state. We match the banner's class
+	// attribute combo (note the space) so we don't hit the leftover CSS rule (".wz-banner--ok{")
+	// or the legitimate done-step summary row ("Company profile saved" with a checkmark).
 	for _, target := range []string{"/onboarding", "/onboarding?sam_saved=1", "/onboarding?saved=1", "/onboarding?docs_saved=1"} {
-		got := render(target)
-		for _, p := range phrases {
-			if strings.Contains(got, p) {
-				t.Errorf("%s still renders the removed success banner %q", target, p)
-			}
+		if got := render(target); strings.Contains(got, "wz-banner wz-banner--ok") {
+			t.Errorf("%s still renders a green success banner div; the persistent banners were removed", target)
 		}
 	}
 }
