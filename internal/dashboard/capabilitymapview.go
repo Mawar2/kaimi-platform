@@ -72,7 +72,7 @@ const capabilityMapContentTmpl = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kaimi — Your capability map</title>
+<title>Kaimi · Your capability map</title>
 <style>
   :root{--bg:#0b1220;--panel:#121a2b;--panel2:#0e1626;--border:#233047;--ink:#e8edf6;--ink3:#93a1bd;--accent:#3b82f6;--ok:#1a7f4b;}
   *{box-sizing:border-box;}
@@ -107,12 +107,12 @@ const capabilityMapContentTmpl = `<!DOCTYPE html>
       <h1>Your capability map</h1>
     </div>
   </div>
-  <p class="sub">How Kaimi understands your business — synthesized from your company profile and the context documents you uploaded. Kaimi uses this to qualify and score opportunities and to ground proposal drafting.</p>
+  <p class="sub">How Kaimi understands your business, built from your company profile and the documents you uploaded. Kaimi uses this to qualify and score opportunities and to ground proposal drafts.</p>
 
   {{if .Unavailable}}
   <div class="note">The capability map is not available in this deployment.</div>
   {{else if .NotBuilt}}
-  <div class="note">Not built yet. Complete onboarding — save your company profile and upload a capability statement or past performance — and Kaimi will build your capability map automatically. <a href="/onboarding">Go to onboarding →</a></div>
+  <div class="note">Not built yet. Complete onboarding: save your company profile and upload a capability statement or past performance, and Kaimi will build your capability map automatically. <a href="/onboarding">Go to onboarding →</a></div>
   {{else}}
   {{with .Map}}
   {{if .Summary}}<div class="summary">{{.Summary}}</div>{{end}}
@@ -141,7 +141,7 @@ const capabilityMapContentTmpl = `<!DOCTYPE html>
   {{range .PastPerformance}}
   <div class="comp">
     <h3>{{if .Client}}{{.Client}}{{else}}Engagement{{end}}</h3>
-    {{if .Scope}}<p>{{.Scope}}{{if .Value}} — {{.Value}}{{end}}</p>{{end}}
+    {{if .Scope}}<p>{{.Scope}}{{if .Value}} · {{.Value}}{{end}}</p>{{end}}
     {{if .Relevance}}<p>{{.Relevance}}</p>{{end}}
   </div>
   {{end}}

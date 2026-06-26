@@ -250,7 +250,7 @@ const submittedContentTmpl = `{{define "content"}}
   <div class="page-head">
     <div class="eyebrow">Pipeline</div>
     <h1>Submitted</h1>
-    <p class="lead">Every proposal that's gone out the door — what it's worth, and everything the team produced along the way.</p>
+    <p class="lead">Every proposal that's gone out the door: what it's worth, and everything the team produced along the way.</p>
     <div class="stats">
       <div class="stat"><div class="v">{{.PendingValue}}<small> awaiting award</small></div><div class="k">{{.PendingCount}} proposals pending decision</div></div>
       <div class="stat"><div class="v">{{.WonValue}}<small> won</small></div><div class="k">{{.WonCount}} awards on record</div></div>

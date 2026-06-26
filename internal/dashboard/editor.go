@@ -109,7 +109,7 @@ func (h *Handler) handleEditor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := EditorData{
-		Title:        "Editor — " + opp.Title,
+		Title:        "Editor · " + opp.Title,
 		OppID:        id,
 		OppTitle:     opp.Title,
 		VersionLabel: versionLabel(doc),
@@ -142,7 +142,7 @@ const editorPageTmpl = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Kaimi — {{.Title}}</title>
+  <title>Kaimi · {{.Title}}</title>
   {{faviconLink}}
   {{styleTag}}
 </head>
@@ -164,7 +164,7 @@ const editorPageTmpl = `<!DOCTYPE html>
       </div>
       <div class="ed-scroll">
         <div class="ed-doc">
-          <div class="ed-title">{{.OppTitle}} — Technical Volume</div>
+          <div class="ed-title">{{.OppTitle}} · Technical Volume</div>
           <div class="ed-meta">{{.Meta}}</div>
           {{range .Sections}}
           <section id="sec-{{.ID}}" class="edsec">

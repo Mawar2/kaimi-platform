@@ -151,7 +151,7 @@ const proposalsContentTmpl = `{{define "content"}}
   <div class="page-head">
     <div class="eyebrow">Focus</div>
     <h1>Active proposals</h1>
-    <p class="lead">Every proposal the agents are working right now — and, most importantly, the ones waiting on you.</p>
+    <p class="lead">Every proposal the agents are working right now. Most importantly, the ones waiting on you.</p>
     <div class="stats">
       <div class="stat"><div class="v">{{.InFlight}}<small> in flight</small></div><div class="k">Proposals being worked</div></div>
       <div class="stat"><div class="v">{{.AgentCount}}<small> agents</small></div><div class="k">Working across proposals</div></div>
@@ -222,7 +222,7 @@ const workspaceContentTmpl = `{{define "content"}}
       <span class="r-badge">` + iconHand + `Needs you</span>
       <div>
         <h2>Tomás is handing you the draft</h2>
-        <p>Read and edit the working draft below — your edits are exactly what Vera reviews.</p>
+        <p>Read and edit the working draft below. Your edits are exactly what Vera reviews.</p>
       </div>
       <div class="r-hand">
         <span class="av" style="background:{{.Agent.HueBG}};color:{{.Agent.HueFG}}">{{.Agent.Initial}}</span>
@@ -233,7 +233,7 @@ const workspaceContentTmpl = `{{define "content"}}
     <div class="r-body">
       {{if .Doc}}
       <div class="r-sec-h">What Tomás produced</div>
-      <div class="summary">Drafted {{len .Doc.Sections}} sections into the working draft — download the full Markdown or edit it inline below.</div>
+      <div class="summary">Drafted {{len .Doc.Sections}} sections into the working draft. Download the full Markdown or edit it inline below.</div>
       <div class="art-row">
         <a class="artifact2" href="/workspace/{{.Opp.ID}}/draft.md" download>` + iconDoc + `Download draft.md<span style="color:var(--ink-4);font-family:var(--font-mono);font-size:11px">{{.VersionLabel}}</span></a>
       </div>
@@ -260,7 +260,7 @@ const workspaceContentTmpl = `{{define "content"}}
       </div>
       {{end}}
 
-      <div class="r-sec-h" style="margin-top:24px">Working draft — edit sections directly <span id="savechip" class="ed-save-chip">Saved</span> <a class="artifact2" href="/editor/{{.Opp.ID}}">` + iconDoc + `Open full editor</a></div>
+      <div class="r-sec-h" style="margin-top:24px">Working draft: edit sections directly <span id="savechip" class="ed-save-chip">Saved</span> <a class="artifact2" href="/editor/{{.Opp.ID}}">` + iconDoc + `Open full editor</a></div>
       {{range .Doc.Sections}}
       <section class="edsec">
         <div class="sec-head2"><h3>{{.Heading}}</h3><span class="reqtag">{{.Status}}</span></div>
@@ -308,7 +308,7 @@ const workspaceContentTmpl = `{{define "content"}}
     <span class="ws-av" style="background:linear-gradient(155deg,#2BD49A,#15A06B)">` + iconCheck + `</span>
     <div style="flex:1">
       <h3>Package ready to submit</h3>
-      <div class="desc" style="margin-top:8px">All stages complete — Vera&#39;s final pass validated the draft as you left it. Final human submission to SAM.gov.</div>
+      <div class="desc" style="margin-top:8px">All stages complete. Vera&#39;s final pass validated the draft as you left it. Final human submission to SAM.gov.</div>
       <div style="margin-top:16px">
         <form method="POST" action="/workspace/{{.Opp.ID}}/submit">
           <button class="kbtn kbtn--select kbtn--lg">` + iconArrow + `Submit to SAM.gov</button>
@@ -339,7 +339,7 @@ const workspaceContentTmpl = `{{define "content"}}
 
   {{if and .Doc (not .AtGate)}}
   <div class="r-sec-h" style="margin-top:30px">
-    Working draft — {{if eq .State "progress"}}review it while the agents work{{else}}final content{{end}}
+    Working draft: {{if eq .State "progress"}}review it while the agents work{{else}}final content{{end}}
     <span class="ed-save-chip">{{.VersionLabel}}</span>
   </div>
   {{range .Doc.Sections}}
