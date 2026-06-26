@@ -25,6 +25,10 @@ type Writer interface {
 	// Save validates apiKey and persists it as the new current key. It returns
 	// ErrInvalidKey (wrapped) when the key is malformed, or a backend error.
 	Save(ctx context.Context, apiKey string) error
+	// Exists reports whether a SAM key is currently configured for the deployment
+	// (a secret version exists). Onboarding uses it so a returning tester sees the true
+	// state rather than being asked to re-enter a key they already saved.
+	Exists(ctx context.Context) (bool, error)
 }
 
 // ErrInvalidKey is returned (wrapped) by Save/ValidateKey when the supplied string
@@ -86,6 +90,14 @@ func (w *MemoryWriter) Save(_ context.Context, apiKey string) error {
 	w.last = strings.TrimSpace(apiKey)
 	w.versions++
 	return nil
+}
+
+// Exists reports whether any key has been saved (the in-memory analogue of a secret
+// version existing).
+func (w *MemoryWriter) Exists(_ context.Context) (bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.versions > 0, nil
 }
 
 // Versions returns how many keys have been saved (for tests).
