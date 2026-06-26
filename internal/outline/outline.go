@@ -83,23 +83,65 @@ func (deterministicPlanner) PlanSections(_ context.Context, opp *opportunity.Opp
 	return buildSections(opp, source), nil
 }
 
+// DocsClientResolver returns the Google Docs client to use for the current draft.
+// Resolving the client per draft (rather than caching one at construction) lets a
+// freshly connected or changed customer Drive take effect on the very next draft
+// with no restart — the cause of the boot-time-cached bug (#73).
+type DocsClientResolver func(context.Context) (googledocs.Client, error)
+
+// staticDocs wraps a fixed client in a resolver that always returns it, so the
+// New/NewWithPlanner constructors keep their existing signatures and behavior.
+func staticDocs(c googledocs.Client) DocsClientResolver {
+	return func(context.Context) (googledocs.Client, error) { return c, nil }
+}
+
 // Agent is the Outline agent.
 type Agent struct {
-	docsClient googledocs.Client
-	planner    SectionPlanner
+	resolveDocs DocsClientResolver
+	planner     SectionPlanner
 }
 
 // New creates a new Outline agent that saves generated outlines to Google Docs
 // via the given client. It uses the deterministic section planner — no model call.
 func New(docsClient googledocs.Client) *Agent {
-	return &Agent{docsClient: docsClient, planner: deterministicPlanner{}}
+	return &Agent{resolveDocs: staticDocs(docsClient), planner: deterministicPlanner{}}
 }
 
 // NewWithPlanner creates an Outline agent that plans sections with the given
 // SectionPlanner (e.g. the gemini-3.5-flash planner) instead of the deterministic
 // rules. Formatting extraction stays deterministic either way.
 func NewWithPlanner(docsClient googledocs.Client, planner SectionPlanner) *Agent {
-	return &Agent{docsClient: docsClient, planner: planner}
+	return &Agent{resolveDocs: staticDocs(docsClient), planner: planner}
+}
+
+// NewWithResolver creates an Outline agent that resolves its Google Docs client
+// per draft via resolveDocs, instead of binding a fixed client at construction.
+// This is what makes a newly connected / changed customer Drive take effect on the
+// next draft without a restart (#73). A nil planner falls back to the deterministic
+// planner. The resolver is invoked once per Run, inside Run's context.
+func NewWithResolver(resolveDocs DocsClientResolver, planner SectionPlanner) *Agent {
+	if planner == nil {
+		planner = deterministicPlanner{}
+	}
+	return &Agent{resolveDocs: resolveDocs, planner: planner}
+}
+
+// resolveDocsClient returns the Docs client for the current draft, guarding the
+// misconfigured cases (a zero-value Agent with no resolver, or a resolver that
+// yields a nil client) so Run fails cleanly with a reason instead of panicking on
+// a nil interface.
+func (a *Agent) resolveDocsClient(ctx context.Context) (googledocs.Client, error) {
+	if a.resolveDocs == nil {
+		return nil, fmt.Errorf("no docs client resolver configured")
+	}
+	c, err := a.resolveDocs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, fmt.Errorf("docs client resolver returned a nil client")
+	}
+	return c, nil
 }
 
 // Run takes a selected Opportunity and produces a structured Outline and a Result.
@@ -174,7 +216,22 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents
 		GeneratedAt:     time.Now().UTC(),
 	}
 
-	created, err := a.docsClient.CreateDoc(ctx, googledocs.Document{
+	// Resolve the Docs client now, per draft, so a Drive connected or re-targeted
+	// since this Agent was constructed is honored immediately, with no restart (#73).
+	docsClient, err := a.resolveDocsClient(ctx)
+	if err != nil {
+		// Don't lose the outline: return it alongside the failed Result.
+		return outline, &agent.Result{
+			AgentName:   agentName,
+			Status:      agent.StatusFailed,
+			NoticeID:    opp.ID,
+			Summary:     fmt.Sprintf("generated outline for %s but failed to resolve the Docs client", opp.ID),
+			Error:       fmt.Sprintf("resolving docs client: %v", err),
+			CompletedAt: time.Now().UTC(),
+		}, fmt.Errorf("outline agent: resolve docs client: %w", err)
+	}
+
+	created, err := docsClient.CreateDoc(ctx, googledocs.Document{
 		Title:    outline.Title,
 		Sections: toDocSections(outline),
 	})

@@ -67,6 +67,86 @@ func baseOpportunity() *opportunity.Opportunity {
 	}
 }
 
+// urlDocsClient is a fakeDocsClient that always succeeds with a given Doc URL, so a
+// test can tell which client a draft actually wrote to.
+func urlDocsClient(url string) *fakeDocsClient {
+	return &fakeDocsClient{
+		createDocFunc: func(_ context.Context, _ googledocs.Document) (*googledocs.CreatedDoc, error) {
+			return &googledocs.CreatedDoc{ID: url, URL: url}, nil
+		},
+	}
+}
+
+// TestOutlineAgent_ResolvesDocsClientPerDraft is the regression guard for #73: the
+// Docs client must be resolved on EVERY draft, not cached once at construction. A
+// Drive connected (or re-targeted) after the Agent was built must take effect on the
+// very next draft with no restart. The old boot-time-cached design would fail this:
+// the second draft would still write to the first client.
+func TestOutlineAgent_ResolvesDocsClientPerDraft(t *testing.T) {
+	ctx := context.Background()
+
+	// "current" is what the deployment would resolve right now. It starts as the
+	// not-connected client and is swapped to the customer's live Drive client between
+	// drafts, exactly as connecting a Drive mid-run would.
+	cached := urlDocsClient("https://docs.google.com/document/d/cached/edit")
+	liveDrive := urlDocsClient("https://docs.google.com/document/d/customer-drive/edit")
+	current := googledocs.Client(cached)
+
+	var calls int
+	a := NewWithResolver(func(context.Context) (googledocs.Client, error) {
+		calls++
+		return current, nil
+	}, nil)
+
+	// Draft 1: before any Drive is connected — writes to the cached client.
+	_, res1, err := a.Run(ctx, baseOpportunity(), nil)
+	if err != nil {
+		t.Fatalf("draft 1: unexpected error: %v", err)
+	}
+	if res1.OutputRef != "https://docs.google.com/document/d/cached/edit" {
+		t.Fatalf("draft 1 OutputRef = %q, want the cached client's URL", res1.OutputRef)
+	}
+
+	// Drive is connected and a target set AFTER the Agent was constructed.
+	current = liveDrive
+
+	// Draft 2: must use the live client immediately — no new Agent, no restart.
+	_, res2, err := a.Run(ctx, baseOpportunity(), nil)
+	if err != nil {
+		t.Fatalf("draft 2: unexpected error: %v", err)
+	}
+	if res2.OutputRef != "https://docs.google.com/document/d/customer-drive/edit" {
+		t.Fatalf("draft 2 OutputRef = %q, want the customer Drive URL (per-draft resolution failed)", res2.OutputRef)
+	}
+
+	if calls != 2 {
+		t.Errorf("resolver invoked %d times, want 2 (once per draft, not cached)", calls)
+	}
+}
+
+// TestOutlineAgent_ResolverErrorFailsCleanly verifies a resolver error yields a
+// failed Result (with the outline preserved) rather than a panic.
+func TestOutlineAgent_ResolverErrorFailsCleanly(t *testing.T) {
+	ctx := context.Background()
+	a := NewWithResolver(func(context.Context) (googledocs.Client, error) {
+		return nil, errors.New("drive token unreadable")
+	}, nil)
+
+	outline, result, err := a.Run(ctx, baseOpportunity(), nil)
+	if err == nil {
+		t.Fatal("expected an error when the resolver fails")
+	}
+	if result == nil || result.Status != agent.StatusFailed {
+		t.Fatalf("expected a failed Result, got %+v", result)
+	}
+	if outline == nil {
+		t.Error("outline must be returned alongside the failed Result, not lost")
+	}
+	if !strings.Contains(result.Error, "drive token unreadable") {
+		t.Errorf("failure reason should carry the resolver error, got %q", result.Error)
+	}
+}
+
 // TestOutlineAgent_HappyPath verifies the agent returns a valid Outline and success result.
 func TestOutlineAgent_HappyPath(t *testing.T) {
 	ctx := context.Background()
