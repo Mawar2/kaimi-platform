@@ -30,7 +30,7 @@ func requireSAMHost(rawURL string) error {
 	if err != nil {
 		return fmt.Errorf("samgov: unparseable description URL")
 	}
-	if u.Scheme != "https" || u.Hostname() != samAPIHost {
+	if u.Scheme != "https" || !strings.EqualFold(u.Hostname(), samAPIHost) {
 		return fmt.Errorf("samgov: refusing to resolve description from non-SAM host %q", u.Hostname())
 	}
 	return nil
@@ -61,7 +61,7 @@ func NewDescriptionResolver(apiKey string) (*DescriptionResolver, error) {
 				if len(via) >= 5 {
 					return fmt.Errorf("samgov: stopped after too many redirects")
 				}
-				if req.URL.Scheme != "https" || req.URL.Hostname() != samAPIHost {
+				if req.URL.Scheme != "https" || !strings.EqualFold(req.URL.Hostname(), samAPIHost) {
 					return fmt.Errorf("samgov: refusing redirect to non-SAM host %q", req.URL.Hostname())
 				}
 				return nil
