@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -957,4 +958,42 @@ func TestOnboardingSAMKeyEntry(t *testing.T) {
 	if !strings.Contains(body2, `action="/onboarding/samgov"`) {
 		t.Errorf("SAM.gov form must post to /onboarding/samgov")
 	}
+}
+
+// TestOnboardingSAMKeySaveFiresHuntTrigger proves a successful SAM-key save fires the hunt
+// trigger (so the tenant's board fills immediately), and a FAILED save does not (no wasted
+// hunt on a rejected key).
+func TestOnboardingSAMKeySaveFiresHuntTrigger(t *testing.T) {
+	post := func(t *testing.T, saver dashboard.SAMKeySaver) (status int, fired bool) {
+		const token = "sam-csrf"
+		h := newOnboardingHandler(t,
+			dashboard.WithProfileStore(&memProfileStore{}),
+			dashboard.WithSAMKeySaver(saver),
+			dashboard.WithHuntTrigger(func() { fired = true }),
+			identityOpt("u@example.com", token),
+		)
+		form := url.Values{"sam_api_key": {"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345-6789"}, "csrf_token": {token}}
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/samgov", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code, fired
+	}
+
+	t.Run("success fires the hunt", func(t *testing.T) {
+		status, fired := post(t, func(context.Context, string) error { return nil })
+		if status != http.StatusSeeOther {
+			t.Fatalf("status = %d, want 303", status)
+		}
+		if !fired {
+			t.Error("hunt trigger was not fired after a successful SAM-key save")
+		}
+	})
+
+	t.Run("failed save does not fire", func(t *testing.T) {
+		_, fired := post(t, func(context.Context, string) error { return fmt.Errorf("secret backend down") })
+		if fired {
+			t.Error("hunt trigger fired despite the SAM-key save failing")
+		}
+	})
 }

@@ -102,6 +102,17 @@ type Drive struct {
 type SAM struct {
 	APIKey    string `yaml:"-"`           // resolved value (never serialized)
 	APIKeyEnv string `yaml:"api_key_env"` // env var name, default SAM_API_KEY
+
+	// LookbackDays is the search window in days (postedFrom = now - LookbackDays).
+	// SAM_LOOKBACK_DAYS. 0 leaves the samgov client default (30). A DAILY incremental
+	// hunt sets a short window (e.g. 2) so it only pulls newly-posted notices; the
+	// first/backfill hunt right after a tenant connects their key overrides it wider.
+	LookbackDays int `yaml:"lookback_days"`
+
+	// MaxSearchRequests caps total SAM /search requests per hunt. SAM_MAX_SEARCH_REQUESTS.
+	// 0 leaves the samgov client default (250). A quota safety net against a broad NAICS
+	// code paging unbounded and exhausting the tenant's 1,000/day quota.
+	MaxSearchRequests int `yaml:"max_search_requests"`
 }
 
 // Store holds the opportunity/proposal JSON store location.
@@ -273,6 +284,18 @@ func applyEnv(cfg *Config) {
 	envInto(&cfg.GCP.OutlineFallbackModel, "OUTLINE_FALLBACK_MODEL")
 	envInto(&cfg.GCP.FinalReviewFallbackModel, "FINALREVIEW_FALLBACK_MODEL")
 	envInto(&cfg.SAM.APIKey, defaultSAMAPIKeyEnv)
+	// SAM search window + per-hunt request cap (quota safety). An unset/malformed value
+	// leaves the field at 0, which the samgov client reads as "use the built-in default".
+	if v := os.Getenv("SAM_LOOKBACK_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.SAM.LookbackDays = n
+		}
+	}
+	if v := os.Getenv("SAM_MAX_SEARCH_REQUESTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.SAM.MaxSearchRequests = n
+		}
+	}
 	envInto(&cfg.Drive.SharedDriveID, "GOOGLE_DRIVE_SHARED_DRIVE_ID")
 	envInto(&cfg.Ingest.GCSBucket, "GCS_SOLICITATIONS_BUCKET")
 	envInto(&cfg.Ingest.DocumentAIProcessor, "DOCUMENTAI_PROCESSOR_ID")

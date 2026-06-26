@@ -474,3 +474,34 @@ func TestLoad_TelemetryFileDisablesEnvReenables(t *testing.T) {
 		t.Error("env KAIMI_TELEMETRY_ENABLED=true did not override file enabled:false")
 	}
 }
+
+// TestLoad_SAMQuotaEnv covers the SAM search-window + request-cap env vars that drive the
+// quota-safe daily hunt: SAM_LOOKBACK_DAYS and SAM_MAX_SEARCH_REQUESTS parse as ints; a
+// malformed value is ignored (left 0 → the samgov client applies its built-in default).
+func TestLoad_SAMQuotaEnv(t *testing.T) {
+	t.Run("parsed", func(t *testing.T) {
+		setEnv(t, "SAM_LOOKBACK_DAYS", "2")
+		setEnv(t, "SAM_MAX_SEARCH_REQUESTS", "120")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.SAM.LookbackDays != 2 {
+			t.Errorf("LookbackDays = %d, want 2", cfg.SAM.LookbackDays)
+		}
+		if cfg.SAM.MaxSearchRequests != 120 {
+			t.Errorf("MaxSearchRequests = %d, want 120", cfg.SAM.MaxSearchRequests)
+		}
+	})
+
+	t.Run("malformed ignored", func(t *testing.T) {
+		setEnv(t, "SAM_LOOKBACK_DAYS", "soon")
+		cfg, err := Load(nil)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.SAM.LookbackDays != 0 {
+			t.Errorf("LookbackDays = %d, want 0 (malformed value ignored → client default)", cfg.SAM.LookbackDays)
+		}
+	})
+}

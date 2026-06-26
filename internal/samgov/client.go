@@ -52,6 +52,46 @@ type Config struct {
 	// UseCached indicates whether to use cached fixtures instead of live API.
 	// When true, the client reads from test/fixtures/ instead of making HTTP requests.
 	UseCached bool
+
+	// LookbackDays is how far back the search window reaches: postedFrom = now -
+	// LookbackDays (postedTo = now). SAM requires postedFrom/postedTo and caps the
+	// span at one year. Defaults to defaultLookbackDays when <= 0. A short window
+	// (e.g. 2) makes a daily incremental hunt cheap — it pulls only newly-posted
+	// notices instead of re-paging the whole month every day — while a wider window
+	// suits a first/backfill hunt right after a tenant connects their key.
+	LookbackDays int
+
+	// MaxSearchRequests caps the total number of SAM /search HTTP requests a single
+	// FetchByNAICS call may issue, across all NAICS codes and all pagination. It is a
+	// safety net so an unexpectedly broad NAICS code (many pages) can never exhaust the
+	// tenant's daily quota in one hunt. Defaults to defaultMaxSearchRequests when <= 0.
+	MaxSearchRequests int
+}
+
+// Quota-safety defaults. The SAM.gov daily quota for an entity-registered key is 1,000
+// requests/day (resets midnight UTC), shared with the per-notice description resolver, so
+// the search side stays well under it. A typical profile is ~1 request per NAICS code; the
+// cap only ever engages for a pathologically broad code.
+const (
+	defaultLookbackDays      = 30
+	defaultMaxSearchRequests = 250
+)
+
+// requestBudget bounds how many SAM /search requests one hunt may issue. take() reports
+// whether another request is allowed and records when the cap is hit so the caller can
+// surface that results are partial rather than silently truncating.
+type requestBudget struct {
+	remaining int
+	capped    bool
+}
+
+func (b *requestBudget) take() bool {
+	if b.remaining <= 0 {
+		b.capped = true
+		return false
+	}
+	b.remaining--
+	return true
 }
 
 // NewClient creates a new SAM.gov API client based on the provided configuration.
@@ -166,9 +206,27 @@ func (c *cachedClient) FetchByID(ctx context.Context, noticeID string) (*opportu
 
 // liveClient implements Client using real HTTP requests to the SAM.gov API.
 type liveClient struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
+	apiKey            string
+	baseURL           string
+	client            *http.Client
+	lookbackDays      int
+	maxSearchRequests int
+}
+
+// lookback returns the configured search window in days, or the default when unset.
+func (l *liveClient) lookback() int {
+	if l.lookbackDays > 0 {
+		return l.lookbackDays
+	}
+	return defaultLookbackDays
+}
+
+// maxRequests returns the configured per-hunt search-request cap, or the default when unset.
+func (l *liveClient) maxRequests() int {
+	if l.maxSearchRequests > 0 {
+		return l.maxSearchRequests
+	}
+	return defaultMaxSearchRequests
 }
 
 // newLiveClient creates a client that makes real HTTP requests to SAM.gov.
@@ -183,8 +241,10 @@ func newLiveClient(config Config) (*liveClient, error) {
 	}
 
 	return &liveClient{
-		apiKey:  config.APIKey,
-		baseURL: baseURL,
+		apiKey:            config.APIKey,
+		baseURL:           baseURL,
+		lookbackDays:      config.LookbackDays,
+		maxSearchRequests: config.MaxSearchRequests,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -262,33 +322,48 @@ func (l *liveClient) FetchByNAICS(ctx context.Context, naicsCodes []string) ([]*
 
 	var allOpportunities []*opportunity.Opportunity
 
+	// One request budget spans ALL NAICS codes + pagination for this hunt, so the cap
+	// bounds the whole hunt's quota cost, not each code independently.
+	budget := &requestBudget{remaining: l.maxRequests()}
+
 	// Fetch opportunities for each NAICS code
 	// SAM.gov API requires separate queries per NAICS code
 	for _, naicsCode := range naicsCodes {
-		opportunities, err := l.fetchByNAICSCode(ctx, naicsCode)
+		opportunities, err := l.fetchByNAICSCode(ctx, naicsCode, budget)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch opportunities for NAICS %s: %w", naicsCode, err)
 		}
 		allOpportunities = append(allOpportunities, opportunities...)
+		if budget.capped {
+			break
+		}
+	}
+	if budget.capped {
+		// Surface partial results loudly rather than silently truncating — the hunt
+		// still saves what it gathered, and the operator learns the cap was hit.
+		fmt.Fprintf(os.Stderr, "Warning: SAM.gov search request cap (%d) reached; this hunt's results may be partial\n", l.maxRequests())
 	}
 
 	// Deduplicate opportunities (same opportunity may match multiple NAICS codes)
 	return deduplicateOpportunities(allOpportunities), nil
 }
 
-// fetchByNAICSCode fetches opportunities for a single NAICS code with pagination.
-func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string) ([]*opportunity.Opportunity, error) {
+// fetchByNAICSCode fetches opportunities for a single NAICS code with pagination, drawing
+// each request from the shared budget so the whole hunt stays within the request cap.
+func (l *liveClient) fetchByNAICSCode(ctx context.Context, naicsCode string, budget *requestBudget) ([]*opportunity.Opportunity, error) {
 	var allOpportunities []*opportunity.Opportunity
 	// SAM.gov's documented maximum page size. The previous limit=100 cost 10x
 	// the requests against the 1,000 req/day quota for no benefit (issue #268).
 	limit := 1000
 	offset := 0
 
-	for {
-		// Calculate date range (last 30 days)
+	// Each iteration draws one request from the shared budget; the loop ends when the
+	// budget is exhausted (quota safety net) or a short page is returned (below).
+	for budget.take() {
+		// Calculate the search window: postedFrom = now - lookback, postedTo = now.
 		now := time.Now()
 		postedTo := now.Format("01/02/2006")
-		postedFrom := now.AddDate(0, 0, -30).Format("01/02/2006")
+		postedFrom := now.AddDate(0, 0, -l.lookback()).Format("01/02/2006")
 
 		// Build the query with url.Values so param names and escaping stay
 		// honest. The NAICS filter is `ncode` per the Opportunities v2 spec —

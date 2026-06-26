@@ -11,6 +11,7 @@ replace github.com/Mawar2/kaimi-telemetry => ./telemetry
 require (
 	cloud.google.com/go/documentai v1.42.0
 	cloud.google.com/go/firestore v1.22.0
+	cloud.google.com/go/run v1.21.0
 	cloud.google.com/go/secretmanager v1.20.0
 	cloud.google.com/go/storage v1.56.1
 	github.com/Mawar2/kaimi-telemetry v0.0.0-00010101000000-000000000000

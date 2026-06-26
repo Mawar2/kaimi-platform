@@ -599,3 +599,92 @@ func TestDeduplicateOpportunities(t *testing.T) {
 		seen[opp.ID] = true
 	}
 }
+
+// TestLiveClient_RequestCapBoundsHunt proves the per-hunt request budget hard-stops
+// pagination, so a pathologically broad NAICS code (endless full pages) can never exhaust
+// the tenant's 1,000/day SAM quota in a single hunt. The server always returns a FULL page,
+// so natural pagination would never terminate; only the cap stops it.
+func TestLiveClient_RequestCapBoundsHunt(t *testing.T) {
+	const record = `{"noticeId":"n-%d","title":"t","postedDate":"2026-05-20","type":"Solicitation"}`
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit < 1 {
+			limit = 1
+		}
+		recs := make([]string, limit)
+		for i := range recs {
+			recs[i] = fmt.Sprintf(record, i)
+		}
+		_, _ = fmt.Fprintf(w, `{"totalRecords":1000000,"opportunitiesData":[%s]}`, strings.Join(recs, ","))
+	}))
+	defer server.Close()
+
+	client := &liveClient{apiKey: "test-key", baseURL: server.URL, client: server.Client(), maxSearchRequests: 3}
+	if _, err := client.FetchByNAICS(context.Background(), []string{"541512"}); err != nil {
+		t.Fatalf("FetchByNAICS failed: %v", err)
+	}
+	if requests != 3 {
+		t.Errorf("made %d requests, want exactly 3 (the configured cap) — unbounded pagination would blow the daily quota", requests)
+	}
+}
+
+// TestLiveClient_CapSpansAllNAICSCodes proves the budget is shared across NAICS codes, so
+// the cap bounds the WHOLE hunt, not each code independently. With a cap of 2 and three
+// codes each offering endless pages, the hunt must stop after 2 total requests.
+func TestLiveClient_CapSpansAllNAICSCodes(t *testing.T) {
+	const record = `{"noticeId":"n-%d","title":"t","postedDate":"2026-05-20","type":"Solicitation"}`
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit < 1 {
+			limit = 1
+		}
+		recs := make([]string, limit)
+		for i := range recs {
+			recs[i] = fmt.Sprintf(record, i)
+		}
+		_, _ = fmt.Fprintf(w, `{"totalRecords":1000000,"opportunitiesData":[%s]}`, strings.Join(recs, ","))
+	}))
+	defer server.Close()
+
+	client := &liveClient{apiKey: "test-key", baseURL: server.URL, client: server.Client(), maxSearchRequests: 2}
+	if _, err := client.FetchByNAICS(context.Background(), []string{"541512", "541511", "518210"}); err != nil {
+		t.Fatalf("FetchByNAICS failed: %v", err)
+	}
+	if requests != 2 {
+		t.Errorf("made %d requests across 3 NAICS codes, want exactly 2 (shared cap, not per-code)", requests)
+	}
+}
+
+// TestLiveClient_LookbackWindowConfigurable proves the search window honors the configured
+// LookbackDays (a short window keeps a daily incremental hunt cheap) and defaults to 30 days
+// when unset, while postedTo stays "today".
+func TestLiveClient_LookbackWindowConfigurable(t *testing.T) {
+	check := func(lookbackDays, wantDaysAgo int) {
+		t.Helper()
+		var gotFrom, gotTo string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotFrom = r.URL.Query().Get("postedFrom")
+			gotTo = r.URL.Query().Get("postedTo")
+			_, _ = w.Write([]byte(`{"totalRecords":0,"opportunitiesData":[]}`))
+		}))
+		defer server.Close()
+
+		client := &liveClient{apiKey: "k", baseURL: server.URL, client: server.Client(), lookbackDays: lookbackDays}
+		if _, err := client.FetchByNAICS(context.Background(), []string{"541512"}); err != nil {
+			t.Fatalf("FetchByNAICS: %v", err)
+		}
+		now := time.Now()
+		if want := now.AddDate(0, 0, -wantDaysAgo).Format("01/02/2006"); gotFrom != want {
+			t.Errorf("lookbackDays=%d: postedFrom=%q, want %q", lookbackDays, gotFrom, want)
+		}
+		if want := now.Format("01/02/2006"); gotTo != want {
+			t.Errorf("lookbackDays=%d: postedTo=%q, want %q (today)", lookbackDays, gotTo, want)
+		}
+	}
+	check(2, 2)  // configured short window for cheap daily hunts
+	check(0, 30) // unset -> default 30-day window (first/backfill hunt)
+}
