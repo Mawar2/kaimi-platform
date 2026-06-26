@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/Mawar2/Kaimi/internal/capabilitymap"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -162,7 +163,7 @@ func (gs *GeminiScorer) Score(ctx context.Context, opp *opportunity.Opportunity,
 
 	config := scoringGenerateConfig()
 
-	resp, err := gs.client.Models.GenerateContent(ctx, gs.modelName, contents, config)
+	resp, err := kobs.GenerateContent(ctx, gs.client, gs.modelName, contents, config)
 	if err != nil {
 		return nil, fmt.Errorf("gemini API call failed: %w", err)
 	}

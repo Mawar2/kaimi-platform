@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"google.golang.org/genai"
+
+	"github.com/Mawar2/Kaimi/internal/kobs"
 )
 
 // GeminiComplianceChecker is the Vertex AI / Gemini implementation of
@@ -70,7 +72,7 @@ func (g *GeminiComplianceChecker) CheckCompliance(ctx context.Context, systemIns
 
 	config := complianceGenerateConfig(systemInstruction)
 
-	resp, err := g.client.Models.GenerateContent(ctx, g.modelName, contents, config)
+	resp, err := kobs.GenerateContent(ctx, g.client, g.modelName, contents, config)
 	if err != nil {
 		return "", fmt.Errorf("gemini API call failed: %w", err)
 	}

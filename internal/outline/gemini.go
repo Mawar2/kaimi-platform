@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 )
 
@@ -69,7 +70,7 @@ func (g *GeminiSectionPlanner) PlanSections(ctx context.Context, opp *opportunit
 		genai.NewContentFromText(buildPlannerPrompt(opp, source), genai.RoleUser),
 	}
 
-	resp, err := g.client.Models.GenerateContent(ctx, g.modelName, contents, outlineGenerateConfig())
+	resp, err := kobs.GenerateContent(ctx, g.client, g.modelName, contents, outlineGenerateConfig())
 	if err != nil {
 		return nil, fmt.Errorf("gemini API call failed: %w", err)
 	}
