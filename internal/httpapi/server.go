@@ -315,6 +315,9 @@ func (s *Server) Routes() http.Handler {
 		// /privacy is the public privacy policy — also ungated (Google's OAuth verification
 		// requires a publicly reachable privacy-policy URL on the app's own domain).
 		outerMux.Handle("/privacy", s.deps.DashboardHTML)
+		// /home is the public landing page — also ungated (it's the app homepage the OAuth
+		// consent screen links to; reviewers must reach it without a session).
+		outerMux.Handle("/home", s.deps.DashboardHTML)
 		// HTML catch-all.
 		outerMux.Handle("/", htmlHandler)
 		handler = outerMux
