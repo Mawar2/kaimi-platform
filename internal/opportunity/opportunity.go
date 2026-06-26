@@ -62,6 +62,11 @@ type Opportunity struct {
 	Selected       bool       `json:"selected"`              // Whether a human selected this for proposal
 	SelectedAt     *time.Time `json:"selected_at,omitempty"` // When selected
 	ProposalStatus string     `json:"proposal_status"`       // Current status in Zone 2 (e.g., "outline", "draft", "review")
+	// ProposalStatusReason is a short, single-line, human-readable explanation set
+	// when ProposalStatus ends in ":failed" (e.g. "writer:failed"), so the dashboard
+	// and API can show WHY a proposal stalled. Empty on success/in-progress. Additive
+	// and omitempty: legacy records without it load fine.
+	ProposalStatusReason string `json:"proposal_status_reason,omitempty"`
 
 	// Award tracking + contract value, surfaced by the Submitted archive screen.
 	// All additive and omitempty, so the JSON store needs no migration and older
