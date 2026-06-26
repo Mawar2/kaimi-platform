@@ -68,6 +68,47 @@ jobs:
         version: v2.12.2  # Pinned for reproducible lint (was 'latest' — nondeterministic staticcheck)
         args: --timeout=5m
 
+  telemetry-core:
+    name: Telemetry Core
+    runs-on: ubuntu-latest
+    # The sellable observability core (telemetry/) is a standalone nested module.
+    # It must build, test, and lint INDEPENDENTLY and import ZERO Kaimi-domain
+    # packages. That one-way dependency rule (host imports core, never the reverse)
+    # is what keeps the module continuously extractable into its own repo. No GCP
+    # secrets needed — this is pure local build/test, so it must always succeed.
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+        cache: false
+
+    - name: Build and test core (standalone)
+      working-directory: telemetry
+      run: |
+        go build ./...
+        go test -race ./...
+
+    - name: Forbid Kaimi-domain imports
+      working-directory: telemetry
+      run: |
+        if go list -deps ./... | grep -q 'github.com/Mawar2/Kaimi'; then
+          echo "::error::telemetry/ imported a Kaimi-domain package — the core must stay domain-agnostic"
+          exit 1
+        fi
+        echo "✓ core imports zero Kaimi packages"
+
+    - name: Lint core
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: v2.12.2  # Pinned to match the root lint job
+        working-directory: telemetry
+        args: --timeout=5m
+
   terraform-lint:
     name: Terraform Lint
     runs-on: ubuntu-latest
@@ -525,7 +566,7 @@ jobs:
   all-checks-pass:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [test, lint, terraform-lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
+    needs: [test, lint, telemetry-core, terraform-lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
     if: always()
 
     steps:
@@ -539,6 +580,12 @@ jobs:
 
         if [[ "${{ needs.lint.result }}" != "success" ]]; then
           echo "::error::Linting failed"
+          exit 1
+        fi
+
+        # telemetry-core runs on every PR/push with no secrets, so it must succeed.
+        if [[ "${{ needs.telemetry-core.result }}" != "success" ]]; then
+          echo "::error::Telemetry core build/test/import-guard failed"
           exit 1
         fi
 

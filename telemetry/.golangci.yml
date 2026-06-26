@@ -1,0 +1,30 @@
+version: "2"
+run:
+  tests: true
+linters:
+  enable:
+    - gocritic
+    - misspell
+    - revive
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+        - name: package-comments
+          severity: warning
+          disabled: false
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Mawar2/kaimi-telemetry
