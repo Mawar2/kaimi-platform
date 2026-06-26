@@ -211,6 +211,8 @@ func (h *Handler) setupRoutes() {
 	h.mux.HandleFunc("GET /help", h.handleHelp)
 	// Public, ungated privacy policy (required for Google OAuth consent-screen verification).
 	h.mux.HandleFunc("GET /privacy", h.handlePrivacy)
+	// Public, ungated landing page (the app homepage Google's OAuth verification expects).
+	h.mux.HandleFunc("GET /home", h.handleHome)
 	h.mux.HandleFunc("GET /onboarding", h.handleOnboarding)
 	h.mux.HandleFunc("/onboarding/profile", postOnly(h.handleOnboardingProfile))
 	// WS-C5b: change the Drive destination from the onboarding/settings page without
