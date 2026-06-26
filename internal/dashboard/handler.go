@@ -653,7 +653,33 @@ func (h *Handler) setupTemplates() {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Onboarding gate: a tenant MUST save their company profile before they can reach the
+	// main dashboard. Until a profile exists, every dashboard page redirects to the
+	// onboarding wizard. The onboarding flow itself, the public pages, and logout are exempt
+	// so the profile can actually be created and the way out stays open.
+	if h.profileRequired(r) {
+		http.Redirect(w, r, onboardingPath, http.StatusSeeOther)
+		return
+	}
 	h.mux.ServeHTTP(w, r)
+}
+
+// profileRequired reports whether this request must be bounced to onboarding because no
+// company profile has been saved yet. Exempt paths (the onboarding flow, the public
+// marketing/help/legal pages, and logout) are always allowed so a profile-less tenant can
+// complete setup.
+func (h *Handler) profileRequired(r *http.Request) bool {
+	if h.profileStore == nil {
+		return false
+	}
+	p := r.URL.Path
+	if p == onboardingPath || strings.HasPrefix(p, onboardingPath+"/") ||
+		p == "/home" || p == "/help" || p == "/privacy" ||
+		p == "/logout" || p == "/favicon.ico" {
+		return false
+	}
+	_, err := h.profileStore.Load()
+	return errors.Is(err, profile.ErrProfileNotFound)
 }
 
 // tenantLabel returns the configured customer display name, or the neutral
@@ -774,17 +800,8 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First-run redirect: a freshly-accessed tenant that hasn't completed onboarding (no
-	// saved profile) lands on the onboarding wizard, not the opportunities board. Scoped
-	// to the root path so 404s on other unmatched paths are unaffected, and only when a
-	// profile store is wired (otherwise there's no onboarding to send them to).
-	if r.URL.Path == "/" && h.profileStore != nil {
-		if _, err := h.profileStore.Load(); errors.Is(err, profile.ErrProfileNotFound) {
-			http.Redirect(w, r, onboardingPath, http.StatusSeeOther)
-			return
-		}
-	}
-
+	// The onboarding gate (see ServeHTTP) already bounces profile-less tenants to the
+	// wizard before any dashboard page renders, so handleList can assume a profile exists.
 	ctx := r.Context()
 	query := r.URL.Query()
 	now := h.Now()

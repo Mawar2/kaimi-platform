@@ -298,7 +298,7 @@ func TestRequireProductKeyExemptsDriveCallback(t *testing.T) {
 }
 
 // TestRequireProductKeyHTMLRedirectsToEntry: an unauthenticated HTML request is
-// redirected to /entry (not 401), and a valid one reaches next.
+// redirected to the public homepage (the main site, not 401), and a valid one reaches next.
 func TestRequireProductKeyHTMLRedirectsToEntry(t *testing.T) {
 	// Base the test clock on the real wall clock: grant() → SetSessionBounded caps the
 	// session at the key's expiry using time.Now(), so a fixed past mint date + short TTL
@@ -306,12 +306,12 @@ func TestRequireProductKeyHTMLRedirectsToEntry(t *testing.T) {
 	now := time.Now().UTC()
 	g, reg := newTestGate(t, now)
 
-	// Unauthenticated → 302 to /entry.
+	// Unauthenticated → 302 to the public homepage (which carries the sign-in CTA).
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	w := httptest.NewRecorder()
 	g.RequireProductKeyHTML(&okNext{}).ServeHTTP(w, req)
-	if w.Result().StatusCode != http.StatusFound || w.Result().Header.Get("Location") != entryPath {
-		t.Errorf("unauth HTML: status=%d loc=%q, want 302 -> %s", w.Result().StatusCode, w.Result().Header.Get("Location"), entryPath)
+	if w.Result().StatusCode != http.StatusFound || w.Result().Header.Get("Location") != loggedOutPath {
+		t.Errorf("unauth HTML: status=%d loc=%q, want 302 -> %s", w.Result().StatusCode, w.Result().Header.Get("Location"), loggedOutPath)
 	}
 
 	// Authenticated → next runs.

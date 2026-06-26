@@ -193,8 +193,8 @@ func TestDriveConnectRedirectsWithMinimalScopesOfflineState(t *testing.T) {
 	if !strings.Contains(scope, drivetoken.ScopeDriveFile) {
 		t.Errorf("consent scope %q missing drive.file", scope)
 	}
-	if !strings.Contains(scope, drivetoken.ScopeDocuments) {
-		t.Errorf("consent scope %q missing documents", scope)
+	if strings.Contains(scope, "auth/documents") {
+		t.Errorf("consent scope %q must NOT include the sensitive documents scope (dropped so the app is publishable without Google verification)", scope)
 	}
 	if strings.Contains(scope, "auth/drive ") || strings.HasSuffix(scope, "auth/drive") {
 		t.Errorf("consent scope %q must NOT include the full-drive scope", scope)
