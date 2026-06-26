@@ -36,6 +36,7 @@ deploy/terraform/
 | GCS buckets `${project}-queue`, `${project}-solicitations` (uniform access, public-access prevention) | `google_storage_bucket.{queue,solicitations}` | Steps 10–11 |
 | Bucket IAM: `storage.objectAdmin` on each bucket | `google_storage_bucket_iam_member.*` | Steps 10–11 |
 | Secret containers `samgov-api-key`, `oauth-client-secret`, `drive-oauth-client-secret`, `session-secret` (each seeded with a **placeholder** version) | `google_secret_manager_secret.secrets` + `google_secret_manager_secret_version.placeholder` | Step 7 (extended; **real** values added out-of-band) |
+| Secret IAM: `secretmanager.secretVersionAdder` on **only** `samgov-api-key` (onboarding key write-path; resource-scoped, not project-wide) | `google_secret_manager_secret_iam_member.samgov_key_adder` | **NEW** (lets a tester save their own SAM key via onboarding) |
 | Cloud Run **Job** `kaimi-pipeline` (GCS volume mount, secret env) | `google_cloud_run_v2_job.pipeline` | Step 10 |
 | Cloud Run **Service** `kaimi-api` | `google_cloud_run_v2_service.api` | **NEW** (not in the script) |
 | Cloud Scheduler `kaimi-pipeline-schedule` (cron `0 7,12,17 * * *`) | `google_cloud_scheduler_job.pipeline_schedule` | Step 10 |
