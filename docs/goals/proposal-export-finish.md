@@ -29,11 +29,12 @@ Rewrite `googledocs.liveClient.CreateDoc` to create + populate the Doc with the 
 **AC:** golden CSV tests (addressed/GAP/review/empty/well-formed/deterministic); handler test (200, text/csv, filename; empty reqs → valid CSV not 500); gate green.
 
 ## Checklist
-- [ ] A implemented + tested (sub-agent, worktree `export/drop-docs-scope`)
-- [ ] B implemented + tested (sub-agent, worktree `export/compliance-matrix`)
-- [ ] Merge both → `feat/export-finish`; full gate (build/test/lint) green
-- [ ] Deploy api to pilot; verify: compliance.csv downloads + valid; Drive connect now requests ONLY drive.file (curl the /connect scope param)
-- [ ] Merge `feat/export-finish` → main; clean instance to pristine; PushNotification; end loop
+- [x] A implemented + tested (sub-agent, `export/drop-docs-scope`)
+- [x] B implemented + tested (sub-agent, `export/compliance-matrix`)
+- [x] Merge both → `feat/export-finish`; full gate (build/test/lint) green
+- [x] Deploy api to pilot (rev 00029); verify: compliance.csv downloads + valid; Drive connect requests ONLY drive.file
+- [x] Merge `feat/export-finish` → main; clean instance to pristine; PushNotification; end loop
 
 ## Progress log
-- 2026-06-26: Research done (2 agents) — both plans verified against code. Launching implementation team.
+- 2026-06-26: Research done (2 agents) — both plans verified against code. Launched implementation team.
+- 2026-06-26: Both implemented by parallel sub-agents, integrated on `feat/export-finish`. Gate green (build/tests/lint 0 issues); `documents` scope fully removed from production. Deployed rev 00029-5vx. Verified live: /connect requests `drive.file` only (no documents); compliance.csv downloads valid (3 real requirements → 3-state coverage); all 5 export buttons render, console clean. DONE.
