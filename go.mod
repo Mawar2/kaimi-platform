@@ -15,6 +15,7 @@ require (
 	cloud.google.com/go/secretmanager v1.20.0
 	cloud.google.com/go/storage v1.56.1
 	github.com/Mawar2/kaimi-telemetry v0.0.0-00010101000000-000000000000
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/adk v1.4.0
