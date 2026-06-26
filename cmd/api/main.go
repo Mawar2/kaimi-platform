@@ -222,12 +222,16 @@ func run() error {
 
 	var auth *httpapi.AuthHandler
 	var productKeyGate *httpapi.ProductKeyGate
+	// keyRegistry is captured (when in product-key mode) so the dashboard can mint teammate
+	// keys for the self-serve Team invite. nil in workspace-OAuth mode.
+	var keyRegistry productkey.Registry
 	switch gateMode {
 	case httpapi.GateModeProductKey:
 		reg, regDesc, rerr := buildProductKeyRegistry(context.Background(), cfg.GCP.ProjectID, allowInsecure)
 		if rerr != nil {
 			return rerr
 		}
+		keyRegistry = reg
 		// Close a Firestore-backed registry on shutdown; the in-memory one is a no-op.
 		if c, ok := reg.(interface{ Close() error }); ok {
 			defer func() { _ = c.Close() }()
@@ -433,6 +437,28 @@ func run() error {
 					return driveTargetStore.Save(drivetoken.Target{DriveID: driveID})
 				}))
 	}
+	// Self-serve Team invites: when a product-key registry is wired, let the dashboard mint
+	// a teammate key (same workspace, individually revocable). Invited keys default to a
+	// 35-day window (~the eval period); override with KAIMI_INVITE_TTL (a Go duration).
+	if keyRegistry != nil {
+		inviteTTL := 35 * 24 * time.Hour
+		if v := os.Getenv("KAIMI_INVITE_TTL"); v != "" {
+			if d, derr := time.ParseDuration(v); derr == nil && d > 0 {
+				inviteTTL = d
+			}
+		}
+		reg := keyRegistry
+		dashboardOpts = append(dashboardOpts, dashboard.WithInviteMinter(
+			func(ctx context.Context, label string) (string, time.Time, error) {
+				rec, merr := reg.Mint(ctx, label, inviteTTL)
+				if merr != nil {
+					return "", time.Time{}, merr
+				}
+				return rec.Key, rec.ExpiresAt, nil
+			}))
+		log.Printf("Self-serve team invites enabled (invite TTL %s)", inviteTTL)
+	}
+
 	dashboardHTML := dashboard.NewHandler(dashboardSvc, dashboardOpts...)
 
 	srv := httpapi.New(httpapi.Deps{

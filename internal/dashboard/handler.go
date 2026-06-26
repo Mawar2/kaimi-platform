@@ -38,6 +38,7 @@ type Handler struct {
 	editorTmpl     *template.Template
 	onboardingTmpl *template.Template
 	capMapTmpl     *template.Template
+	teamTmpl       *template.Template
 	notFoundTmpl   *template.Template
 	Now            func() time.Time
 
@@ -69,6 +70,11 @@ type Handler struct {
 	// fall back to the per-session query param only. cmd/api wires it via
 	// WithSAMKeyConfiguredCheck.
 	samKeyConfigured func() bool
+
+	// inviteMinter mints a new product key for a teammate (self-serve team invite). nil =
+	// the Team page shows the feature is unavailable. cmd/api wires it from the product-key
+	// registry via WithInviteMinter. The handler builds the magic link from the request host.
+	inviteMinter InviteMinter
 
 	// onSAMKeySaved fires a fresh opportunity hunt right after a tenant saves their SAM.gov
 	// key (so their board fills without waiting for the daily schedule). It is best-effort
@@ -185,6 +191,9 @@ func (h *Handler) setupRoutes() {
 	h.mux.HandleFunc("/opportunity/{id}/select", postOnly(h.handleSelect))
 	h.mux.HandleFunc("GET /proposals", h.handleProposals)
 	h.mux.HandleFunc("GET /submitted", h.handleSubmitted)
+	// Self-serve team invite (mints a teammate product key for the same workspace).
+	h.mux.HandleFunc("GET /team", h.handleTeam)
+	h.mux.HandleFunc("/team/invite", postOnly(h.handleTeamInvite))
 	h.mux.HandleFunc("GET /submitted/export.csv", h.handleSubmittedExport)
 	h.mux.HandleFunc("/submitted/{id}/outcome", postOnly(h.handleOutcome))
 	h.mux.HandleFunc("GET /workspace/{id}", h.handleWorkspace)
@@ -241,6 +250,7 @@ const (
 	iconCheck   = `<svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 	iconWarn    = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 4l9 16H3z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M12 10v4M12 17v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`
 	iconLink    = `<svg viewBox="0 0 24 24" fill="none"><path d="M10 14a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 1 0-5.7-5.7L11 7.3M14 10a4 4 0 0 0-5.7 0L6 12.3a4 4 0 1 0 5.7 5.7l1.3-1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+	iconTeam    = `<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 13.6A5.5 5.5 0 0 1 20.5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`
 	iconUpload  = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4M7 9l5-5 5 5M5 20h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 )
 
@@ -290,6 +300,11 @@ const shellTmpl = `
         ` + iconArchive + `
         <span>Submitted</span>
         <span class="count">{{.SubmittedCount}}</span>
+      </a>
+      <div class="nav-h">Account</div>
+      <a class="nav-item{{if eq .ActiveNav "team"}} on{{end}}" href="/team">
+        ` + iconTeam + `
+        <span>Team</span>
       </a>
       <div class="spacer"></div>
       <div class="me">
@@ -615,6 +630,8 @@ func (h *Handler) setupTemplates() {
 	h.editorTmpl = template.Must(template.New("editor").Funcs(funcMap).Parse(editorPageTmpl))
 	h.onboardingTmpl = onboardingTemplate(funcMap)
 	h.capMapTmpl = capabilityMapTemplate(funcMap)
+	h.teamTmpl = template.Must(template.Must(
+		template.New("team").Funcs(funcMap).Parse(shellTmpl)).Parse(teamContentTmpl))
 	h.notFoundTmpl = template.Must(template.New("notfound").Funcs(funcMap).Parse(notFoundTmplStr))
 }
 
