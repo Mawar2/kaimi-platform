@@ -100,6 +100,29 @@ func (h *Handler) handleProposalPDF(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// handleProposalComplianceCSV serves the proposal's compliance matrix as a CSV download — one
+// row per must-have requirement (extracted by the Scorer) traced to its coverage: Addressed
+// in a section, a GAP named by the Final Review, or left for the user to Review. When no
+// requirements were extracted it still returns a usable manual template, never an error page.
+func (h *Handler) handleProposalComplianceCSV(w http.ResponseWriter, r *http.Request) {
+	doc, id, ok := h.loadExportDoc(w, r)
+	if !ok {
+		return
+	}
+	var reqs []string
+	if opp, err := h.svc.Get(r.Context(), id); err == nil && opp != nil {
+		reqs = opp.Requirements
+	}
+	data, err := export.RenderComplianceCSV(doc, reqs, h.exportOptions(r.Context(), id))
+	if err != nil {
+		http.Error(w, "failed to render the compliance matrix", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", proposalFilename(doc, id, "csv")))
+	_, _ = w.Write(data)
+}
+
 // loadExportDoc validates the request + loads the proposal document, writing the appropriate
 // error response and returning ok=false on any failure.
 func (h *Handler) loadExportDoc(w http.ResponseWriter, r *http.Request) (*document.Document, string, bool) {

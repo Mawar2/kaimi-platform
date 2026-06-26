@@ -229,6 +229,8 @@ func (h *Handler) setupRoutes() {
 	// Proposal exports: editable Word (.docx) for revision/sharing + locked PDF for submission.
 	h.mux.HandleFunc("GET /workspace/{id}/proposal.docx", h.handleProposalDOCX)
 	h.mux.HandleFunc("GET /workspace/{id}/proposal.pdf", h.handleProposalPDF)
+	// Compliance matrix (CSV): requirements → coverage, for the user to work the gaps.
+	h.mux.HandleFunc("GET /workspace/{id}/compliance.csv", h.handleProposalComplianceCSV)
 	// Save the proposal into the tenant's connected Google Drive as an editable Doc.
 	h.mux.HandleFunc("/workspace/{id}/save-to-drive", postOnly(h.handleSaveToDrive))
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
