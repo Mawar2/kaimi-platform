@@ -104,6 +104,9 @@ type WorkspaceData struct {
 	// Flash is a one-shot confirmation banner shown after a gate action
 	// (issue #246 B4), derived from the ?flash= redirect marker.
 	Flash string
+	// CanSaveToDrive is true when a Google Drive saver is wired, so the workspace shows the
+	// "Save to Google Drive" action.
+	CanSaveToDrive bool
 }
 
 // gateFlashMessage maps a ?flash= redirect marker to the confirmation banner the
@@ -261,6 +264,7 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	data.AgentLine = agentLines[agentKeyFor(stageIndex)]
 	data.Flash = gateFlashMessage(r.URL.Query().Get("flash"))
+	data.CanSaveToDrive = h.saveToDrive != nil
 	// The sidebar shows the same queue/needs/active counts here as on every
 	// other page (issue #246 B1).
 	h.fillShellCounts(r.Context(), &data.shellData)

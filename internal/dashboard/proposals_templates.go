@@ -238,6 +238,7 @@ const workspaceContentTmpl = `{{define "content"}}
         <a class="artifact2" href="/workspace/{{.Opp.ID}}/proposal.docx" download>` + iconDoc + `Word (.docx)<span style="color:var(--ink-4);font-size:11px">editable</span></a>
         <a class="artifact2" href="/workspace/{{.Opp.ID}}/proposal.pdf" download>` + iconDoc + `PDF<span style="color:var(--ink-4);font-size:11px">for submission</span></a>
         <a class="artifact2" href="/workspace/{{.Opp.ID}}/draft.md" download>` + iconDoc + `Markdown<span style="color:var(--ink-4);font-family:var(--font-mono);font-size:11px">{{.VersionLabel}}</span></a>
+        {{if .CanSaveToDrive}}<form method="POST" action="/workspace/{{.Opp.ID}}/save-to-drive" style="display:inline"><button class="artifact2" type="submit">` + iconLink + `Save to Google Drive<span style="color:var(--ink-4);font-size:11px">editable + shareable</span></button></form>{{end}}
       </div>
 
       {{range .OpenFlags}}

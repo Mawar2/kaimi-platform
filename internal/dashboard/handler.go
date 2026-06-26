@@ -71,6 +71,12 @@ type Handler struct {
 	// WithSAMKeyConfiguredCheck.
 	samKeyConfigured func() bool
 
+	// saveToDrive writes the finished proposal into the tenant's connected Google Drive as an
+	// editable Google Doc (so they can do last-minute tweaks + share with colleagues), using
+	// the EXISTING customer-Drive connection — no new API. nil = the "Save to Google Drive"
+	// action is hidden. cmd/api wires it via WithProposalDriveSaver.
+	saveToDrive ProposalDriveSaver
+
 	// inviteMinter mints a new product key for a teammate (self-serve team invite). nil =
 	// the Team page shows the feature is unavailable. cmd/api wires it from the product-key
 	// registry via WithInviteMinter. The handler builds the magic link from the request host.
@@ -223,6 +229,8 @@ func (h *Handler) setupRoutes() {
 	// Proposal exports: editable Word (.docx) for revision/sharing + locked PDF for submission.
 	h.mux.HandleFunc("GET /workspace/{id}/proposal.docx", h.handleProposalDOCX)
 	h.mux.HandleFunc("GET /workspace/{id}/proposal.pdf", h.handleProposalPDF)
+	// Save the proposal into the tenant's connected Google Drive as an editable Doc.
+	h.mux.HandleFunc("/workspace/{id}/save-to-drive", postOnly(h.handleSaveToDrive))
 	h.mux.HandleFunc("/workspace/{id}/section/{sid}", postOnly(h.handleSectionSave))
 	h.mux.HandleFunc("/workspace/{id}/approve", postOnly(h.handleAction("approve")))
 	h.mux.HandleFunc("/workspace/{id}/changes", postOnly(h.handleAction("changes")))
