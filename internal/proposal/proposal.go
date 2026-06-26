@@ -67,6 +67,12 @@ type Deps struct {
 	Writer        WriterRunner
 	Review        Reviewer
 	Profile       *scorer.CapabilityProfile
+	// ProfileProvider, when set, resolves the company profile FRESH at draft time so a
+	// profile saved via onboarding AFTER this long-lived service started is used (the
+	// static Profile above is captured once at startup). It takes precedence over Profile
+	// when it returns a non-nil value; otherwise Profile is the fallback. Without this, a
+	// tenant who onboards after boot would get proposals grounded on the boot-time profile.
+	ProfileProvider func() *scorer.CapabilityProfile
 	// Ingest is optional. When set, the draft pipeline ingests the solicitation
 	// attachments before outlining, attaches the resulting SolicitationDocs to the
 	// Opportunity, and threads the extracted text into the Writer and Final Review
@@ -94,6 +100,18 @@ type Service struct {
 	// (e.g. a server restart across the human gate) degrades to a review with no
 	// documents, never an error.
 	docText map[string]map[string]string
+}
+
+// currentProfile returns the company profile to ground the Writer on: the live
+// ProfileProvider's value when one is wired and returns non-nil (so a profile saved via
+// onboarding after this service started is honored), else the static deps.Profile.
+func (s *Service) currentProfile() *scorer.CapabilityProfile {
+	if s.deps.ProfileProvider != nil {
+		if p := s.deps.ProfileProvider(); p != nil {
+			return p
+		}
+	}
+	return s.deps.Profile
 }
 
 // NewService validates deps and returns a Service.
@@ -466,7 +484,7 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 		draft, res, err := s.deps.Writer.Run(ctx, writer.Input{
 			Opportunity:  opp,
 			Outline:      single,
-			Profile:      s.deps.Profile,
+			Profile:      s.currentProfile(),
 			Documents:    documents,
 			RevisionNote: revisionNote,
 		})
