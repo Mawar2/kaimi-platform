@@ -21,6 +21,10 @@ FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
+# The telemetry core is an in-tree nested module consumed via a local replace
+# (replace github.com/Mawar2/kaimi-telemetry => ./telemetry); its go.mod must exist
+# before `go mod download` can resolve that replace.
+COPY telemetry/go.mod ./telemetry/
 RUN go mod download
 
 COPY . .
