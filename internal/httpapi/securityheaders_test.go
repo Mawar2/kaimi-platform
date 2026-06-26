@@ -41,4 +41,12 @@ func TestSecurityHeadersSet(t *testing.T) {
 	if !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Errorf("CSP missing frame-ancestors 'none': %q", csp)
 	}
+	// The SSR dashboard embeds icons + web fonts as data: URIs; the CSP must allow them or
+	// the browser blocks the fonts and the UI degrades to system fonts (browser-QA regression).
+	if !strings.Contains(csp, "font-src 'self' data:") {
+		t.Errorf("CSP missing font-src 'self' data: (embedded fonts would be blocked): %q", csp)
+	}
+	if !strings.Contains(csp, "img-src 'self' data:") {
+		t.Errorf("CSP missing img-src 'self' data: (embedded icons would be blocked): %q", csp)
+	}
 }
