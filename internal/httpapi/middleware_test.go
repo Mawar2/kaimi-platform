@@ -177,18 +177,21 @@ func TestRoutesProtectsAPIGroup(t *testing.T) {
 	}
 }
 
-// TestRoutesHealthzExemptFromAuth proves /healthz is reachable WITHOUT a session
-// even when auth is configured — the wrap covers only the /api/v1 group.
+// TestRoutesHealthzExemptFromAuth proves both /healthz and /health are reachable WITHOUT
+// a session even when auth is configured — the wrap covers only the /api/v1 group. Both
+// paths serve the probe; /health is the externally-reachable one on Cloud Run (whose front
+// end intercepts the exact path /healthz before it reaches the container).
 func TestRoutesHealthzExemptFromAuth(t *testing.T) {
 	srv := New(Deps{Auth: newTestAuth(t, nil, nil)})
 	h := srv.Routes()
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/healthz with auth configured status = %d, want %d (must stay public)", rec.Code, http.StatusOK)
+	for _, path := range []string{"/healthz", "/health"} {
+		req := httptest.NewRequest(http.MethodGet, path, http.NoBody)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s with auth configured status = %d, want %d (must stay public)", path, rec.Code, http.StatusOK)
+		}
 	}
 }
 
