@@ -109,6 +109,36 @@ jobs:
         working-directory: telemetry
         args: --timeout=5m
 
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+        cache: false
+
+    # govulncheck (official Go team scanner): known CVEs in dependencies, filtered to the
+    # reachable call graph. Blocking — it is high-signal and low-noise.
+    - name: govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+    # gosec static security analysis. Informational on initial rollout (continue-on-error)
+    # so the pilot is not blocked by a flood of pre-existing findings; review the report and
+    # promote to blocking once triaged. Excludes the Wails-embed-only cmd/desktop.
+    - name: gosec
+      continue-on-error: true
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec -severity medium -confidence medium -exclude-dir=cmd/desktop ./...
+
   terraform-lint:
     name: Terraform Lint
     runs-on: ubuntu-latest
@@ -566,7 +596,7 @@ jobs:
   all-checks-pass:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [test, lint, telemetry-core, terraform-lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
+    needs: [test, lint, telemetry-core, security-scan, terraform-lint, verify-gcp, verify-acceptance-criteria, ai-code-review, auto-fix]
     if: always()
 
     steps:
@@ -592,6 +622,13 @@ jobs:
         # terraform-lint runs on every PR/push with no secrets, so it must succeed.
         if [[ "${{ needs.terraform-lint.result }}" != "success" ]]; then
           echo "::error::Terraform validation failed"
+          exit 1
+        fi
+
+        # security-scan (govulncheck blocking; gosec informational) runs with no
+        # secrets on every PR/push, so it must succeed.
+        if [[ "${{ needs.security-scan.result }}" != "success" ]]; then
+          echo "::error::Security scan (govulncheck/gosec) failed"
           exit 1
         fi
 

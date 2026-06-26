@@ -340,7 +340,9 @@ func (s *Server) Routes() http.Handler {
 	// would 405 it. With no origins configured (the same-origin default) CORS is a
 	// no-op pass-through, so it never interferes with RequireSession: the auth wrap
 	// on /api/v1 still runs untouched for every real (non-preflight) request.
-	return CORS(s.deps.AllowedOrigins)(handler)
+	// SecurityHeaders is outermost so OWASP baseline headers land on every response,
+	// including CORS preflights and the public routes.
+	return SecurityHeaders(CORS(s.deps.AllowedOrigins)(handler))
 }
 
 // handleHealth serves the unauthenticated liveness probe. It reports 200 with a
