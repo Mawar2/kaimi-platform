@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/profile"
 )
 
@@ -61,7 +62,7 @@ func (b *GeminiBuilder) Build(ctx context.Context, p *profile.CapabilityProfile,
 	prompt := buildPrompt(p, docs)
 	contents := []*genai.Content{genai.NewContentFromText(prompt, genai.RoleUser)}
 
-	resp, err := b.client.Models.GenerateContent(ctx, b.modelName, contents, generateConfig())
+	resp, err := kobs.GenerateContent(ctx, b.client, b.modelName, contents, generateConfig())
 	if err != nil {
 		return nil, fmt.Errorf("capabilitymap: gemini call failed: %w", err)
 	}

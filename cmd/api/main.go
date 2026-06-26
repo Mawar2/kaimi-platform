@@ -17,9 +17,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/Mawar2/kaimi-telemetry/httpstream"
+	"github.com/Mawar2/kaimi-telemetry/monitor"
 
 	"github.com/Mawar2/Kaimi/internal/capabilitymap"
 	"github.com/Mawar2/Kaimi/internal/config"
@@ -99,6 +103,43 @@ func run() error {
 	s, err := store.NewJSONStore(*storePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize store: %w", err)
+	}
+
+	// Wire the privacy-first telemetry pipeline. It is ADDITIVE and on by default;
+	// set KAIMI_TELEMETRY_ENABLED=false to turn it off entirely. setupTelemetry
+	// installs the process-wide kobs emitter (until then all instrumentation is a
+	// no-op) and returns the LiveSink that backs the live event stream, exposed to
+	// the HTTP layer via Deps.LiveSource. liveSource stays a nil interface when
+	// telemetry is disabled, so no live-stream route is served. The emitter is
+	// flushed and closed on shutdown below.
+	var liveSource httpstream.Source
+	// monitorHandler serves the embedded Monitor SPA (the operator's live
+	// event-stream UI shipped inside the telemetry core). It is wired only when
+	// telemetry is enabled — without a live stream the Monitor has nothing to render —
+	// and is gated like the dashboard/stream by the HTTP layer (Deps.Monitor).
+	var monitorHandler http.Handler
+	if telemetryEnabled(os.Getenv(envTelemetryEnabled)) {
+		live, em, terr := setupTelemetry(*storePath)
+		if terr != nil {
+			return fmt.Errorf("set up telemetry: %w", terr)
+		}
+		liveSource = live
+		monitorHandler = monitor.Handler()
+		// Flush+close on shutdown, additively alongside the server shutdown below. A
+		// defer covers every return path (including the early returns between here
+		// and serve), so the JSONL log is durably flushed and the LiveSink's
+		// subscriber channels are closed no matter how run() exits. Shutdown is
+		// idempotent, so this never double-closes.
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if serr := em.Shutdown(ctx); serr != nil {
+				log.Printf("telemetry shutdown: %v", serr)
+			}
+		}()
+		log.Printf("Telemetry enabled (event log under %s)", filepath.Join(*storePath, "telemetry"))
+	} else {
+		log.Printf("Telemetry disabled (%s is false)", envTelemetryEnabled)
 	}
 
 	// Runtime company-profile store (WS-C1), rooted at the SAME store base path so
@@ -286,13 +327,15 @@ func run() error {
 			return fmt.Errorf("build SAM key writer: %w", serr)
 		}
 		defer func() { _ = samWriter.Close() }()
-		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeySaver(samWriter.Save))
-		// Let onboarding reflect whether a key is already configured (entered earlier OR
-		// deployment-provided), so a returning tester isn't blocked re-entering it.
-		dashboardOpts = append(dashboardOpts, dashboard.WithSAMKeyConfiguredCheck(func() bool {
-			ok, eerr := samWriter.Exists(context.Background())
-			return eerr == nil && ok
-		}))
+		// WithSAMKeyConfiguredCheck lets onboarding reflect whether a key is already
+		// configured (entered earlier OR deployment-provided), so a returning tester
+		// isn't blocked re-entering it.
+		dashboardOpts = append(dashboardOpts,
+			dashboard.WithSAMKeySaver(samWriter.Save),
+			dashboard.WithSAMKeyConfiguredCheck(func() bool {
+				ok, eerr := samWriter.Exists(context.Background())
+				return eerr == nil && ok
+			}))
 		log.Printf("Onboarding SAM.gov key entry enabled (writes to Secret Manager secret %q)", samSecretName)
 	}
 
@@ -382,6 +425,8 @@ func run() error {
 		Auth:                auth,
 		ProductKey:          productKeyGate,
 		Drive:               driveHandler,
+		LiveSource:          liveSource,
+		Monitor:             monitorHandler,
 		AllowInsecureNoAuth: allowInsecure,
 		// CORS allow-list from CORS_ALLOWED_ORIGINS (empty by default → same-origin,
 		// no-op). Set only when a browser SPA is served from a different origin.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/scorer"
@@ -140,6 +141,10 @@ func (s *Service) Select(ctx context.Context, oppID string) error {
 		return fmt.Errorf("select %s: %w", oppID, err)
 	}
 
+	// Telemetry: the bridge event from Zone 1. trace_id is the opportunity ID,
+	// set explicitly because the stage spawned below runs on a severed context.
+	kobs.EmitProposal("proposal.selected", kobs.TenantID(opp, ""), opp.ID, "", "", 0,
+		kobs.ProposalID(opp.ID), kobs.ProposalStatus(opp.ProposalStatus))
 	s.spawn(oppID, s.runDraftPipeline)
 	return nil
 }
@@ -200,6 +205,9 @@ func (s *Service) Approve(ctx context.Context, oppID string) error {
 		s.release(oppID)
 		return err
 	}
+	// Telemetry: the human's go decision at the gate, before Final Review runs.
+	kobs.EmitProposal("proposal.approved", kobs.TenantID(opp, ""), oppID, "", "", 0,
+		kobs.ProposalID(oppID), kobs.ProposalStatus(StatusReviewRunning))
 	s.spawn(oppID, s.runFinalReview)
 	return nil
 }
@@ -241,7 +249,13 @@ func (s *Service) Submit(ctx context.Context, oppID string) error {
 	if opp.ProposalStatus != StatusReadyToSubmit {
 		return fmt.Errorf("proposal %s is not ready to submit (status %q)", oppID, opp.ProposalStatus)
 	}
-	return s.setStatus(ctx, oppID, StatusSubmitted)
+	if err := s.setStatus(ctx, oppID, StatusSubmitted); err != nil {
+		return err
+	}
+	// Telemetry: the terminal human act. Emitted only on a successful transition.
+	kobs.EmitProposal("proposal.submitted", kobs.TenantID(opp, ""), oppID, "", "", 0,
+		kobs.ProposalID(oppID), kobs.ProposalStatus(StatusSubmitted))
+	return nil
 }
 
 // atGate reports whether the proposal is paused for the human.
@@ -315,8 +329,18 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 	// the Outline, the Writer, and the Final Review compliance pass.
 	documents := s.ingestDocuments(ctx, opp)
 
+	// Telemetry: open the outline span (agent Noa). trace_id is the opportunity
+	// ID; the start time is captured off the injected clock for the duration.
+	tenant := kobs.TenantID(opp, "")
+	outlineStart := s.Now()
+	kobs.EmitProposal("proposal.outline.started", tenant, oppID, "outline", kobs.AgentOutline, 0,
+		kobs.ProposalID(oppID), kobs.ProposalStage("outline"))
+
 	out, res, err := s.deps.Outline.Run(ctx, opp, documents)
 	if err != nil || res == nil || res.IsFailed() || out == nil {
+		kobs.EmitProposal("proposal.outline.failed", tenant, oppID, "outline", kobs.AgentOutline,
+			s.Now().Sub(outlineStart).Milliseconds(),
+			kobs.ProposalID(oppID), kobs.ProposalStage("outline"), kobs.ProposalStatus("failed"), kobs.ProposalErrorOf(err))
 		s.failStatus(ctx, oppID, "outline:failed")
 		return
 	}
@@ -328,14 +352,22 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 	}
 	if err := s.deps.Documents.Create(doc, "outline",
 		fmt.Sprintf("Outline skeleton: %d sections", len(out.Sections))); err != nil {
+		kobs.EmitProposal("proposal.outline.failed", tenant, oppID, "outline", kobs.AgentOutline,
+			s.Now().Sub(outlineStart).Milliseconds(),
+			kobs.ProposalID(oppID), kobs.ProposalStage("outline"), kobs.ProposalStatus("failed"), kobs.ProposalErrorOf(err))
 		s.failStatus(ctx, oppID, "outline:failed")
 		return
 	}
 
+	// Telemetry: close the outline span on success.
+	kobs.EmitProposal("proposal.outline.completed", tenant, oppID, "outline", kobs.AgentOutline,
+		s.Now().Sub(outlineStart).Milliseconds(),
+		kobs.ProposalID(oppID), kobs.ProposalStage("outline"), kobs.ProposalStatus("success"))
+
 	if err := s.setStatus(ctx, oppID, StatusWriterRunning); err != nil {
 		return
 	}
-	s.draftSections(ctx, oppID, opp, out, documents, "Draft from the technical writer", "")
+	s.draftSections(ctx, oppID, opp, out, documents, "Draft from the technical writer", "", false)
 }
 
 // ingestDocuments runs the optional ingest stage for opp, attaches the resulting
@@ -393,7 +425,7 @@ func (s *Service) runRevision(ctx context.Context, oppID string) {
 	// Thread the human's change request into the Writer so the revision actually
 	// addresses it, instead of redrafting blind.
 	s.draftSections(ctx, oppID, opp, outlineFromDocument(doc), s.cachedDocText(oppID),
-		"Revised draft after change request", latestChangeRequest(doc))
+		"Revised draft after change request", latestChangeRequest(doc), true)
 }
 
 // latestChangeRequest returns the most recent human "Request changes:" note on
@@ -414,7 +446,13 @@ func latestChangeRequest(doc *document.Document) string {
 // applying each drafted section to the document as it completes so the
 // human can review the outline — and watch the draft grow — while the
 // writer works. It pauses at the gate when every section is drafted.
-func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportunity.Opportunity, out *outline.Outline, documents map[string]string, note, revisionNote string) {
+func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportunity.Opportunity, out *outline.Outline, documents map[string]string, note, revisionNote string, revision bool) {
+	// Telemetry: open the writer span (agent Tomás). revision=true marks the
+	// re-run after a human change request; the start time uses the injected clock.
+	tenant := kobs.TenantID(opp, "")
+	writerStart := s.Now()
+	kobs.EmitProposal("proposal.writer.started", tenant, oppID, "writer", kobs.AgentWriter, 0,
+		kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalRevision(revision))
 	for _, section := range out.Sections {
 		// A one-section outline keeps the Writer's per-section prompting
 		// identical while letting the document update incrementally.
@@ -434,6 +472,10 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 		})
 		if err != nil || res == nil || res.IsFailed() {
 			// Keep whatever sections already landed; surface the failure.
+			kobs.EmitProposal("proposal.writer.failed", tenant, oppID, "writer", kobs.AgentWriter,
+				s.Now().Sub(writerStart).Milliseconds(),
+				kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalStatus("failed"),
+				kobs.ProposalRevision(revision), kobs.ProposalErrorOf(err))
 			s.failStatus(ctx, oppID, "writer:failed")
 			return
 		}
@@ -443,11 +485,26 @@ func (s *Service) draftSections(ctx context.Context, oppID string, opp *opportun
 		}
 		if _, err := s.deps.Documents.ReplaceSections(oppID, bodies, "writer",
 			fmt.Sprintf("%s — %s", note, section.Title)); err != nil {
+			kobs.EmitProposal("proposal.writer.failed", tenant, oppID, "writer", kobs.AgentWriter,
+				s.Now().Sub(writerStart).Milliseconds(),
+				kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalStatus("failed"),
+				kobs.ProposalRevision(revision), kobs.ProposalErrorOf(err))
 			s.failStatus(ctx, oppID, "writer:failed")
 			return
 		}
+		// Telemetry: one section landed. The title is content-class.
+		kobs.EmitProposal("proposal.section.updated", tenant, oppID, "writer", kobs.AgentWriter, 0,
+			kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalRevision(revision),
+			kobs.ProposalSection(section.Title))
 	}
+	// Telemetry: close the writer span, then record reaching the human gate.
+	kobs.EmitProposal("proposal.writer.completed", tenant, oppID, "writer", kobs.AgentWriter,
+		s.Now().Sub(writerStart).Milliseconds(),
+		kobs.ProposalID(oppID), kobs.ProposalStage("writer"), kobs.ProposalStatus("success"),
+		kobs.ProposalRevision(revision))
 	_ = s.setStatus(ctx, oppID, StatusGate)
+	kobs.EmitProposal("proposal.gate.reached", tenant, oppID, "", "", 0,
+		kobs.ProposalID(oppID), kobs.ProposalStatus(StatusGate))
 }
 
 // runFinalReview renders the document as the human left it and runs the
@@ -462,6 +519,12 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 		s.failStatus(ctx, oppID, "final-review:failed")
 		return
 	}
+
+	// Telemetry: open the final-review span (agent Vera) around the real pass.
+	tenant := kobs.TenantID(opp, "")
+	reviewStart := s.Now()
+	kobs.EmitProposal("proposal.finalreview.started", tenant, oppID, "finalreview", kobs.AgentReview, 0,
+		kobs.ProposalID(oppID), kobs.ProposalStage("finalreview"))
 
 	res, err := s.deps.Review.Review(ctx, finalreview.Input{
 		Draft:       doc.Markdown(),
@@ -486,12 +549,20 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 			_, _ = s.deps.Documents.SetFlags(oppID, flags, "final-review", "Final pass clean — flags resolved")
 		}
 		_ = s.setStatus(ctx, oppID, StatusReadyToSubmit)
+		// Telemetry: the pass was clean and the proposal is ready to submit.
+		kobs.EmitProposal("proposal.finalreview.completed", tenant, oppID, "finalreview", kobs.AgentReview,
+			s.Now().Sub(reviewStart).Milliseconds(),
+			kobs.ProposalID(oppID), kobs.ProposalStage("finalreview"), kobs.ProposalStatus("ready_to_submit"))
 	case res.NeedsHuman():
 		flags := flagsFromResult(res.Flags, doc)
 		if len(flags) > 0 {
 			_, _ = s.deps.Documents.SetFlags(oppID, flags, "final-review", "Final review issues")
 		}
 		_ = s.setStatus(ctx, oppID, StatusReviewNeedsHuman)
+		// Telemetry: the pass sent the human back to the gate with flags.
+		kobs.EmitProposal("proposal.finalreview.needs_human", tenant, oppID, "finalreview", kobs.AgentReview,
+			s.Now().Sub(reviewStart).Milliseconds(),
+			kobs.ProposalID(oppID), kobs.ProposalStage("finalreview"), kobs.ProposalStatus("needs_human"))
 	default:
 		s.failStatus(ctx, oppID, "final-review:failed")
 	}

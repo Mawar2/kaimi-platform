@@ -1,0 +1,515 @@
+/*
+ * Monitor base styling. Intentionally minimal and structural — a polished visual
+ * pass arrives later via design tooling. This sheet establishes a readable dark
+ * dashboard layout (top strip + three lanes) and the shared primitives
+ * (cards, chips, badges, skeletons, the dimmed/reconnecting states).
+ */
+
+:root {
+  --bg: #0a1020;
+  --bg-panel: #121a2e;
+  --bg-panel-2: #1a2540;
+  --border: #243150;
+  --text: #e6ecf5;
+  --text-dim: #8b9ac0;
+  --accent: #22d3ee;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --running: #60a5fa;
+  --radius: 8px;
+  --gap: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.monitor {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---- reconnecting banner -------------------------------------------------- */
+
+.banner {
+  padding: 6px 16px;
+  background: #3a2a08;
+  color: var(--warn);
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.banner .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Dim the whole content area when the stream is not live. */
+.is-stale {
+  opacity: 0.55;
+  filter: grayscale(0.3);
+  transition: opacity 0.2s ease;
+}
+
+/* ---- top strip ------------------------------------------------------------ */
+
+.topstrip {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.topstrip .brand {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.live {
+  background: var(--ok);
+}
+.status-dot.reconnecting {
+  background: var(--warn);
+}
+.status-dot.disconnected {
+  background: var(--err);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.metric .value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.metric .label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.metric .value.err {
+  color: var(--err);
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.filter-group .grp-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+
+.chip {
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.chip:hover {
+  color: var(--text);
+}
+.chip.active {
+  background: var(--accent);
+  color: #04212a;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- lane layout ---------------------------------------------------------- */
+
+.lanes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--gap);
+  padding: var(--gap);
+  overflow: hidden;
+  min-height: 0;
+}
+.lane-timeline {
+  grid-row: 1 / span 2;
+  grid-column: 1;
+}
+.lane-system {
+  grid-row: 1;
+  grid-column: 2;
+}
+.lane-journey {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.lane {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.lane-head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.lane-head .sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.lane-body {
+  padding: 10px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- agent timeline / swimlanes ------------------------------------------ */
+
+.swimlane {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  background: var(--bg-panel-2);
+}
+.swimlane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.swimlane-head .trace {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.state-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-left: auto;
+}
+.state-tag.active {
+  background: rgba(96, 165, 250, 0.18);
+  color: var(--running);
+}
+.state-tag.submitted {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--ok);
+}
+
+.phases {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.milestones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 12px 8px;
+}
+.milestone {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.phase {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+}
+.phase.running {
+  border-left-color: var(--running);
+}
+.phase.completed {
+  border-left-color: var(--ok);
+}
+.phase.failed {
+  border-left-color: var(--err);
+}
+.phase.needs_human {
+  border-left-color: var(--warn);
+}
+.phase-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.phase-name {
+  font-weight: 600;
+}
+.phase-actor {
+  font-size: 12px;
+  color: var(--accent);
+}
+.phase-dur {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+.phase-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.phase.running .phase-status {
+  color: var(--running);
+}
+.phase.completed .phase-status {
+  color: var(--ok);
+}
+.phase.failed .phase-status {
+  color: var(--err);
+}
+.phase.needs_human .phase-status {
+  color: var(--warn);
+}
+
+.llm-spans {
+  margin: 6px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.llm-span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-left: 12px;
+  border-left: 1px dashed var(--border);
+}
+.llm-span .nm {
+  color: var(--text);
+}
+.tokens {
+  font-variant-numeric: tabular-nums;
+}
+.badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.badge.warn {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warn);
+}
+.badge.fallback {
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--err);
+}
+
+/* ---- system lane / quota gauge ------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stat-box {
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.stat-box .value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stat-box .label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.stat-box .value.err {
+  color: var(--err);
+}
+
+.gauge {
+  margin-top: 6px;
+}
+.gauge-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.gauge-track {
+  height: 10px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.gauge-fill {
+  height: 100%;
+  background: var(--ok);
+  transition: width 0.3s ease;
+}
+.gauge-fill.low {
+  background: var(--warn);
+}
+.gauge-fill.crit {
+  background: var(--err);
+}
+
+/* ---- journey lane / funnel ----------------------------------------------- */
+
+.funnel-step {
+  margin-bottom: 8px;
+}
+.funnel-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.funnel-row .nm {
+  color: var(--text);
+}
+.funnel-row .ct {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.funnel-bar {
+  height: 8px;
+  background: var(--bg-panel-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.funnel-bar-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.dropoff {
+  font-size: 11px;
+  color: var(--err);
+  margin-left: 6px;
+}
+
+/* ---- skeletons & empty states -------------------------------------------- */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-panel-2) 25%,
+    #20304f 50%,
+    var(--bg-panel-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skeleton-line {
+  height: 12px;
+  margin-bottom: 8px;
+}
+.skeleton-block {
+  height: 64px;
+  margin-bottom: 10px;
+}
+
+.empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 12px;
+}

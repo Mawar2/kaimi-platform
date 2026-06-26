@@ -2,6 +2,8 @@ package proposal
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/document"
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
 	"github.com/Mawar2/Kaimi/internal/scorer"
@@ -228,6 +231,259 @@ func TestGuards(t *testing.T) {
 	}
 	if err := svc.Select(context.Background(), "missing"); err == nil {
 		t.Errorf("Select on unknown opportunity must fail")
+	}
+}
+
+// failingOutline always fails, so a test can prove the outline-failure
+// telemetry path (and that no writer telemetry follows).
+type failingOutline struct{}
+
+func (failingOutline) Run(_ context.Context, _ *opportunity.Opportunity, _ map[string]string) (*outline.Outline, *agent.Result, error) {
+	return nil, nil, errors.New("outline boom")
+}
+
+// TestProposalLifecycleTelemetry_FullSuccessPath drives Select → Approve →
+// Submit with a stub writer and a ready-to-submit reviewer, then asserts the
+// full ordered set of lifecycle events, the correct agent per phase, and a
+// non-negative duration on every closed span. trace_id and tenant_id must ride
+// every event.
+func TestProposalLifecycleTelemetry_FullSuccessPath(t *testing.T) {
+	capture, restore := kobs.NewCapture()
+	defer restore()
+
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	docsClient, err := googledocs.NewClient(context.Background(), googledocs.Config{UseCached: true})
+	if err != nil {
+		t.Fatalf("docs client: %v", err)
+	}
+	svc := NewService(&Deps{
+		Opportunities: opps,
+		Documents:     docs,
+		Outline:       outline.New(docsClient),
+		Writer:        &recordingWriter{},
+		Review:        &recordingReviewer{}, // returns ready_to_submit
+		Profile:       &scorer.CapabilityProfile{},
+	})
+
+	// Seed with an explicit tenant so we can assert tenant_id propagation.
+	now := time.Now()
+	opp := &opportunity.Opportunity{
+		ID:               "zta-1",
+		Title:            "Zero Trust Architecture Modernization",
+		Agency:           "DHS CISA",
+		NAICSCode:        "541512",
+		Description:      "Modernize zero trust architecture.",
+		ResponseDeadline: now.Add(30 * 24 * time.Hour),
+		Requirements:     []string{"FedRAMP High"},
+		TenantID:         "bluemeta",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := opps.Save(context.Background(), opp); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+	if err := svc.Approve(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	svc.Wait()
+	if err := svc.Submit(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	events := capture.Drain()
+	if len(events) == 0 {
+		t.Fatal("no telemetry captured")
+	}
+
+	var names []string
+	for _, e := range events {
+		names = append(names, e.Name)
+		if e.TraceID != "zta-1" {
+			t.Errorf("event %q TraceID = %q, want zta-1 (the opportunity ID)", e.Name, e.TraceID)
+		}
+		if e.TenantID != "bluemeta" {
+			t.Errorf("event %q TenantID = %q, want bluemeta", e.Name, e.TenantID)
+		}
+	}
+
+	// Collapse consecutive section.updated repeats so the ordered backbone is
+	// stable regardless of how many sections the outline produced.
+	var seq []string
+	for _, n := range names {
+		if n == "proposal.section.updated" && len(seq) > 0 && seq[len(seq)-1] == n {
+			continue
+		}
+		seq = append(seq, n)
+	}
+	want := []string{
+		"proposal.selected",
+		"proposal.outline.started",
+		"proposal.outline.completed",
+		"proposal.writer.started",
+		"proposal.section.updated",
+		"proposal.writer.completed",
+		"proposal.gate.reached",
+		"proposal.approved",
+		"proposal.finalreview.started",
+		"proposal.finalreview.completed",
+		"proposal.submitted",
+	}
+	if !reflect.DeepEqual(seq, want) {
+		t.Fatalf("lifecycle event order:\n got  %v\n want %v", seq, want)
+	}
+
+	// At least one section was drafted.
+	sectionUpdates := 0
+	for _, n := range names {
+		if n == "proposal.section.updated" {
+			sectionUpdates++
+		}
+	}
+	if sectionUpdates == 0 {
+		t.Error("expected at least one proposal.section.updated event")
+	}
+
+	for _, e := range events {
+		switch {
+		case strings.HasPrefix(e.Name, "proposal.outline."):
+			if e.Actor.Name != kobs.AgentOutline {
+				t.Errorf("%s actor = %q, want %q", e.Name, e.Actor.Name, kobs.AgentOutline)
+			}
+		case strings.HasPrefix(e.Name, "proposal.writer.") || e.Name == "proposal.section.updated":
+			if e.Actor.Name != kobs.AgentWriter {
+				t.Errorf("%s actor = %q, want %q", e.Name, e.Actor.Name, kobs.AgentWriter)
+			}
+		case strings.HasPrefix(e.Name, "proposal.finalreview."):
+			if e.Actor.Name != kobs.AgentReview {
+				t.Errorf("%s actor = %q, want %q", e.Name, e.Actor.Name, kobs.AgentReview)
+			}
+		}
+		if strings.HasSuffix(e.Name, ".completed") && e.DurationMS < 0 {
+			t.Errorf("%s duration_ms = %d, want >= 0", e.Name, e.DurationMS)
+		}
+		if strings.HasSuffix(e.Name, ".started") && e.DurationMS != 0 {
+			t.Errorf("%s duration_ms = %d, want 0 at span open", e.Name, e.DurationMS)
+		}
+	}
+}
+
+// TestProposalLifecycleTelemetry_OutlineFailureEmitsNoWriterEvents proves an
+// outline failure emits proposal.outline.failed (with Noa as actor) and that no
+// writer-phase telemetry follows.
+func TestProposalLifecycleTelemetry_OutlineFailureEmitsNoWriterEvents(t *testing.T) {
+	capture, restore := kobs.NewCapture()
+	defer restore()
+
+	dir := t.TempDir()
+	opps, err := store.NewJSONStore(dir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	docs, err := document.NewStore(dir)
+	if err != nil {
+		t.Fatalf("docs: %v", err)
+	}
+	svc := NewService(&Deps{
+		Opportunities: opps,
+		Documents:     docs,
+		Outline:       failingOutline{},
+		Writer:        &recordingWriter{},
+		Review:        &recordingReviewer{},
+		Profile:       &scorer.CapabilityProfile{},
+	})
+	seedOpp(t, opps)
+
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+
+	events := capture.Drain()
+	seen := map[string]bool{}
+	for _, e := range events {
+		seen[e.Name] = true
+		if strings.HasPrefix(e.Name, "proposal.writer.") || e.Name == "proposal.section.updated" {
+			t.Errorf("no writer telemetry expected on outline failure, got %q", e.Name)
+		}
+	}
+	if !seen["proposal.outline.started"] {
+		t.Error("missing proposal.outline.started")
+	}
+	if !seen["proposal.outline.failed"] {
+		t.Error("missing proposal.outline.failed")
+	}
+	if seen["proposal.outline.completed"] {
+		t.Error("must not emit proposal.outline.completed on failure")
+	}
+	for _, e := range events {
+		if e.Name == "proposal.outline.failed" {
+			if e.Actor.Name != kobs.AgentOutline {
+				t.Errorf("outline.failed actor = %q, want %q", e.Actor.Name, kobs.AgentOutline)
+			}
+			if e.DurationMS < 0 {
+				t.Errorf("outline.failed duration_ms = %d, want >= 0", e.DurationMS)
+			}
+		}
+	}
+}
+
+// TestProposalLifecycleTelemetry_NeedsHumanPath proves the real Final Review's
+// needs_human verdict emits proposal.finalreview.needs_human (Vera) and not
+// proposal.finalreview.completed.
+func TestProposalLifecycleTelemetry_NeedsHumanPath(t *testing.T) {
+	capture, restore := kobs.NewCapture()
+	defer restore()
+
+	svc, opps := newTestService(t)
+	seedOpp(t, opps)
+
+	if err := svc.Select(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	svc.Wait()
+	// The stub draft omits "FedRAMP High", so the real Final Review returns the
+	// human to the gate with flags.
+	if err := svc.Approve(context.Background(), "zta-1"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	svc.Wait()
+
+	events := capture.Drain()
+	seen := map[string]bool{}
+	for _, e := range events {
+		seen[e.Name] = true
+	}
+	if !seen["proposal.finalreview.started"] {
+		t.Error("missing proposal.finalreview.started")
+	}
+	if !seen["proposal.finalreview.needs_human"] {
+		t.Error("missing proposal.finalreview.needs_human")
+	}
+	if seen["proposal.finalreview.completed"] {
+		t.Error("must not emit proposal.finalreview.completed on a needs_human verdict")
+	}
+	for _, e := range events {
+		if e.Name == "proposal.finalreview.needs_human" {
+			if e.Actor.Name != kobs.AgentReview {
+				t.Errorf("needs_human actor = %q, want %q (Vera)", e.Actor.Name, kobs.AgentReview)
+			}
+			if e.DurationMS < 0 {
+				t.Errorf("needs_human duration_ms = %d, want >= 0", e.DurationMS)
+			}
+		}
 	}
 }
 

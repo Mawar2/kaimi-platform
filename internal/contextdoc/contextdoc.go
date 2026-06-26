@@ -200,8 +200,11 @@ func (s *JSONStore) write(docs []Doc) error {
 // directory components (defeating path traversal like "../../etc/passwd") and replaces
 // any character outside [A-Za-z0-9._-] with "_". An empty result falls back to "file".
 func sanitizeName(name string) string {
-	base := filepath.Base(filepath.FromSlash(name))
-	base = strings.ReplaceAll(base, "\\", "_")
+	// Normalize Windows separators to '/' before taking the base so directory
+	// components are stripped regardless of host OS. filepath.Base only splits on
+	// the OS separator, so on Linux a "..\..\x" path would otherwise leak through
+	// (the bug TestSanitizeName guards against).
+	base := filepath.Base(strings.ReplaceAll(name, "\\", "/"))
 	var b strings.Builder
 	for _, r := range base {
 		switch {
