@@ -126,77 +126,46 @@ func TestCachedClient_CreateDoc_EmptyTitle(t *testing.T) {
 	}
 }
 
-// TestBuildRequests verifies that buildRequests produces InsertText and
-// UpdateParagraphStyle requests in the correct order, with cursor indices that
-// account for the inserted text at each step.
-func TestBuildRequests(t *testing.T) {
+// TestRenderDocumentHTML verifies that renderDocumentHTML emits the title as an
+// <h1>, each section heading as an <h2>, and each body line as its own <p>; that
+// HTML in the content is escaped (so it can't be interpreted as markup); and that
+// "[GAP: …]" markers survive verbatim.
+func TestRenderDocumentHTML(t *testing.T) {
 	doc := Document{
-		Title: "Test Document",
+		Title: "Proposal Outline",
 		Sections: []DocSection{
-			{Heading: "Executive Summary", Body: "Required: yes\nSummary body."},
-			{Heading: "Technical Approach", Body: "Required: yes\nApproach body."},
+			{Heading: "Executive Summary", Body: "First line\nSecond line"},
+			{Heading: "Pricing", Body: "[GAP: pricing] needs <script>alert(1)</script> input"},
 		},
 	}
 
-	reqs := buildRequests(doc)
+	out := renderDocumentHTML(doc)
 
-	// Each section produces 3 requests: InsertText (heading), UpdateParagraphStyle
-	// (heading), InsertText (body).
-	wantCount := len(doc.Sections) * 3
-	if len(reqs) != wantCount {
-		t.Fatalf("len(requests) = %d, want %d", len(reqs), wantCount)
+	wantContains := []string{
+		"<h1>Proposal Outline</h1>",
+		"<h2>Executive Summary</h2>",
+		"<h2>Pricing</h2>",
+		"<p>First line</p>",
+		"<p>Second line</p>",
+		"&lt;script&gt;", // the <script> tag is escaped, not interpreted
+		"[GAP: pricing]", // GAP markers survive verbatim
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered HTML missing %q\ngot: %s", want, out)
+		}
 	}
 
-	index := int64(1)
-	for i, sec := range doc.Sections {
-		base := i * 3
-
-		insertHeading := reqs[base].InsertText
-		if insertHeading == nil {
-			t.Fatalf("requests[%d]: expected InsertText request for heading", base)
-		}
-		headingText := sec.Heading + "\n"
-		if insertHeading.Text != headingText {
-			t.Errorf("requests[%d].InsertText.Text = %q, want %q", base, insertHeading.Text, headingText)
-		}
-		if insertHeading.Location == nil || insertHeading.Location.Index != index {
-			t.Errorf("requests[%d].InsertText.Location.Index = %v, want %d", base, insertHeading.Location, index)
-		}
-
-		style := reqs[base+1].UpdateParagraphStyle
-		if style == nil {
-			t.Fatalf("requests[%d]: expected UpdateParagraphStyle request for heading", base+1)
-		}
-		if style.ParagraphStyle == nil || style.ParagraphStyle.NamedStyleType != "HEADING_1" {
-			t.Errorf("requests[%d].UpdateParagraphStyle.ParagraphStyle.NamedStyleType = %v, want HEADING_1", base+1, style.ParagraphStyle)
-		}
-		wantStart := index
-		wantEnd := index + int64(len(headingText))
-		if style.Range == nil || style.Range.StartIndex != wantStart || style.Range.EndIndex != wantEnd {
-			t.Errorf("requests[%d].UpdateParagraphStyle.Range = %v, want [%d, %d)", base+1, style.Range, wantStart, wantEnd)
-		}
-		index += int64(len(headingText))
-
-		insertBody := reqs[base+2].InsertText
-		if insertBody == nil {
-			t.Fatalf("requests[%d]: expected InsertText request for body", base+2)
-		}
-		bodyText := sec.Body + "\n\n"
-		if insertBody.Text != bodyText {
-			t.Errorf("requests[%d].InsertText.Text = %q, want %q", base+2, insertBody.Text, bodyText)
-		}
-		if insertBody.Location == nil || insertBody.Location.Index != index {
-			t.Errorf("requests[%d].InsertText.Location.Index = %v, want %d", base+2, insertBody.Location, index)
-		}
-		index += int64(len(bodyText))
+	// The raw, unescaped <script> tag must never appear in the output.
+	if strings.Contains(out, "<script>") {
+		t.Errorf("rendered HTML contains an unescaped <script> tag\ngot: %s", out)
 	}
-}
 
-// TestBuildRequests_Empty verifies that a document with no sections produces no requests.
-func TestBuildRequests_Empty(t *testing.T) {
-	reqs := buildRequests(Document{Title: "Empty Document"})
-	if len(reqs) != 0 {
-		t.Errorf("len(requests) = %d, want 0 for a document with no sections", len(reqs))
+	// A two-line body must yield exactly two <p> elements for that section. The
+	// first section has two lines; combined with the second section's single body
+	// paragraph, that is three <p> total.
+	if got := strings.Count(out, "<p>"); got != 3 {
+		t.Errorf("<p> count = %d, want 3 (two from the first section, one from the second)", got)
 	}
 }
 
