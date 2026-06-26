@@ -20,20 +20,20 @@ until a complete pass is clean. Then restore the instance to pristine and end.
 - [x] Onboarding: Profile (fill + save; validation)
 - [x] Onboarding: Connect — SAM key field/connected state
 - [x] Onboarding: Connect — single Upload-document button (upload works)
-- [ ] Onboarding: Connect — Google Drive button (expected redirect_uri_mismatch, graceful)
+- [x] Onboarding: Connect — Google Drive button (expected redirect_uri_mismatch, graceful)
 - [x] Onboarding: Done summary
-- [ ] First-run redirect (no profile → onboarding)
-- [ ] Capability map view (built from profile + doc; sources cited)
+- [x] First-run redirect (no profile → onboarding)
+- [x] Capability map view (built from profile + doc; sources cited)
 - [x] Opportunities board (list, scores, stage filters, sort)
-- [ ] Opportunity detail (capability match, deadline pill)
-- [ ] Select → Zone-2 draft (status transitions)
-- [ ] Proposal/editor screen (sections render, edit, approve/request-changes)
-- [ ] Submitted screen (if reachable)
-- [ ] /help page
-- [ ] Sidebar/nav links
-- [ ] Security headers present on pages; gate blocks no-session
-- [ ] Responsive (mobile/tablet/desktop)
-- [ ] Console errors + failed network requests across all pages
+- [x] Opportunity detail (capability match, deadline pill)
+- [x] Select → Zone-2 draft (status transitions)
+- [x] Proposal/editor screen (sections render, edit, approve/request-changes)
+- [x] Submitted screen (if reachable)
+- [x] /help page
+- [x] Sidebar/nav links
+- [x] Security headers present on pages; gate blocks no-session
+- [x] Responsive (mobile/tablet/desktop)
+- [x] Console errors + failed network requests across all pages
 
 ## Loop protocol (each iteration)
 1. Browse a slice of components; record findings under "## Findings".
@@ -67,6 +67,16 @@ until a complete pass is clean. Then restore the instance to pristine and end.
 ## Patch plan
 - [x] CSP `font-src 'self' data:` — FIXED (commit on feat/pilot-qa), deployed rev 00023-v82, verified board console clean. Test asserts font-src + img-src allow data:.
 - [ ] (low/a11y) profile textareas (NAICS, competencies) not enumerated by `snapshot -i` → likely missing `<label for>`/aria-label association. Polish, not a blocker.
+
+### Iteration 3 — capability map → board → detail → select → draft → editor → nav → responsive (CLEAN)
+- Capability map: synthesized correctly from the saved profile (Ey3 Technologies QA, Zero Trust, NAICS 541512); competencies + differentiators. Console CLEAN.
+- Opportunity detail: score + rationale + capability match + "Select to pursue". Console CLEAN. (Score rationale reflects the profile at hunt-time — expected.)
+- Select → /workspace: full Zone-2 pipeline ran (Outline→Writer→needs_human), 5 sections, 9872 chars, **9 "Ey3" mentions** (runtime-profile fix holds). Editor: inline-editable sections, [GAP:] markers, "Approve & resume"/"Request changes". Console CLEAN.
+- /help → 302 to board (no dedicated help page; nothing links to it — low priority). Proposals + Submitted pages render (gated). Sidebar nav works (Opportunities/Proposals/Submitted counts). Onboarding welcome console re-verified CLEAN.
+- Drive button → /api/v1/integrations/drive/connect (correct OAuth-start; redirect_uri_mismatch pending the Google-console step, not a code bug). No failed network requests on /, /opportunity, /workspace, /capability-map. Gate blocks no-session (302 / 401 JSON).
+
+## VERDICT: clean full sweep — 1 real bug found + fixed (CSP fonts), 0 remaining blockers.
+Low-priority follow-ups (non-blocking): /help redirects to board; profile textareas (NAICS/competencies) lack label/aria associations.
 
 ## Progress log
 - 2026-06-26: goal created; browser verified. **Iteration 1 done: onboarding (all 5 steps) visually + console clean, upload-button fix confirmed live, no defects.** Next: functional onboarding (save profile + upload doc) → capability map → board → detail → select/draft → editor; then help/responsive/edge cases.
