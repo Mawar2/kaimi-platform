@@ -38,8 +38,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/Mawar2/Kaimi/internal/config"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/pipeline"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/samgov"
@@ -68,6 +70,30 @@ func run() error {
 	// Abort gracefully on Ctrl+C rather than killing mid-write.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// Wire the privacy-first telemetry pipeline. It is ADDITIVE and on by default
+	// (config.Telemetry.Enabled; set KAIMI_TELEMETRY_ENABLED=false to disable).
+	// kobs.Setup installs the process-wide emitter — until then every Scorer LLM
+	// trace is a no-op — and the deferred Shutdown flushes the JSONL log on the way
+	// out, so a completed run leaves a durable event log. The LiveSink it returns
+	// is discarded here: the batch pipeline serves no live stream (that seam is
+	// consumed by the long-running servers); a flush on exit is all this binary
+	// needs.
+	if cfg.Telemetry.Enabled {
+		telDir := cfg.TelemetryDir(cfg.Store.Path)
+		_, em, terr := kobs.Setup(telDir, cfg.Telemetry.BufferSize)
+		if terr != nil {
+			return fmt.Errorf("set up telemetry: %w", terr)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if serr := em.Shutdown(shutdownCtx); serr != nil {
+				log.Printf("telemetry shutdown: %v", serr)
+			}
+		}()
+		log.Printf("Telemetry enabled (event log under %s)", telDir)
+	}
 
 	// One profile feeds both the Hunter gate and the Scorer (WS-A3). The Hunter
 	// uses the structured eligibility facts (NAICS tiers, set-aside flags) directly;

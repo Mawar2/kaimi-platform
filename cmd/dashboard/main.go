@@ -23,6 +23,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/config"
 	"github.com/Mawar2/Kaimi/internal/dashboard"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
 	"github.com/Mawar2/Kaimi/internal/store"
 )
@@ -111,6 +112,29 @@ func run() error {
 	s, err := store.NewJSONStore(*storePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize store: %w", err)
+	}
+
+	// Wire the privacy-first telemetry pipeline. It is ADDITIVE and on by default
+	// (config.Telemetry.Enabled; set KAIMI_TELEMETRY_ENABLED=false to disable).
+	// kobs.Setup installs the process-wide emitter (until then all instrumentation
+	// is a no-op) and the deferred Shutdown flushes the JSONL log on exit. The
+	// returned LiveSink is the seam T0.9's SSE Monitor mounts over; this
+	// offline-dev binary serves no live route yet, so it is held but unused.
+	if cfg.Telemetry.Enabled {
+		telDir := cfg.TelemetryDir(*storePath)
+		live, em, terr := kobs.Setup(telDir, cfg.Telemetry.BufferSize)
+		if terr != nil {
+			return fmt.Errorf("set up telemetry: %w", terr)
+		}
+		_ = live // TODO(T0.9): mount the SSE Monitor over this LiveSink.
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if serr := em.Shutdown(shutdownCtx); serr != nil {
+				log.Printf("telemetry shutdown: %v", serr)
+			}
+		}()
+		log.Printf("Telemetry enabled (event log under %s)", telDir)
 	}
 
 	proposals, err := proposalwiring.New(context.Background(), &cfg, proposalwiring.Options{

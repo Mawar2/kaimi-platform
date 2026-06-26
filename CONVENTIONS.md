@@ -1,6 +1,6 @@
 # CONVENTIONS.md — Kaimi
 
-**Last updated:** 2026-06-09
+**Last updated:** 2026-06-26
 
 How code is organized, named, tested, and shipped in this repo. These conventions
 exist to prevent the 47-file chaos failure mode. Honor them. If you need to introduce
@@ -148,6 +148,32 @@ Before introducing any new pattern (error handling, logging, config, etc.):
    documenting why it is needed and how it differs from existing patterns.
 
 No new convention is introduced without updating this file.
+
+### Telemetry config + a default-on boolean knob (T0.8)
+
+The telemetry pipeline is configured through `internal/config` like every other
+tenant input, with three knobs on `Config.Telemetry`:
+
+- `KAIMI_TELEMETRY_ENABLED` (`telemetry.enabled`) — **defaults to on**. Because a
+  plain `bool`'s zero value (`false`) cannot be told apart from an explicit
+  `enabled: false`, `Load` *seeds* `Telemetry.Enabled = true` before the
+  file/env layers run. `yaml.Unmarshal` only overwrites keys present in the file
+  and the env overlay only overwrites when the var is set, so the seed survives
+  as the default while `enabled: false` (file) or `KAIMI_TELEMETRY_ENABLED=false`
+  (env) still disable it — preserving the `env > file > default` precedence. A
+  malformed env value stays enabled (additive observability fails safe-on).
+- `KAIMI_TELEMETRY_PATH` (`telemetry.path`) — event-log directory; empty derives
+  `<store path>/telemetry` via `Config.TelemetryDir`.
+- `KAIMI_TELEMETRY_BUFFER_SIZE` (`telemetry.buffer_size`) — emitter buffer; `0`
+  uses the emitter default.
+
+Use this seed-before-load approach for any future **default-on** boolean config
+field. Default-off booleans need no seed (the zero value is already the default).
+
+The process-wide emitter is built in exactly one place — `kobs.Setup(dir,
+bufferSize)` — which every binary (`cmd/api`, `cmd/pipeline`, `cmd/dashboard`)
+calls, so the privacy boundary (`redact.Gate` with `Central: nil`, no content
+egress) lives in a single, testable function.
 
 ---
 
