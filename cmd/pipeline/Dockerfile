@@ -19,6 +19,10 @@ WORKDIR /src
 # Download modules first so Docker layer caching skips re-downloading
 # dependencies when only source files change.
 COPY go.mod go.sum ./
+# The telemetry core is an in-tree nested module consumed via a local replace
+# (replace github.com/Mawar2/kaimi-telemetry => ./telemetry); its go.mod must exist
+# before `go mod download` can resolve that replace.
+COPY telemetry/go.mod ./telemetry/
 RUN go mod download
 
 COPY . .
