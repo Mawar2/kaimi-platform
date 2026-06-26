@@ -46,7 +46,7 @@ import (
 // fakes in proposal_test.go, which a separate test package cannot reach.
 type fakeOutline struct{}
 
-func (fakeOutline) Run(_ context.Context, opp *opportunity.Opportunity, _ map[string]string) (*outline.Outline, *agent.Result, error) {
+func (fakeOutline) Run(_ context.Context, opp *opportunity.Opportunity, _ *scorer.CapabilityProfile, _ map[string]string) (*outline.Outline, *agent.Result, error) {
 	out := &outline.Outline{
 		OpportunityID: opp.ID,
 		Title:         opp.Title,

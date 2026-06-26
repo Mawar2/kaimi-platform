@@ -8,6 +8,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/fallback"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 func init() {
@@ -112,7 +113,7 @@ type recordingPlanner struct {
 	calls      int
 }
 
-func (r *recordingPlanner) PlanSections(_ context.Context, _ *opportunity.Opportunity, _ string) ([]outline.Section, error) {
+func (r *recordingPlanner) PlanSections(_ context.Context, _ *opportunity.Opportunity, _ *scorer.CapabilityProfile, _ string) ([]outline.Section, error) {
 	r.calls++
 	if r.failNTimes > 0 {
 		r.failNTimes--
@@ -126,7 +127,7 @@ func TestPlanner_PrimarySucceeds_BackupUntouched(t *testing.T) {
 	backup := &recordingPlanner{sections: []outline.Section{{ID: "other", Title: "Other"}}}
 	p := fallback.NewPlanner(primary, backup)
 
-	got, err := p.PlanSections(context.Background(), nil, "source")
+	got, err := p.PlanSections(context.Background(), nil, nil, "source")
 	if err != nil || len(got) != 1 || got[0].ID != "exec" {
 		t.Fatalf("got (%v, %v), want primary's sections", got, err)
 	}
@@ -141,7 +142,7 @@ func TestPlanner_TransientThenRecovers_SameOption(t *testing.T) {
 	backup := &recordingPlanner{sections: []outline.Section{{ID: "other", Title: "Other"}}}
 	p := fallback.NewPlanner(primary, backup)
 
-	got, err := p.PlanSections(context.Background(), nil, "source")
+	got, err := p.PlanSections(context.Background(), nil, nil, "source")
 	if err != nil || len(got) != 1 || got[0].ID != "exec" {
 		t.Fatalf("got (%v, %v), want primary's sections after retry", got, err)
 	}
@@ -158,7 +159,7 @@ func TestPlanner_NonTransient_FailsOverImmediately(t *testing.T) {
 	backup := &recordingPlanner{sections: []outline.Section{{ID: "other", Title: "Other"}}}
 	p := fallback.NewPlanner(primary, backup)
 
-	got, err := p.PlanSections(context.Background(), nil, "source")
+	got, err := p.PlanSections(context.Background(), nil, nil, "source")
 	if err != nil || len(got) != 1 || got[0].ID != "other" {
 		t.Fatalf("got (%v, %v), want backup's sections", got, err)
 	}
@@ -172,7 +173,7 @@ func TestPlanner_AllFail_ReturnsLastError_NoStub(t *testing.T) {
 	backup := &recordingPlanner{err: errors.New("backup down")}
 	p := fallback.NewPlanner(primary, backup)
 
-	got, err := p.PlanSections(context.Background(), nil, "source")
+	got, err := p.PlanSections(context.Background(), nil, nil, "source")
 	if got != nil {
 		t.Errorf("expected nil sections when all options fail (no stub), got %v", got)
 	}

@@ -372,7 +372,7 @@ func (s *Service) runDraftPipeline(ctx context.Context, oppID string) {
 	kobs.EmitProposal("proposal.outline.started", tenant, oppID, "outline", kobs.AgentOutline, 0,
 		kobs.ProposalID(oppID), kobs.ProposalStage("outline"))
 
-	out, res, err := s.deps.Outline.Run(ctx, opp, documents)
+	out, res, err := s.deps.Outline.Run(ctx, opp, s.currentProfile(), documents)
 	if err != nil || res == nil || res.IsFailed() || out == nil {
 		kobs.EmitProposal("proposal.outline.failed", tenant, oppID, "outline", kobs.AgentOutline,
 			s.Now().Sub(outlineStart).Milliseconds(),
@@ -568,6 +568,7 @@ func (s *Service) runFinalReview(ctx context.Context, oppID string) {
 		Opportunity: opp,
 		Outline:     outlineFromDocument(doc),
 		Documents:   s.cachedDocText(oppID),
+		Profile:     s.currentProfile(),
 	})
 	if err != nil || res == nil {
 		s.failStatus(ctx, oppID, "final-review:failed")

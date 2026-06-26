@@ -17,6 +17,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/googledocs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 const agentName = "outline"
@@ -69,17 +70,22 @@ type Outline struct {
 type SectionPlanner interface {
 	// PlanSections returns the ordered proposal sections for the opportunity.
 	// source is the combined opportunity description plus extracted document text.
-	// It must return at least one section or a non-nil error — never an empty,
-	// error-free result (which would yield a silently empty outline).
-	PlanSections(ctx context.Context, opp *opportunity.Opportunity, source string) ([]Section, error)
+	// profile is the bidding company's capability profile (may be nil), provided so
+	// a planner can emphasize sections the company can support; the section structure
+	// must still be driven by the solicitation, not the company. It must return at
+	// least one section or a non-nil error — never an empty, error-free result
+	// (which would yield a silently empty outline).
+	PlanSections(ctx context.Context, opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, source string) ([]Section, error)
 }
 
 // deterministicPlanner is the default SectionPlanner: it derives sections from the
 // opportunity and source text with the rule-based buildSections. It never errors.
 type deterministicPlanner struct{}
 
-// PlanSections implements SectionPlanner using the rule-based buildSections.
-func (deterministicPlanner) PlanSections(_ context.Context, opp *opportunity.Opportunity, source string) ([]Section, error) {
+// PlanSections implements SectionPlanner using the rule-based buildSections. The
+// company profile is unused here — the deterministic rules derive sections from the
+// solicitation alone; profile grounding is a Gemini-planner concern.
+func (deterministicPlanner) PlanSections(_ context.Context, opp *opportunity.Opportunity, _ *scorer.CapabilityProfile, source string) ([]Section, error) {
 	return buildSections(opp, source), nil
 }
 
@@ -124,7 +130,7 @@ func NewWithPlanner(docsClient googledocs.Client, planner SectionPlanner) *Agent
 // The section structure comes from the configured SectionPlanner (deterministic
 // by default, gemini-3.5-flash when constructed with NewWithPlanner); formatting
 // rules are always extracted deterministically.
-func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents map[string]string) (*Outline, *agent.Result, error) {
+func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, documents map[string]string) (*Outline, *agent.Result, error) {
 	if opp == nil {
 		return nil, &agent.Result{
 			AgentName: agentName,
@@ -141,7 +147,7 @@ func (a *Agent) Run(ctx context.Context, opp *opportunity.Opportunity, documents
 	}
 
 	source := combinedSource(opp, documents)
-	sections, err := planner.PlanSections(ctx, opp, source)
+	sections, err := planner.PlanSections(ctx, opp, profile, source)
 	if err != nil {
 		return nil, &agent.Result{
 			AgentName:   agentName,

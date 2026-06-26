@@ -7,6 +7,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 // fakePlanner is a colocated test double for SectionPlanner so the agent's
@@ -18,7 +19,7 @@ type fakePlanner struct {
 	gotSrc   string
 }
 
-func (f *fakePlanner) PlanSections(_ context.Context, opp *opportunity.Opportunity, source string) ([]Section, error) {
+func (f *fakePlanner) PlanSections(_ context.Context, opp *opportunity.Opportunity, _ *scorer.CapabilityProfile, source string) ([]Section, error) {
 	f.gotOpp = opp
 	f.gotSrc = source
 	return f.sections, f.err
@@ -43,7 +44,7 @@ func TestOutlineAgent_UsesInjectedPlanner(t *testing.T) {
 	}}
 	a := NewWithPlanner(succeedingDocsClient(), planner)
 
-	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil)
+	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestOutlineAgent_UsesInjectedPlanner(t *testing.T) {
 func TestOutlineAgent_PlannerError(t *testing.T) {
 	a := NewWithPlanner(succeedingDocsClient(), &fakePlanner{err: errors.New("model unavailable")})
 
-	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil)
+	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil, nil)
 	if err == nil {
 		t.Fatal("expected an error when the planner fails, got nil")
 	}
@@ -84,7 +85,7 @@ func TestOutlineAgent_PlannerError(t *testing.T) {
 func TestOutlineAgent_PlannerReturnsNoSections(t *testing.T) {
 	a := NewWithPlanner(succeedingDocsClient(), &fakePlanner{sections: nil})
 
-	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil)
+	outline, res, err := a.Run(context.Background(), plannerTestOpp(), nil, nil)
 	if err == nil {
 		t.Fatal("expected an error when the planner returns zero sections, got nil")
 	}
@@ -99,7 +100,7 @@ func TestDeterministicPlanner_MatchesBuildSections(t *testing.T) {
 	opp := plannerTestOpp()
 	source := combinedSource(opp, nil)
 
-	got, err := deterministicPlanner{}.PlanSections(context.Background(), opp, source)
+	got, err := deterministicPlanner{}.PlanSections(context.Background(), opp, nil, source)
 	if err != nil {
 		t.Fatalf("deterministic planner error: %v", err)
 	}

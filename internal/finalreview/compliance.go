@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 // complianceSystemInstruction is delivered as a system instruction (not in the
@@ -60,9 +61,9 @@ func (a *Agent) runCompliance(ctx context.Context, in Input) []string {
 	// still runs in deployments without document ingestion (issue #264).
 	var prompt string
 	if len(in.Documents) > 0 {
-		prompt = buildCompliancePrompt(in.Draft, in.Documents)
+		prompt = buildCompliancePrompt(in.Draft, in.Profile, in.Documents)
 	} else {
-		prompt = buildOpportunityCompliancePrompt(in.Draft, in.Opportunity)
+		prompt = buildOpportunityCompliancePrompt(in.Draft, in.Profile, in.Opportunity)
 	}
 
 	raw, err := a.checker.CheckCompliance(ctx, complianceSystemInstruction, prompt)
@@ -91,12 +92,14 @@ func (a *Agent) runCompliance(ctx context.Context, in Input) []string {
 
 // buildCompliancePrompt assembles the grounded user prompt: the draft followed by
 // the full solicitation document text, in a stable filename order.
-func buildCompliancePrompt(draft string, documents map[string]string) string {
+func buildCompliancePrompt(draft string, profile *scorer.CapabilityProfile, documents map[string]string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Proposal draft to evaluate\n")
 	sb.WriteString(draft)
 	sb.WriteString("\n\n")
+
+	writeBiddingCompanyFacts(&sb, profile)
 
 	sb.WriteString("## Solicitation documents (the only source of mandatory requirements)\n")
 	names := make([]string, 0, len(documents))
@@ -115,16 +118,52 @@ func buildCompliancePrompt(draft string, documents map[string]string) string {
 	return sb.String()
 }
 
+// writeBiddingCompanyFacts appends the bidding company's facts so the compliance
+// reviewer can flag draft claims the company cannot actually support (an
+// unsupported certification, past performance it does not hold). It writes nothing
+// when no profile or no usable fields are present, so the prompt never implies
+// company facts that were not provided. These are the company's TRUE capabilities,
+// distinct from the solicitation requirements the draft is graded against.
+func writeBiddingCompanyFacts(sb *strings.Builder, profile *scorer.CapabilityProfile) {
+	if profile == nil {
+		return
+	}
+	var body strings.Builder
+	if c := strings.TrimSpace(profile.Company); c != "" {
+		fmt.Fprintf(&body, "Company: %s\n", c)
+	}
+	if len(profile.CompetencyTags) > 0 {
+		fmt.Fprintf(&body, "Competencies: %s\n", strings.Join(profile.CompetencyTags, ", "))
+	}
+	if len(profile.PastPerformance) > 0 {
+		fmt.Fprintf(&body, "Past performance: %s\n", strings.Join(profile.PastPerformance, ", "))
+	}
+	if len(profile.PrimaryNAICS) > 0 {
+		fmt.Fprintf(&body, "Primary NAICS: %s\n", strings.Join(profile.PrimaryNAICS, ", "))
+	}
+	if profile.SDBStatus {
+		body.WriteString("Small Disadvantaged Business: yes\n")
+	}
+	if body.Len() == 0 {
+		return
+	}
+	sb.WriteString("## Bidding company facts (the company's TRUE capabilities — flag any draft claim these cannot support)\n")
+	sb.WriteString(body.String())
+	sb.WriteString("\n")
+}
+
 // buildOpportunityCompliancePrompt assembles the fallback user prompt for
 // deployments without document ingestion: the draft followed by a solicitation
 // summary built from the opportunity's own fields. The summary is clearly
 // labeled so the model knows it is not seeing full solicitation documents.
-func buildOpportunityCompliancePrompt(draft string, opp *opportunity.Opportunity) string {
+func buildOpportunityCompliancePrompt(draft string, profile *scorer.CapabilityProfile, opp *opportunity.Opportunity) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Proposal draft to evaluate\n")
 	sb.WriteString(draft)
 	sb.WriteString("\n\n")
+
+	writeBiddingCompanyFacts(&sb, profile)
 
 	sb.WriteString("## Solicitation summary (the only source of mandatory requirements; full documents unavailable)\n")
 	fmt.Fprintf(&sb, "Title: %s\n", opp.Title)

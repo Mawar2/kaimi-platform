@@ -238,7 +238,7 @@ func TestGuards(t *testing.T) {
 // telemetry path (and that no writer telemetry follows).
 type failingOutline struct{}
 
-func (failingOutline) Run(_ context.Context, _ *opportunity.Opportunity, _ map[string]string) (*outline.Outline, *agent.Result, error) {
+func (failingOutline) Run(_ context.Context, _ *opportunity.Opportunity, _ *scorer.CapabilityProfile, _ map[string]string) (*outline.Outline, *agent.Result, error) {
 	return nil, nil, errors.New("outline boom")
 }
 

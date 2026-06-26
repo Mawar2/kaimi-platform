@@ -296,7 +296,7 @@ func processOpportunities(ctx context.Context, opps []*opportunity.Opportunity) 
 		}
 		fmt.Println()
 
-		ol, result, err := ag.Run(ctx, opp, nil)
+		ol, result, err := ag.Run(ctx, opp, nil, nil)
 		if err != nil {
 			fmt.Printf("  ERROR: %v\n\n", err)
 			continue

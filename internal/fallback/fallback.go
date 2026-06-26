@@ -24,6 +24,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/finalreview"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/writer"
 )
 
@@ -145,12 +146,12 @@ func NewPlanner(primary outline.SectionPlanner, backups ...outline.SectionPlanne
 	return &planner{options: append([]outline.SectionPlanner{primary}, backups...)}
 }
 
-func (p *planner) PlanSections(ctx context.Context, opp *opportunity.Opportunity, source string) ([]outline.Section, error) {
+func (p *planner) PlanSections(ctx context.Context, opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, source string) ([]outline.Section, error) {
 	options := make([]func(context.Context) ([]outline.Section, error), len(p.options))
 	for i := range p.options {
 		pl := p.options[i]
 		options[i] = func(ctx context.Context) ([]outline.Section, error) {
-			return pl.PlanSections(ctx, opp, source)
+			return pl.PlanSections(ctx, opp, profile, source)
 		}
 	}
 	return run(ctx, "outline", options)

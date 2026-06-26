@@ -8,6 +8,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/ingest"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 	"github.com/Mawar2/Kaimi/internal/writer"
 )
 
@@ -27,7 +28,7 @@ type Ingestor interface {
 // the ingested solicitation document text. The concrete *outline.Agent satisfies
 // this.
 type OutlineRunner interface {
-	Run(ctx context.Context, opp *opportunity.Opportunity, documents map[string]string) (*outline.Outline, *agent.Result, error)
+	Run(ctx context.Context, opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, documents map[string]string) (*outline.Outline, *agent.Result, error)
 }
 
 // WriterRunner produces a draft and a Result from a writer.Input.

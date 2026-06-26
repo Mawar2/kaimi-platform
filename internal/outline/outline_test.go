@@ -72,7 +72,7 @@ func TestOutlineAgent_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	a := New(succeedingDocsClient())
 
-	outline, result, err := a.Run(ctx, baseOpportunity(), nil)
+	outline, result, err := a.Run(ctx, baseOpportunity(), nil, nil)
 
 	if err != nil {
 		t.Fatalf("Run() returned unexpected error: %v", err)
@@ -128,7 +128,7 @@ func TestOutlineAgent_GroundsOnDocuments(t *testing.T) {
 		"Section_L.pdf": "Proposals are limited to 15 pages. Offerors shall identify key personnel by name. Submit a completed SF-330.",
 	}
 
-	outline, result, err := a.Run(ctx, opp, documents)
+	outline, result, err := a.Run(ctx, opp, nil, documents)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestOutlineAgent_DocCreationFails(t *testing.T) {
 	wantErr := errors.New("drive: permission denied")
 	a := New(failingDocsClient(wantErr))
 
-	outline, result, err := a.Run(ctx, baseOpportunity(), nil)
+	outline, result, err := a.Run(ctx, baseOpportunity(), nil, nil)
 
 	if err == nil {
 		t.Fatal("Run() should return an error when Doc creation fails")
@@ -211,7 +211,7 @@ func TestOutlineAgent_NilOpportunity(t *testing.T) {
 	ctx := context.Background()
 	a := New(succeedingDocsClient())
 
-	outline, result, err := a.Run(ctx, nil, nil)
+	outline, result, err := a.Run(ctx, nil, nil, nil)
 
 	if err == nil {
 		t.Fatal("Run() should return an error when opportunity is nil")
@@ -543,7 +543,7 @@ func TestOutlineAgent_FormattingRulesNonNil(t *testing.T) {
 	opp := baseOpportunity()
 	opp.Description = ""
 
-	outline, _, err := New(succeedingDocsClient()).Run(context.Background(), opp, nil)
+	outline, _, err := New(succeedingDocsClient()).Run(context.Background(), opp, nil, nil)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
