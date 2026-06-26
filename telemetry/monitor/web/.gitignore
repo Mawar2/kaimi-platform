@@ -1,0 +1,15 @@
+# Node dependencies — never commit; reinstall with `npm install`.
+node_modules/
+
+# Vite caches and logs.
+.vite/
+node_modules/.vite/
+*.local
+
+# Editor/OS noise.
+.DS_Store
+
+# NOTE: dist/ is intentionally NOT ignored. The built bundle is embedded via
+# go:embed and must be committed so `go build ./...` works without npm.
+
+*.tsbuildinfo
