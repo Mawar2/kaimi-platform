@@ -14,17 +14,17 @@ until a complete pass is clean. Then restore the instance to pristine and end.
 - **Code/deploy:** worktree C:/Users/Owner/Kaimi-sec, branch feat/pilot-qa (off main); deploy api img → `gcloud run services update pilot-kaimi-api`.
 
 ## Component checklist (each: renders? functional? console clean? visual ok?)
-- [ ] Login (access link → session → onboarding)
-- [ ] Onboarding: Welcome
-- [ ] Onboarding: License (verified key)
-- [ ] Onboarding: Profile (fill + save; validation)
-- [ ] Onboarding: Connect — SAM key field/connected state
-- [ ] Onboarding: Connect — single Upload-document button (upload works)
+- [x] Login (access link → session → onboarding)
+- [x] Onboarding: Welcome
+- [x] Onboarding: License (verified key)
+- [x] Onboarding: Profile (fill + save; validation)
+- [x] Onboarding: Connect — SAM key field/connected state
+- [x] Onboarding: Connect — single Upload-document button (upload works)
 - [ ] Onboarding: Connect — Google Drive button (expected redirect_uri_mismatch, graceful)
-- [ ] Onboarding: Done summary
+- [x] Onboarding: Done summary
 - [ ] First-run redirect (no profile → onboarding)
 - [ ] Capability map view (built from profile + doc; sources cited)
-- [ ] Opportunities board (list, scores, stage filters, sort)
+- [x] Opportunities board (list, scores, stage filters, sort)
 - [ ] Opportunity detail (capability match, deadline pill)
 - [ ] Select → Zone-2 draft (status transitions)
 - [ ] Proposal/editor screen (sections render, edit, approve/request-changes)
@@ -56,8 +56,17 @@ until a complete pass is clean. Then restore the instance to pristine and end.
 - Deep-link a wizard step: `$B goto $U/onboarding?step=<welcome|license|profile|connect|done>`.
 - Board/detail/draft are gated behind a saved profile (first-run redirects "/" → onboarding) — must complete onboarding (save profile) first; that writes data to clean up at loop end.
 
+### Iteration 2 — functional onboarding + board
+- Profile save works in-browser: filled company/NAICS/competencies/set-aside → advanced to Connect; persisted to profile.json (naics stored under `naics_codes`). 0 console errors on save.
+- **BUG (fixed): CSP blocked the dashboard's embedded `data:` web fonts on every page.** CSP had `img-src data:` but no `font-src`, so fonts fell back to `default-src 'self'` and the browser blocked them (UI silently degraded to system fonts). Browser-only catch (curl can't see it).
+- Board (/) renders: opportunities list, fit-score rings, stage counts, sidebar. After the fix + cache-bust: **0 console errors**.
+
+### Tooling notes (added)
+- The browse server PERSISTS a console buffer + a persistent browser PROFILE/cache (/c/Users/Owner/.gemini/antigravity-browser-profile) across kills → stale console + cached pages. **Before each console check: `$B console --clear`, then load a CACHE-BUSTED url (`?qa=<nanos>`), then `$B console --errors`.** (Iteration-1 onboarding "0 errors" was likely an unreliable read — RE-VERIFY onboarding console with this method.)
+
 ## Patch plan
-- None yet — iteration 1 clean.
+- [x] CSP `font-src 'self' data:` — FIXED (commit on feat/pilot-qa), deployed rev 00023-v82, verified board console clean. Test asserts font-src + img-src allow data:.
+- [ ] (low/a11y) profile textareas (NAICS, competencies) not enumerated by `snapshot -i` → likely missing `<label for>`/aria-label association. Polish, not a blocker.
 
 ## Progress log
 - 2026-06-26: goal created; browser verified. **Iteration 1 done: onboarding (all 5 steps) visually + console clean, upload-button fix confirmed live, no defects.** Next: functional onboarding (save profile + upload doc) → capability map → board → detail → select/draft → editor; then help/responsive/edge cases.
