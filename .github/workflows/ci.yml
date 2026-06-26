@@ -638,7 +638,10 @@ jobs:
       github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://console.cloud.google.com/run?project=${{ secrets.GCP_PROJECT_ID }}
+      # NOTE: environment.url cannot reference the `secrets` context (GitHub
+      # rejects the whole workflow at startup — "invalid workflow file"). Use a
+      # static console URL; the deploy job itself still uses secrets.* in steps.
+      url: https://console.cloud.google.com/run
 
     steps:
     - name: Checkout code
