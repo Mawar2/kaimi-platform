@@ -97,7 +97,7 @@ type DriveStatus struct {
 	// Target is the configured target Drive/folder id, or "" when none is set.
 	Target string
 	// TargetName is the human-readable destination label (e.g. the folder name
-	// "Kaimi Proposals"), or "" when unknown — in which case the UI falls back to
+	// "Kaimi Federal Proposals"), or "" when unknown — in which case the UI falls back to
 	// showing the id. It is populated where the name is known (the WS-C5a
 	// auto-created folder); a manually-pasted id has no resolvable name.
 	TargetName string
@@ -351,7 +351,7 @@ type OnboardingData struct {
 // onboarding page (WS-C5b/C5d). Exactly one of IsFolder / IsRoot is true, or both
 // are false meaning "not set yet". When IsFolder is true, FolderID holds the id,
 // OpenURL the Drive web link, and Label the text to show — the folder name when
-// known, otherwise the id (so the user sees "Kaimi Proposals", not an opaque id).
+// known, otherwise the id (so the user sees "Kaimi Federal Proposals", not an opaque id).
 type driveDestView struct {
 	IsFolder bool
 	IsRoot   bool

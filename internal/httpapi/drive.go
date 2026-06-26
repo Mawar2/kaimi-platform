@@ -18,7 +18,7 @@ import (
 // defaultDriveFolderName is the name of the folder auto-created in the customer's
 // Drive when they connect (WS-C5a), so generated proposal Docs have a tidy home
 // without the user having to pick a destination first.
-const defaultDriveFolderName = "Kaimi Proposals"
+const defaultDriveFolderName = "Kaimi Federal Proposals"
 
 // This file implements the WS-C2 customer-Drive connect flow: the endpoints that
 // let a deployment connect the CUSTOMER's own Google Workspace/Drive so generated
@@ -212,7 +212,7 @@ func (h *DriveHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
-// ensureDefaultTarget auto-creates the default "Kaimi Proposals" folder in the
+// ensureDefaultTarget auto-creates the default "Kaimi Federal Proposals" folder in the
 // customer's Drive and persists it as the target, but ONLY when no target has been
 // set yet (WS-C5a). It is best-effort by contract: the token is already persisted by
 // the time this runs, so any error here is logged as a warning and swallowed — the
