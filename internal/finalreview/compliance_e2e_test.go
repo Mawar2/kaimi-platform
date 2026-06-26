@@ -49,7 +49,7 @@ func TestCompliance_E2E_LiveGemini(t *testing.T) {
 			"Offerors shall provide a 5-page technical approach.",
 	}
 
-	prompt := buildCompliancePrompt(draft, documents)
+	prompt := buildCompliancePrompt(draft, nil, documents)
 	raw, err := checker.CheckCompliance(ctx, complianceSystemInstruction, prompt)
 	if err != nil {
 		t.Fatalf("CheckCompliance: %v", err)

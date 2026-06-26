@@ -10,6 +10,7 @@ import (
 
 	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 // outlinePlannerSystemInstruction tells the model its job is to identify the
@@ -65,9 +66,9 @@ func NewGeminiSectionPlanner(ctx context.Context, projectID, location, modelName
 // requests structured JSON and parses it into the Section list. It never returns
 // an empty, error-free result: a blocked response or a section-less plan is an
 // error so the agent halts rather than producing a silently empty outline.
-func (g *GeminiSectionPlanner) PlanSections(ctx context.Context, opp *opportunity.Opportunity, source string) ([]Section, error) {
+func (g *GeminiSectionPlanner) PlanSections(ctx context.Context, opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, source string) ([]Section, error) {
 	contents := []*genai.Content{
-		genai.NewContentFromText(buildPlannerPrompt(opp, source), genai.RoleUser),
+		genai.NewContentFromText(buildPlannerPrompt(opp, profile, source), genai.RoleUser),
 	}
 
 	resp, err := kobs.GenerateContent(ctx, g.client, g.modelName, contents, outlineGenerateConfig())
@@ -135,7 +136,7 @@ func outlineResponseSchema() *genai.Schema {
 
 // buildPlannerPrompt assembles the grounded user prompt: the opportunity facts and
 // the combined solicitation text the model plans against.
-func buildPlannerPrompt(opp *opportunity.Opportunity, source string) string {
+func buildPlannerPrompt(opp *opportunity.Opportunity, profile *scorer.CapabilityProfile, source string) string {
 	var sb strings.Builder
 	sb.WriteString("## Opportunity\n")
 	fmt.Fprintf(&sb, "Title: %s\n", opp.Title)
@@ -144,9 +145,37 @@ func buildPlannerPrompt(opp *opportunity.Opportunity, source string) string {
 	if opp.SetAsideCode != "" {
 		fmt.Fprintf(&sb, "Set-aside: %s\n", opp.SetAsideCode)
 	}
+	writePlannerCompanyContext(&sb, profile)
 	sb.WriteString("\n## Solicitation text (plan the sections from this)\n")
 	sb.WriteString(source)
 	return sb.String()
+}
+
+// writePlannerCompanyContext appends a short bidding-company context block so the
+// planner can emphasize and order sections the company is positioned to win (e.g.
+// ensure a past-performance section when the company has relevant history). It is
+// deliberately framed as context, NOT as a section source: the required section
+// STRUCTURE must still come from the solicitation. Writes nothing for a nil/empty
+// profile so the prompt never implies company facts that were not provided.
+func writePlannerCompanyContext(sb *strings.Builder, profile *scorer.CapabilityProfile) {
+	if profile == nil {
+		return
+	}
+	var body strings.Builder
+	if len(profile.CompetencyTags) > 0 {
+		fmt.Fprintf(&body, "Competencies: %s\n", strings.Join(profile.CompetencyTags, ", "))
+	}
+	if len(profile.PrimaryNAICS) > 0 {
+		fmt.Fprintf(&body, "Primary NAICS: %s\n", strings.Join(profile.PrimaryNAICS, ", "))
+	}
+	if len(profile.PastPerformance) > 0 {
+		fmt.Fprintf(&body, "Past performance: %s\n", strings.Join(profile.PastPerformance, ", "))
+	}
+	if body.Len() == 0 {
+		return
+	}
+	sb.WriteString("\n## Bidding company context (emphasize sections this company can support; the required section STRUCTURE must still come from the solicitation)\n")
+	sb.WriteString(body.String())
 }
 
 // plannedSections is the JSON shape the model returns under outlineResponseSchema.

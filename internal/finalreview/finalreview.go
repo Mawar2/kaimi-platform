@@ -11,6 +11,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/agent"
 	"github.com/Mawar2/Kaimi/internal/opportunity"
 	"github.com/Mawar2/Kaimi/internal/outline"
+	"github.com/Mawar2/Kaimi/internal/scorer"
 )
 
 const agentName = "final-review"
@@ -42,6 +43,13 @@ type Input struct {
 	// LLM compliance pass (#164) can vet the draft against the full solicitation;
 	// the current deterministic checks do not use it.
 	Documents map[string]string
+
+	// Profile is the bidding company's capability profile. The LLM compliance pass
+	// uses it to flag claims the draft makes that the company cannot support (e.g. a
+	// certification or past performance it does not actually hold). Optional: when
+	// nil the compliance pass simply omits the company-facts block. The deterministic
+	// checks do not use it.
+	Profile *scorer.CapabilityProfile
 }
 
 // Agent is the Final Review agent.

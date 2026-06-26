@@ -48,7 +48,7 @@ func TestLivePlanSections(t *testing.T) {
 		"and Past Performance volume. Section M: Proposals are evaluated on technical " +
 		"merit, management approach, and past performance relevance."
 
-	sections, err := planner.PlanSections(ctx, opp, source)
+	sections, err := planner.PlanSections(ctx, opp, nil, source)
 	if err != nil {
 		t.Fatalf("PlanSections (%s): %v", model, err)
 	}
