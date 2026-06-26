@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,8 @@ type Config struct {
 	Store   Store   `yaml:"store"`
 	Ingest  Ingest  `yaml:"ingest"`
 	Server  Server  `yaml:"server"`
+
+	Telemetry Telemetry `yaml:"telemetry"`
 }
 
 // Tenant identifies the deployment's owning organization. Forward-compatibility
@@ -120,6 +123,28 @@ type Server struct {
 	Port int    `yaml:"port"` // PORT/-port, default 8900
 }
 
+// Telemetry holds the settings for the local, privacy-first observability
+// pipeline (internal/kobs + the kaimi-telemetry core). The binaries install a
+// process-wide emitter from these values; until one is installed every
+// instrumentation call site is a no-op, so telemetry is purely additive.
+type Telemetry struct {
+	// Enabled turns the telemetry pipeline on. It DEFAULTS to true (on): an
+	// absent setting keeps it enabled, KAIMI_TELEMETRY_ENABLED (or the YAML
+	// `enabled` field) can explicitly disable it, and a malformed env value
+	// stays enabled — keeping the additive observability on the safe side of a
+	// typo. See Load for how the default is seeded ahead of the file/env layers.
+	Enabled bool `yaml:"enabled"`
+	// Path is the directory holding the durable JSONL event log. When empty the
+	// binaries derive it as <store path>/telemetry via Config.TelemetryDir, so
+	// the event log lives alongside the deployment's queue. KAIMI_TELEMETRY_PATH
+	// overrides it.
+	Path string `yaml:"path"`
+	// BufferSize is the emitter's bounded-channel capacity. A value below 1 (the
+	// default) lets the emitter apply its own default. KAIMI_TELEMETRY_BUFFER_SIZE
+	// overrides it.
+	BufferSize int `yaml:"buffer_size"`
+}
+
 // Flags carries values parsed from the command line. Each field is a pointer so
 // Load can distinguish "flag not provided" (nil) from "flag provided with the
 // zero value". A nil *Flags means no command-line overrides at all.
@@ -171,6 +196,15 @@ const (
 // caller's responsibility via ValidateMode / ValidateLive.
 func Load(flags *Flags) (Config, error) {
 	var cfg Config
+
+	// Layer 0 (telemetry default seed): telemetry is ENABLED by default, so seed
+	// it before the file/env layers. yaml.Unmarshal only overwrites fields that
+	// are present in the file, and applyEnv only overwrites when the env var is
+	// set, so this seed survives as the default while an explicit `enabled: false`
+	// (file) or KAIMI_TELEMETRY_ENABLED=false (env) still turns it off. This keeps
+	// the precedence env > file > default for the one boolean knob without the
+	// zero-value ambiguity a plain bool default would carry.
+	cfg.Telemetry.Enabled = true
 
 	// Layer 1 (lowest): config file, if one was named.
 	if flags != nil && flags.ConfigPath != nil && *flags.ConfigPath != "" {
@@ -249,6 +283,20 @@ func applyEnv(cfg *Config) {
 			cfg.Server.Port = n
 		}
 	}
+	// Telemetry: an unset env var leaves the file/seed value untouched. A set but
+	// malformed KAIMI_TELEMETRY_ENABLED is treated as "stay enabled" so a typo
+	// never silently turns observability off.
+	if v := os.Getenv("KAIMI_TELEMETRY_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Telemetry.Enabled = b
+		}
+	}
+	envInto(&cfg.Telemetry.Path, "KAIMI_TELEMETRY_PATH")
+	if v := os.Getenv("KAIMI_TELEMETRY_BUFFER_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Telemetry.BufferSize = n
+		}
+	}
 }
 
 // applyFlags overlays provided (non-nil) command-line flags onto cfg.
@@ -324,6 +372,17 @@ func (c *Config) ValidateLive() error {
 		return fmt.Errorf("GCP_PROJECT_ID is required for live mode: %w", ErrMissingRequired)
 	}
 	return nil
+}
+
+// TelemetryDir returns the directory that holds the telemetry event log. It is
+// the configured Telemetry.Path when set, otherwise <storePath>/telemetry, so by
+// default the event log lives alongside the deployment's opportunity/proposal
+// queue. The directory is created by the telemetry setup, not here.
+func (c *Config) TelemetryDir(storePath string) string {
+	if c.Telemetry.Path != "" {
+		return c.Telemetry.Path
+	}
+	return filepath.Join(storePath, "telemetry")
 }
 
 // envInto overwrites dst with the named env var when it is set and non-empty.

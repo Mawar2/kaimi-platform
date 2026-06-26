@@ -367,11 +367,110 @@ func clearKaimiEnv(t *testing.T) {
 		"GCP_AGENT_REGION",
 		"GEMINI_MODEL", "OUTLINE_MODEL", "FINALREVIEW_MODEL", "PORT", "HOST",
 		"GCS_SOLICITATIONS_BUCKET", "DOCUMENTAI_PROCESSOR_ID", "DOCUMENTAI_LOCATION",
+		"KAIMI_TELEMETRY_ENABLED", "KAIMI_TELEMETRY_PATH", "KAIMI_TELEMETRY_BUFFER_SIZE",
 	}
 	for _, v := range vars {
 		t.Setenv(v, "")
 		if err := os.Unsetenv(v); err != nil {
 			t.Fatalf("unset %s: %v", v, err)
 		}
+	}
+}
+
+func TestLoad_TelemetryDefaults(t *testing.T) {
+	// Telemetry is ENABLED by default; Path is empty (derived from the store path
+	// via TelemetryDir) and BufferSize is 0 (emitter applies its own default).
+	clearKaimiEnv(t)
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.Telemetry.Enabled {
+		t.Error("default Telemetry.Enabled = false, want true")
+	}
+	if cfg.Telemetry.Path != "" {
+		t.Errorf("default Telemetry.Path = %q, want empty", cfg.Telemetry.Path)
+	}
+	if cfg.Telemetry.BufferSize != 0 {
+		t.Errorf("default Telemetry.BufferSize = %d, want 0", cfg.Telemetry.BufferSize)
+	}
+	// With Store.Path at its default, the event log lives under <store>/telemetry.
+	wantDir := filepath.Join(cfg.Store.Path, "telemetry")
+	if got := cfg.TelemetryDir(cfg.Store.Path); got != wantDir {
+		t.Errorf("TelemetryDir = %q, want %q", got, wantDir)
+	}
+}
+
+func TestLoad_TelemetryEnvOverrides(t *testing.T) {
+	clearKaimiEnv(t)
+	setEnv(t, "KAIMI_TELEMETRY_ENABLED", "false")
+	setEnv(t, "KAIMI_TELEMETRY_PATH", "/var/telemetry")
+	setEnv(t, "KAIMI_TELEMETRY_BUFFER_SIZE", "256")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Telemetry.Enabled {
+		t.Error("Telemetry.Enabled = true with KAIMI_TELEMETRY_ENABLED=false, want false")
+	}
+	if cfg.Telemetry.Path != "/var/telemetry" {
+		t.Errorf("Telemetry.Path = %q, want /var/telemetry", cfg.Telemetry.Path)
+	}
+	if cfg.Telemetry.BufferSize != 256 {
+		t.Errorf("Telemetry.BufferSize = %d, want 256", cfg.Telemetry.BufferSize)
+	}
+	// An explicit Path wins over the store-derived default.
+	if got := cfg.TelemetryDir("./queue"); got != "/var/telemetry" {
+		t.Errorf("TelemetryDir = %q, want /var/telemetry", got)
+	}
+}
+
+func TestLoad_TelemetryMalformedEnabledStaysOn(t *testing.T) {
+	// A malformed KAIMI_TELEMETRY_ENABLED must NOT silently disable telemetry: it
+	// stays on the safe (enabled) side, matching the additive-observability rule.
+	clearKaimiEnv(t)
+	setEnv(t, "KAIMI_TELEMETRY_ENABLED", "garbage")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.Telemetry.Enabled {
+		t.Error("Telemetry.Enabled = false for malformed env value, want true (stay enabled)")
+	}
+}
+
+func TestLoad_TelemetryFileDisablesEnvReenables(t *testing.T) {
+	// The YAML file can disable telemetry; an env var overrides the file (env >
+	// file > default), so KAIMI_TELEMETRY_ENABLED=true re-enables it.
+	clearKaimiEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("telemetry:\n  enabled: false\n  buffer_size: 64\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// File alone disables it.
+	cfg, err := Load(&Flags{ConfigPath: &path})
+	if err != nil {
+		t.Fatalf("Load(file) error: %v", err)
+	}
+	if cfg.Telemetry.Enabled {
+		t.Error("file enabled:false did not disable telemetry")
+	}
+	if cfg.Telemetry.BufferSize != 64 {
+		t.Errorf("file buffer_size = %d, want 64", cfg.Telemetry.BufferSize)
+	}
+
+	// Env overrides the file.
+	setEnv(t, "KAIMI_TELEMETRY_ENABLED", "true")
+	cfg, err = Load(&Flags{ConfigPath: &path})
+	if err != nil {
+		t.Fatalf("Load(file+env) error: %v", err)
+	}
+	if !cfg.Telemetry.Enabled {
+		t.Error("env KAIMI_TELEMETRY_ENABLED=true did not override file enabled:false")
 	}
 }

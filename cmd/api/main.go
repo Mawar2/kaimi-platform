@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -32,6 +31,7 @@ import (
 	"github.com/Mawar2/Kaimi/internal/drivetoken"
 	"github.com/Mawar2/Kaimi/internal/httpapi"
 	"github.com/Mawar2/Kaimi/internal/ingest"
+	"github.com/Mawar2/Kaimi/internal/kobs"
 	"github.com/Mawar2/Kaimi/internal/productkey"
 	"github.com/Mawar2/Kaimi/internal/profile"
 	"github.com/Mawar2/Kaimi/internal/proposalwiring"
@@ -105,21 +105,22 @@ func run() error {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	// Wire the privacy-first telemetry pipeline. It is ADDITIVE and on by default;
-	// set KAIMI_TELEMETRY_ENABLED=false to turn it off entirely. setupTelemetry
-	// installs the process-wide kobs emitter (until then all instrumentation is a
-	// no-op) and returns the LiveSink that backs the live event stream, exposed to
-	// the HTTP layer via Deps.LiveSource. liveSource stays a nil interface when
-	// telemetry is disabled, so no live-stream route is served. The emitter is
-	// flushed and closed on shutdown below.
+	// Wire the privacy-first telemetry pipeline. It is ADDITIVE and on by default
+	// (config.Telemetry.Enabled; set KAIMI_TELEMETRY_ENABLED=false to turn it off).
+	// kobs.Setup installs the process-wide emitter (until then all instrumentation
+	// is a no-op) and returns the LiveSink that backs the live event stream,
+	// exposed to the HTTP layer via Deps.LiveSource — the seam T0.9's SSE Monitor
+	// consumes. liveSource stays a nil interface when telemetry is disabled, so no
+	// live-stream route is served. The emitter is flushed and closed on shutdown.
 	var liveSource httpstream.Source
 	// monitorHandler serves the embedded Monitor SPA (the operator's live
 	// event-stream UI shipped inside the telemetry core). It is wired only when
 	// telemetry is enabled — without a live stream the Monitor has nothing to render —
 	// and is gated like the dashboard/stream by the HTTP layer (Deps.Monitor).
 	var monitorHandler http.Handler
-	if telemetryEnabled(os.Getenv(envTelemetryEnabled)) {
-		live, em, terr := setupTelemetry(*storePath)
+	if cfg.Telemetry.Enabled {
+		telDir := cfg.TelemetryDir(*storePath)
+		live, em, terr := kobs.Setup(telDir, cfg.Telemetry.BufferSize)
 		if terr != nil {
 			return fmt.Errorf("set up telemetry: %w", terr)
 		}
@@ -137,9 +138,9 @@ func run() error {
 				log.Printf("telemetry shutdown: %v", serr)
 			}
 		}()
-		log.Printf("Telemetry enabled (event log under %s)", filepath.Join(*storePath, "telemetry"))
+		log.Printf("Telemetry enabled (event log under %s)", telDir)
 	} else {
-		log.Printf("Telemetry disabled (%s is false)", envTelemetryEnabled)
+		log.Printf("Telemetry disabled (KAIMI_TELEMETRY_ENABLED=false)")
 	}
 
 	// Runtime company-profile store (WS-C1), rooted at the SAME store base path so
