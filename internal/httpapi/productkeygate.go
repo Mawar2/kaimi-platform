@@ -297,7 +297,7 @@ var entryTemplate = template.Must(template.New("entry").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kaimi — Access</title>
+<title>Kaimi · Access</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }

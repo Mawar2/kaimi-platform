@@ -112,9 +112,9 @@ type WorkspaceData struct {
 func gateFlashMessage(flash string) string {
 	switch flash {
 	case "changes":
-		return "Sent back to Tomás — he will revise the draft and return it to you."
+		return "Sent back to Tomás. He'll revise the draft and return it to you."
 	case "approve":
-		return "Approved — Vera is running the final review on your draft."
+		return "Approved. Vera is running the final review on your draft."
 	case "submit":
 		return "Submitted to SAM.gov."
 	default:
@@ -125,7 +125,7 @@ func gateFlashMessage(flash string) string {
 // agentLines are the working-state description sentences from the handoff.
 var agentLines = map[string]string{
 	"outline": "Mapping the solicitation into a section plan and matching each requirement to an evaluation factor.",
-	"writer":  "Drafting the technical volume from the outline — section by section, grounded only in the facts on file.",
+	"writer":  "Drafting the technical volume from the outline, section by section, grounded only in the facts on file.",
 	"review":  "Running the final compliance and consistency pass. Validating every requirement and cross-reference.",
 }
 

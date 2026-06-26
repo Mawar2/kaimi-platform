@@ -396,7 +396,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kaimi — Setup</title>
+<title>Kaimi · Setup</title>
 <style>
   :root{--bg:#0b1220;--panel:#121a2b;--panel2:#0e1626;--border:#233047;--ink:#e8edf6;--ink3:#93a1bd;--accent:#3b82f6;--ok:#1a7f4b;--okbg:#e7f7ee;--errbg:#2a1620;--errbd:#5b2230;--errfg:#f3b5c2;}
   *{box-sizing:border-box;}
@@ -489,17 +489,17 @@ const onboardingContentTmpl = `<!DOCTYPE html>
 
     {{if .FormErr}}<div class="wz-banner wz-banner--err">` + iconWarn + `<span>{{.FormErr}}</span></div>{{end}}
     {{if .Saved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Company profile saved.</span></div>{{end}}
-    {{if .SAMKeySaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved — your next hunt will use it.</span></div>{{end}}
-    {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded — Kaimi will use them to understand your business.</span></div>{{end}}
+    {{if .SAMKeySaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>SAM.gov key saved. Your next hunt will use it.</span></div>{{end}}
+    {{if .DocsSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Documents uploaded. Kaimi will use them to understand your business.</span></div>{{end}}
     {{if .DriveSaved}}<div class="wz-banner wz-banner--ok">` + iconCheck + `<span>Drive destination updated.</span></div>{{end}}
 
     <!-- 1. Welcome -->
     <section class="wz-step" data-step="welcome">
       <h2>Welcome to Kaimi</h2>
-      <p class="sub">Setup takes about three minutes: confirm your license, tell Kaimi what your company does, and connect SAM.gov — so your next hunt is already yours.</p>
+      <p class="sub">Setup takes about three minutes: confirm your license, tell Kaimi what your company does, and connect SAM.gov, so your next hunt is already yours.</p>
       <div class="card"><span class="ic" style="background:#3b82f6">N</span><div><h3>It hunts for you</h3><p>Kaimi pulls live SAM.gov opportunities and scores each against your capabilities.</p></div></div>
       <div class="card"><span class="ic" style="background:#22b8cf">T</span><div><h3>It drafts the ones you pick</h3><p>Select an opportunity and a team of agents outlines, writes, and checks the proposal.</p></div></div>
-      <div class="card"><span class="ic" style="background:#f59e0b">✋</span><div><h3>You stay in command</h3><p>Nothing ships without you. Every proposal pauses at one human review gate — yours.</p></div></div>
+      <div class="card"><span class="ic" style="background:#f59e0b">✋</span><div><h3>You stay in command</h3><p>Nothing ships without you. Every proposal pauses at one human review gate: yours.</p></div></div>
       <div class="wz-nav"><span></span><button class="btn btn-primary" data-go="license">` + iconArrow + `Get started</button></div>
     </section>
 
@@ -528,7 +528,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
           <label>UEI <span class="hint">(optional)</span><input type="text" name="uei" value="{{.UEI}}"></label>
           <label>CAGE <span class="hint">(optional)</span><input type="text" name="cage" value="{{.CAGE}}"></label>
         </div>
-        <label>NAICS codes <span class="hint">— one per line: code|description|tier (primary|secondary|tertiary)</span>
+        <label>NAICS codes <span class="hint">· one per line: code|description|tier (primary|secondary|tertiary)</span>
           <textarea name="naics" rows="4" placeholder="541512|Computer Systems Design|primary">{{.NAICS}}</textarea></label>
         <fieldset><legend>Set-aside eligibility</legend><div class="chips">
           <label class="chk"><input type="checkbox" name="sa_small_business"{{if .SetAside.SmallBusiness}} checked{{end}}> Small business</label>
@@ -538,7 +538,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
           <label class="chk"><input type="checkbox" name="sa_wosb"{{if .SetAside.WOSB}} checked{{end}}> WOSB</label>
           <label class="chk"><input type="checkbox" name="sa_hubzone"{{if .SetAside.HUBZone}} checked{{end}}> HUBZone</label>
         </div></fieldset>
-        <label>Capabilities statement <span class="hint">— one competency per line</span>
+        <label>Capabilities statement <span class="hint">· one competency per line</span>
           <textarea name="competencies" rows="3" placeholder="Cloud migration &amp; DevSecOps">{{.Competencies}}</textarea></label>
         <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="license">Back</button><button class="btn btn-primary" type="submit">` + iconCheck + `Save &amp; continue</button></div>
       </form>
@@ -551,9 +551,9 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       {{if .SAMKeyConfigured}}
       <form class="wz-form" method="POST" action="/onboarding/samgov">
         {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
-        <label>SAM.gov API key <span class="hint">— from your SAM.gov account → Account Details → API Key (about 40 characters)</span>
-          <input type="text" name="sam_api_key" class="mono" maxlength="64" pattern="[A-Za-z0-9._-]{30,64}" inputmode="latin" autocomplete="off" spellcheck="false" autocapitalize="off" required title="Paste your SAM.gov API key — letters, digits, and - _ . (about 40 characters)." placeholder="e.g. AbCd1234-EfGh5678-IjKl9012-MnOp3456-Qr78"></label>
-        <p class="sub" style="margin:0">Your key is stored encrypted in Secret Manager — never shown, logged, or shared. It is yours alone, so your daily quota is never shared with another tester.</p>
+        <label>SAM.gov API key <span class="hint">· from your SAM.gov account → Account Details → API Key (about 40 characters)</span>
+          <input type="text" name="sam_api_key" class="mono" maxlength="64" pattern="[A-Za-z0-9._-]{30,64}" inputmode="latin" autocomplete="off" spellcheck="false" autocapitalize="off" required title="Paste your SAM.gov API key. Letters, digits, and - _ . (about 40 characters)." placeholder="e.g. AbCd1234-EfGh5678-IjKl9012-MnOp3456-Qr78"></label>
+        <p class="sub" style="margin:0">Your key is stored encrypted in Secret Manager. It's never shown, logged, or shared, and it's yours alone, so your daily quota is never shared with another tester.</p>
         <div><button class="btn btn-primary" type="submit">` + iconCheck + `Save SAM.gov key</button></div>
       </form>
       {{else}}
@@ -562,7 +562,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       {{if .ContextDocsEnabled}}
       <div class="card" style="margin-top:14px"><span class="ic" style="background:#8b5cf6">+</span><div style="flex:1">
         <h3>Business context documents <span class="hint">(optional, recommended)</span></h3>
-        <p>Upload your capability statement, CPARS, or recent proposals. Kaimi reads them to understand your business and sharpen how it qualifies and scores opportunities. Tip: keep a Google Drive folder of BD context your team maintains over time — you can point Kaimi at it later.</p>
+        <p>Upload your capability statement, CPARS, or recent proposals. Kaimi reads them to understand your business and sharpen how it qualifies and scores opportunities. Tip: keep a Google Drive folder of BD context your team maintains over time, and you can point Kaimi at it later.</p>
         <form class="wz-form" method="POST" action="/onboarding/docs" enctype="multipart/form-data">
           {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
           <input type="file" name="docs" multiple accept=".pdf,.docx,.doc,.txt,.md">
@@ -578,13 +578,13 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       <div class="card" style="margin-top:14px"><span class="ic" style="background:#22b8cf">` + iconLink + `</span><div style="flex:1">
         <h3>Google Drive <span class="hint">(optional)</span></h3>
         {{if not .Drive.Configured}}
-        <p>Customer-Drive connect is not enabled in this deployment. Generated proposal Docs use the default Drive — drafts stay in Kaimi.</p>
+        <p>Customer-Drive connect is not enabled in this deployment. Generated proposal Docs use the default Drive, so drafts stay in Kaimi.</p>
         {{else if .Drive.Connected}}
         <p>Connected. Proposal Docs are created in this destination:</p>
         <p>
-          {{if .DriveDest.IsFolder}}Folder <strong>{{.DriveDest.Label}}</strong> — <a href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer" style="color:#5aa2ff">Open in Drive</a>
+          {{if .DriveDest.IsFolder}}Folder <strong>{{.DriveDest.Label}}</strong> · <a href="{{.DriveDest.OpenURL}}" target="_blank" rel="noopener noreferrer" style="color:#5aa2ff">Open in Drive</a>
           {{else if .DriveDest.IsRoot}}My Drive (root)
-          {{else}}Not set yet — Docs land in your connected Drive's default location.{{end}}
+          {{else}}Not set yet. Docs land in your connected Drive's default location.{{end}}
         </p>
         {{if .CanEditDrive}}
         <form class="wz-form" method="POST" action="/onboarding/drive/target" style="margin-top:10px">
@@ -599,7 +599,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
         {{end}}
         <p><a href="` + driveConnectPath + `" style="color:#5aa2ff">Reconnect</a></p>
         {{else}}
-        <p>Link your Google Drive so finished proposal Docs save straight to your Workspace. Kaimi requests the minimal scope — only files it creates.</p>
+        <p>Link your Google Drive so finished proposal Docs save straight to your Workspace. Kaimi requests the minimal scope: only files it creates.</p>
         <div class="drive-row">
           <a class="btn gbtn" href="` + driveConnectPath + `"><span class="gglyph" aria-hidden="true">G</span>Connect Google Drive</a>
           <span class="muted">Opens Google's secure consent screen · you can skip and connect later.</span>
@@ -615,10 +615,10 @@ const onboardingContentTmpl = `<!DOCTYPE html>
       <p class="sub">Kaimi runs your next hunt automatically and scores every opportunity against your profile. Jump in and triage your queue.</p>
       <ul class="sum">
         <li{{if not .LicenseKey}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>License linked</b></div></li>
-        <li{{if not .HasProfile}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>Company profile {{if .HasProfile}}saved{{else}}pending{{end}}</b> <span>— grounds hunting, scoring &amp; drafting</span></div></li>
-        <li{{if not .SAMKeySaved}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>SAM.gov {{if .SAMKeySaved}}connected{{else}}pending{{end}}</b> <span>— your own key &amp; quota</span></div></li>
+        <li{{if not .HasProfile}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>Company profile {{if .HasProfile}}saved{{else}}pending{{end}}</b> <span>· grounds hunting, scoring &amp; drafting</span></div></li>
+        <li{{if not .SAMKeySaved}} class="muted"{{end}}><span class="ck">` + iconCheck + `</span><div><b>SAM.gov {{if .SAMKeySaved}}connected{{else}}pending{{end}}</b> <span>· your own key &amp; quota</span></div></li>
       </ul>
-      <p class="sub" style="margin-top:18px">Kaimi has built a <a href="/capability-map" style="color:#5aa2ff">capability map</a> of your business from your profile and documents — it's what sharpens how opportunities are qualified and scored.</p>
+      <p class="sub" style="margin-top:18px">Kaimi has built a <a href="/capability-map" style="color:#5aa2ff">capability map</a> of your business from your profile and documents. It's what sharpens how opportunities are qualified and scored.</p>
       <div class="wz-nav"><button class="btn btn-ghost" type="button" data-back="connect">Back</button><a class="btn btn-primary" href="/">` + iconArrow + `Enter Kaimi</a></div>
     </section>
   </main>

@@ -248,7 +248,7 @@ const shellTmpl = `
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="refresh" content="30">
-  <title>Kaimi — {{.PageTitle}}</title>
+  <title>Kaimi · {{.PageTitle}}</title>
   {{faviconLink}}
   {{styleTag}}
   <style>
@@ -366,7 +366,7 @@ const listContentTmpl = `{{define "content"}}
     <div class="empty2">
       <div class="g">` + iconSearch + `</div>
       <h3>No opportunities yet</h3>
-      <p>The pipeline runs on a schedule and the next hunt lands here automatically — the first results show up after tonight&#39;s 02:00 SAM.gov run.</p>
+      <p>The pipeline runs on a schedule and the next hunt lands here automatically. The first results show up after tonight&#39;s 02:00 SAM.gov run.</p>
     </div>
     {{end}}
     {{end}}
@@ -541,7 +541,7 @@ const notFoundTmplStr = `
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Kaimi — Not Found</title>
+  <title>Kaimi · Not Found</title>
   {{faviconLink}}
   {{styleTag}}
   <style>body { margin: 1rem 2rem; } a { color: var(--primary); }</style>
