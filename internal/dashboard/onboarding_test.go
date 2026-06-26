@@ -604,27 +604,24 @@ func TestOnboardingNoIdentityInsecureDevAllowed(t *testing.T) {
 	}
 }
 
-// TestFirstRunLinkAppearsWhenNoProfile proves the main dashboard surfaces a
-// "Complete onboarding" entry point when no company profile is configured, and hides
-// it once a profile exists.
-func TestFirstRunLinkAppearsWhenNoProfile(t *testing.T) {
-	// No profile → first-run link present.
+// TestFirstRunRedirectsToOnboarding proves the main dashboard sends a tester with no
+// company profile straight to the onboarding wizard (first-run), and serves the board
+// once a profile exists.
+func TestFirstRunRedirectsToOnboarding(t *testing.T) {
+	// No profile → first-run redirect to onboarding.
 	h := newOnboardingHandler(t, dashboard.WithProfileStore(&memProfileStore{}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", http.NoBody))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET / status = %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "Complete onboarding") {
-		t.Errorf("first-run link missing when no profile configured")
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/onboarding" {
+		t.Fatalf("no-profile GET / = %d %q, want 303 -> /onboarding", rec.Code, rec.Header().Get("Location"))
 	}
 
-	// Profile present → no first-run link.
+	// Profile present → board renders (no redirect).
 	h2 := newOnboardingHandler(t, dashboard.WithProfileStore(&memProfileStore{p: validProfile()}))
 	rec2 := httptest.NewRecorder()
 	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/", http.NoBody))
-	if strings.Contains(rec2.Body.String(), "Complete onboarding") {
-		t.Errorf("first-run link should be hidden once a profile is configured")
+	if rec2.Code != http.StatusOK {
+		t.Errorf("onboarded GET / = %d, want 200 (board)", rec2.Code)
 	}
 }
 

@@ -92,9 +92,9 @@ func TestTriageEmptyStateProfileConfigured(t *testing.T) {
 	}
 }
 
-// TestTriageEmptyStateNoProfile proves that with NO profile and an empty store,
-// the onboarding prompt takes priority and the contradictory "no opportunities"
-// empty state is suppressed (one message, not two).
+// TestTriageEmptyStateNoProfile proves that with NO profile, hitting "/" first-run-
+// redirects to the onboarding wizard rather than rendering the board — the tester
+// completes setup before they ever reach the opportunities screen.
 func TestTriageEmptyStateNoProfile(t *testing.T) {
 	svc := newEmptyService(t) // empty JSON store
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
@@ -104,19 +104,11 @@ func TestTriageEmptyStateNoProfile(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 
-	body := rr.Body.String()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 (first-run redirect to onboarding)", rr.Code)
 	}
-	if !contains(body, onboardingPrompt) {
-		t.Errorf("no profile must surface the onboarding prompt %q", onboardingPrompt)
-	}
-	// Onboarding takes priority: do not also show the "no opportunities" panel.
-	if contains(body, emptyConfiguredHeading) {
-		t.Errorf("no profile must NOT also show the no-opportunities empty state (avoid two conflicting empty states)")
-	}
-	if contains(body, emptyFilteredHeading) {
-		t.Errorf("no profile must NOT show the filtered-empty copy")
+	if loc := rr.Header().Get("Location"); loc != "/onboarding" {
+		t.Errorf("redirect = %q, want /onboarding", loc)
 	}
 }
 

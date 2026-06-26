@@ -722,6 +722,17 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// First-run redirect: a freshly-accessed tenant that hasn't completed onboarding (no
+	// saved profile) lands on the onboarding wizard, not the opportunities board. Scoped
+	// to the root path so 404s on other unmatched paths are unaffected, and only when a
+	// profile store is wired (otherwise there's no onboarding to send them to).
+	if r.URL.Path == "/" && h.profileStore != nil {
+		if _, err := h.profileStore.Load(); errors.Is(err, profile.ErrProfileNotFound) {
+			http.Redirect(w, r, onboardingPath, http.StatusSeeOther)
+			return
+		}
+	}
+
 	ctx := r.Context()
 	query := r.URL.Query()
 	now := h.Now()
