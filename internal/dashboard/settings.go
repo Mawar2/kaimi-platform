@@ -291,7 +291,7 @@ body.naics-js .naics-hidden{ display:none; }
     items.forEach(function(it){
       var row=document.createElement("button");row.type="button";row.className="naics-result";
       row.innerHTML="<b>"+esc(it.code)+"</b> "+esc(it.title);
-      row.addEventListener("click",function(){add(it.code,it.title);row.remove();if(!results.children.length){hideResults();}search.focus();});
+      row.addEventListener("click",function(e){e.stopPropagation();add(it.code,it.title);row.remove();if(!results.children.length){hideResults();}search.focus();});
       results.appendChild(row);
     });
     results.hidden=false;
