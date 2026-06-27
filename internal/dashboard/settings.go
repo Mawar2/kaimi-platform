@@ -291,7 +291,7 @@ body.naics-js .naics-hidden{ display:none; }
     items.forEach(function(it){
       var row=document.createElement("button");row.type="button";row.className="naics-result";
       row.innerHTML="<b>"+esc(it.code)+"</b> "+esc(it.title);
-      row.addEventListener("click",function(){add(it.code,it.title);search.value="";hideResults();search.focus();});
+      row.addEventListener("click",function(){add(it.code,it.title);row.remove();if(!results.children.length){hideResults();}search.focus();});
       results.appendChild(row);
     });
     results.hidden=false;
@@ -303,7 +303,7 @@ body.naics-js .naics-hidden{ display:none; }
     if(q.length<2){hideResults();return;}
     timer=setTimeout(function(){
       var id=++last;
-      fetch("/api/v1/naics?q="+encodeURIComponent(q)+"&limit=12",{credentials:"same-origin",headers:{"Accept":"application/json"}})
+      fetch("/api/v1/naics?q="+encodeURIComponent(q)+"&limit=25",{credentials:"same-origin",headers:{"Accept":"application/json"}})
         .then(function(r){return r.ok?r.json():{results:[]};})
         .then(function(d){if(id===last){renderResults((d&&d.results)||[]);}})
         .catch(function(){hideResults();});
