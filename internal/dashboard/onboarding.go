@@ -727,7 +727,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     items.forEach(function(it){
       var row=document.createElement("button");row.type="button";row.className="naics-result";
       row.innerHTML="<b>"+esc(it.code)+"</b> "+esc(it.title);
-      row.addEventListener("click",function(){add(it.code,it.title);search.value="";hideResults();search.focus();});
+      row.addEventListener("click",function(e){e.stopPropagation();add(it.code,it.title);row.remove();if(!results.children.length){hideResults();}search.focus();});
       results.appendChild(row);
     });
     results.hidden=false;
@@ -739,7 +739,7 @@ const onboardingContentTmpl = `<!DOCTYPE html>
     if(q.length<2){hideResults();return;}
     timer=setTimeout(function(){
       var id=++last;
-      fetch("/api/v1/naics?q="+encodeURIComponent(q)+"&limit=12",{credentials:"same-origin",headers:{"Accept":"application/json"}})
+      fetch("/api/v1/naics?q="+encodeURIComponent(q)+"&limit=25",{credentials:"same-origin",headers:{"Accept":"application/json"}})
         .then(function(r){return r.ok?r.json():{results:[]};})
         .then(function(d){if(id===last){renderResults((d&&d.results)||[]);}})
         .catch(function(){hideResults();});
@@ -971,7 +971,10 @@ func (h *Handler) handleOnboardingSAMKey(w http.ResponseWriter, r *http.Request)
 	}
 
 	// PRG: advance to the final step with a success flag.
-	http.Redirect(w, r, onboardingPath+"?sam_saved=1&step="+stepDone, http.StatusSeeOther)
+	// Stay on the Connect step after saving the key so the tester can continue with the
+	// remaining Connect tasks (upload context docs, connect Drive) instead of being jumped
+	// to the final step.
+	http.Redirect(w, r, onboardingPath+"?sam_saved=1&step="+stepConnect, http.StatusSeeOther)
 }
 
 // maxUploadBytes bounds an onboarding document upload request. Capability statements /
