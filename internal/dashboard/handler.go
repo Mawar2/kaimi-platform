@@ -39,6 +39,7 @@ type Handler struct {
 	onboardingTmpl *template.Template
 	capMapTmpl     *template.Template
 	teamTmpl       *template.Template
+	settingsTmpl   *template.Template
 	notFoundTmpl   *template.Template
 	Now            func() time.Time
 
@@ -200,6 +201,12 @@ func (h *Handler) setupRoutes() {
 	// Self-serve team invite (mints a teammate product key for the same workspace).
 	h.mux.HandleFunc("GET /team", h.handleTeam)
 	h.mux.HandleFunc("/team/invite", postOnly(h.handleTeamInvite))
+	// Post-onboarding company-profile editor. GET renders the form; POST saves via the
+	// SAME profile store the pipeline and Writer read at runtime, so a save is picked up
+	// by every agent on its next run. Registered with method-specific patterns (Go 1.22+
+	// ServeMux) so the GET and the state-mutating POST are distinct handlers on one path.
+	h.mux.HandleFunc("GET /settings", h.handleSettings)
+	h.mux.HandleFunc("POST /settings", h.handleSettingsSave)
 	h.mux.HandleFunc("GET /submitted/export.csv", h.handleSubmittedExport)
 	h.mux.HandleFunc("/submitted/{id}/outcome", postOnly(h.handleOutcome))
 	h.mux.HandleFunc("GET /workspace/{id}", h.handleWorkspace)
@@ -270,6 +277,8 @@ const (
 	iconTeam    = `<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 13.6A5.5 5.5 0 0 1 20.5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`
 	iconUpload  = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4M7 9l5-5 5 5M5 20h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 	iconHelp    = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M9.6 9.3a2.4 2.4 0 0 1 4.4 1.3c0 1.6-2 1.8-2 3.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 17.1v.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`
+	// iconSettings is a gear glyph for the Account → Settings nav item.
+	iconSettings = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.3 7.5l2.1 1.2M17.6 15.3l2.1 1.2M4.3 16.5l2.1-1.2M17.6 8.7l2.1-1.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`
 )
 
 // sidebarMarkSVG is the 22px Kai wave mark inside the sidebar's navy gradient
@@ -323,6 +332,10 @@ const shellTmpl = `
       <a class="nav-item{{if eq .ActiveNav "team"}} on{{end}}" href="/team">
         ` + iconTeam + `
         <span>Team</span>
+      </a>
+      <a class="nav-item{{if eq .ActiveNav "settings"}} on{{end}}" href="/settings">
+        ` + iconSettings + `
+        <span>Settings</span>
       </a>
       <a class="nav-item" href="/help" target="_blank" rel="noopener">
         ` + iconHelp + `
@@ -654,6 +667,8 @@ func (h *Handler) setupTemplates() {
 	h.capMapTmpl = capabilityMapTemplate(funcMap)
 	h.teamTmpl = template.Must(template.Must(
 		template.New("team").Funcs(funcMap).Parse(shellTmpl)).Parse(teamContentTmpl))
+	h.settingsTmpl = template.Must(template.Must(
+		template.New("settings").Funcs(funcMap).Parse(shellTmpl)).Parse(settingsContentTmpl))
 	h.notFoundTmpl = template.Must(template.New("notfound").Funcs(funcMap).Parse(notFoundTmplStr))
 }
 
