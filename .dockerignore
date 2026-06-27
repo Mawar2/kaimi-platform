@@ -14,3 +14,11 @@ sa.json
 *.pem
 *.key
 .env
+
+# Never bake a real company profile into the image. config/profile.json is BlueMeta's
+# (or any operator's) real profile and must not ship as a seed/fallback in a customer
+# image. The neutral config/profile.example.yaml stays as the only baked fallback; real
+# profiles arrive at runtime via onboarding (the per-tenant store).
+config/profile.json
+config/bluemeta_profile.yaml
+config/bluemeta_scorer_profile.json

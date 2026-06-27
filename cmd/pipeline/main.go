@@ -115,6 +115,18 @@ func run() error {
 		return fmt.Errorf("failed to load company profile: %w", err)
 	}
 	log.Printf("Profile source: %s\n", profileSource)
+
+	// Do not hunt for an un-onboarded deployment. When no real profile has been saved (the
+	// store is empty and there is no baked profile file), ResolveProfileWithStore falls back
+	// to the neutral example template. Hunting in that state would populate the queue with
+	// opportunities scored against a placeholder identity. Skip cleanly; the hunt resumes
+	// automatically once a company profile is saved via onboarding. This also makes the daily
+	// scheduler a safe no-op until the deployment is set up.
+	if profileSource == profile.ExampleProfilePath {
+		log.Printf("No company profile configured yet (resolved the example template). Skipping the hunt until the deployment is onboarded.")
+		return nil
+	}
+
 	eligibilityProfile := companyProfile
 	scoringProfile := scorer.FromProfile(companyProfile)
 
