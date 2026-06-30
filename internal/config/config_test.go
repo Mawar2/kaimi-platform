@@ -185,6 +185,25 @@ func TestLoad_ProfilePathAlias(t *testing.T) {
 	})
 }
 
+// TestLoad_TenantFromEnv proves the per-deployment tenant identity is read from env, so a
+// customer's Terraform-set display name actually reaches the dashboard (was silently dropped).
+func TestLoad_TenantFromEnv(t *testing.T) {
+	clearKaimiEnv(t)
+	setEnv(t, "TENANT_ID", "ey3")
+	setEnv(t, "TENANT_DISPLAY_NAME", "Ey3 Technologies")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Tenant.ID != "ey3" {
+		t.Errorf("Tenant.ID = %q, want ey3", cfg.Tenant.ID)
+	}
+	if cfg.Tenant.DisplayName != "Ey3 Technologies" {
+		t.Errorf("Tenant.DisplayName = %q, want %q", cfg.Tenant.DisplayName, "Ey3 Technologies")
+	}
+}
+
 func TestLoad_FlagOverridesEnv(t *testing.T) {
 	clearKaimiEnv(t)
 	setEnv(t, "MODE", "live")

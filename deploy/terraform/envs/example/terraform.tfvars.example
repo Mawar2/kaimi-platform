@@ -42,6 +42,29 @@ api_image      = "us-east4-docker.pkg.dev/acme-kaimi-prod/kaimi/api:latest"
 # outline_model     = "gemini-3.5-flash"
 # finalreview_model = "gemini-2.5-pro"
 
+# --- Access gate: workspace-oauth (default) OR product-key sign-ups ----------
+#
+# Leave gate_mode unset for the default Google Workspace sign-in (use the OAuth
+# settings below). Set gate_mode = "product-key" for the magic-link sign-up flow —
+# this is what a magic-link sign-up customer uses. In product-key mode `terraform
+# apply` also provisions a Firestore registry for the keys, grants the runtime SA
+# the IAM to run on-SAM-key-save instant hunts, and sets KAIMI_GATE_MODE. After
+# apply, mint the first key with the kaimi-key CLI (see README) and send the magic
+# link. The Workspace OAuth settings below are NOT needed in product-key mode.
+# gate_mode = "product-key"
+#
+# Firestore database location for the product-key registry (product-key mode only).
+# Empty = use `region`. NOTE: a Firestore location is PERMANENT once created.
+# firestore_location = "us-east4"
+
+# --- Optional: monthly budget alert ------------------------------------------
+#
+# Attach a Cloud Billing budget that emails the billing-account admins at 50/90/
+# 100% of budget_amount_usd. Leave billing_account empty (default) to skip it.
+# The billing account id is the account this project is linked to.
+# billing_account   = "012345-6789AB-CDEF01"
+# budget_amount_usd = 50
+
 # --- Sign-in OAuth (recommended for production) ------------------------------
 #
 # Create a Google OAuth 2.0 Client ID (type: Web application). Put the client id

@@ -62,6 +62,12 @@ locals {
   # GCS store path the pipeline writes to, on the mounted volume (setup-gcp.sh:234).
   store_mount_path = "/mnt/store"
   store_path       = "/mnt/store/queue"
+
+  # Product-key gate flag, reused by the count-gated Firestore database, the
+  # product-key IAM grants, and the API's HUNT_PIPELINE_JOB env. When gate_mode is
+  # the default "workspace-oauth" this is false and every product-key-only resource
+  # is skipped (count = 0), leaving the existing path byte-for-byte unchanged.
+  product_key_mode = var.gate_mode == "product-key"
 }
 
 # -----------------------------------------------------------------------------
@@ -84,6 +90,7 @@ resource "google_project_service" "required" {
     "storage.googleapis.com",              # GCS buckets (setup-gcp.sh:219,269)
     "logging.googleapis.com",              # logWriter target (setup-gcp.sh:88)
     "monitoring.googleapis.com",           # metricWriter target (setup-gcp.sh:89)
+    "firestore.googleapis.com",            # product-key registry (Firestore Native; enabled always — harmless when unused)
   ])
 
   project = var.project_id
@@ -535,6 +542,27 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.api_insecure_no_auth ? "true" : "false"
       }
 
+      # --- Access gate (workspace-oauth default, or product-key magic links) ---
+      # KAIMI_GATE_MODE selects the gate (internal/httpapi/gate.go). In product-key
+      # mode the API also serves the magic-link sign-up flow backed by the Firestore
+      # registry provisioned below.
+      env {
+        name  = "KAIMI_GATE_MODE"
+        value = var.gate_mode
+      }
+
+      # HUNT_PIPELINE_JOB names THIS deployment's pipeline Cloud Run Job so the API
+      # can execute it immediately after a tenant saves their SAM key (cmd/api/main.go
+      # ~393), filling their board without waiting for the daily schedule. Only wired
+      # in product-key mode (the magic-link sign-up flow); empty otherwise so the
+      # workspace-oauth path is unchanged. Referencing the job resource's .name makes
+      # it auto-point at this deployment's own job (prefix-aware). The runtime SA's
+      # run.developer + actAs grants below are what make the execute call succeed.
+      env {
+        name  = "HUNT_PIPELINE_JOB"
+        value = local.product_key_mode ? google_cloud_run_v2_job.pipeline.name : ""
+      }
+
       # --- Sign-in OAuth (non-secret parts as plain env; secret from SM) ---
       env {
         name  = "OAUTH_CLIENT_ID"
@@ -694,4 +722,102 @@ resource "google_cloud_scheduler_job" "pipeline_schedule" {
     google_project_service.required,
     google_cloud_run_v2_job_iam_member.scheduler_invoker,
   ]
+}
+
+# -----------------------------------------------------------------------------
+# 10. Product-key access gate (count-gated on gate_mode == "product-key")
+#     All resources here are skipped entirely (count = 0) in the default
+#     workspace-oauth mode, so that path is unchanged. In product-key mode they
+#     provision the per-deployment Firestore registry the magic-link sign-up flow
+#     uses (internal/productkey/firestore.go, collection product_keys) and the IAM
+#     that lets the API (a) read/write that registry and (b) EXECUTE the pipeline
+#     Job for the on-SAM-key-save instant hunt.
+# -----------------------------------------------------------------------------
+
+# Firestore database (Native mode) for the product-key registry. The default
+# database id "(default)" is what the app's Firestore client uses. The location is
+# PERMANENT once created (see var.firestore_location); coalesce falls back to the
+# deployment region when firestore_location is left empty.
+resource "google_firestore_database" "product_keys" {
+  count = local.product_key_mode ? 1 : 0
+
+  project     = var.project_id
+  name        = "(default)"
+  location_id = coalesce(var.firestore_location, var.region)
+  type        = "FIRESTORE_NATIVE"
+
+  depends_on = [google_project_service.required]
+}
+
+# Firestore access for the runtime SA so the API can read/write the product_keys
+# collection (the key registry). roles/datastore.user covers Firestore Native
+# document read/write (Firestore shares the Datastore IAM surface).
+resource "google_project_iam_member" "runtime_firestore_user" {
+  count = local.product_key_mode ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+# On-SAM-key-save instant hunt: the API EXECUTES the pipeline Job (run.jobs.run)
+# right after a tenant saves their SAM key (cmd/api/main.go ~393). This mirrors the
+# proven fresh-hunt IAM:
+#   - run.jobs.run is granted by roles/run.developer (project-scoped here), and
+#   - the call also needs actAs on the Job's runtime SA = iam.serviceAccountUser
+#     bound on the runtime SA itself (the SA "uses" itself as the Job identity).
+resource "google_project_iam_member" "runtime_run_developer" {
+  count = local.product_key_mode ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_service_account_iam_member" "runtime_act_as_self" {
+  count = local.product_key_mode ? 1 : 0
+
+  service_account_id = google_service_account.runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+# -----------------------------------------------------------------------------
+# 11. Optional monthly budget alert (count-gated on billing_account)
+#     Skipped entirely when billing_account is empty (the default). When set, a
+#     Cloud Billing budget for THIS project alerts the billing-account admins at
+#     50% / 90% / 100% of budget_amount_usd. The budget lives under the billing
+#     account, not the project, so the deploy-time credentials need
+#     billing.budgets.create on that billing account.
+# -----------------------------------------------------------------------------
+resource "google_billing_budget" "monthly" {
+  count = var.billing_account != "" ? 1 : 0
+
+  billing_account = var.billing_account
+  display_name    = "Kaimi ${var.tenant_id} monthly budget"
+
+  # Scope the budget to this deployment's project so the alert reflects Kaimi's
+  # spend specifically, not the whole billing account.
+  budget_filter {
+    projects = ["projects/${var.project_id}"]
+  }
+
+  amount {
+    specified_amount {
+      currency_code = "USD"
+      # units is the whole-currency amount as a string in the provider schema, so
+      # cast the numeric var. (Sub-unit "nanos" are omitted = .00.)
+      units = tostring(var.budget_amount_usd)
+    }
+  }
+
+  threshold_rules {
+    threshold_percent = 0.5
+  }
+  threshold_rules {
+    threshold_percent = 0.9
+  }
+  threshold_rules {
+    threshold_percent = 1.0
+  }
 }
