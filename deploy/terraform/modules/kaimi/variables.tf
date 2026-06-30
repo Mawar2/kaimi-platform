@@ -169,6 +169,58 @@ variable "profile_path" {
   default     = "config/profile.json"
 }
 
+# --- Access gate mode --------------------------------------------------------
+#
+# Kaimi has two ways to gate access, chosen at deploy time (the app reads
+# KAIMI_GATE_MODE — see internal/httpapi/gate.go, default "workspace-oauth"):
+#   - "workspace-oauth": Google Workspace sign-in (any verified account in
+#     allowed_workspace_domain). This is the default; the OAuth variables below
+#     and the oauth-client-secret/session-secret secrets drive it.
+#   - "product-key": time-limited KAIMI-XXXX-XXXX-XXXX product keys handed out
+#     via magic links (the magic-link sign-up flow). Keys live in a per-deployment
+#     Firestore registry (collection product_keys) in THIS project. When set, the
+#     module also provisions a Firestore database, grants the runtime SA Firestore
+#     + Cloud Run Job-execution IAM, and wires HUNT_PIPELINE_JOB so a tenant's
+#     first hunt fires the instant they save their SAM key. Mint the first key with
+#     the kaimi-key CLI after apply (see README / outputs).
+
+variable "gate_mode" {
+  description = "Access gate the API enforces (maps to KAIMI_GATE_MODE). \"workspace-oauth\" (default) = Google Workspace sign-in. \"product-key\" = magic-link product keys backed by a per-deployment Firestore registry; this is what a magic-link sign-up customer uses, and it makes the module also provision Firestore, grant the runtime SA Firestore + Job-execution IAM, and set HUNT_PIPELINE_JOB for on-SAM-key-save instant hunts."
+  type        = string
+  default     = "workspace-oauth"
+
+  validation {
+    condition     = contains(["workspace-oauth", "product-key"], var.gate_mode)
+    error_message = "gate_mode must be either \"workspace-oauth\" or \"product-key\"."
+  }
+}
+
+variable "firestore_location" {
+  description = "Firestore database location for the product-key registry (used ONLY when gate_mode = \"product-key\"). Empty (default) means \"use var.region\". NOTE: a Firestore database's location is PERMANENT once the database is created — it cannot be changed later without deleting the database, so pick deliberately (a region like \"us-east4\" or a multi-region like \"nam5\")."
+  type        = string
+  default     = ""
+}
+
+# --- Optional monthly budget alert -------------------------------------------
+#
+# A per-deployment Cloud Billing budget that emails the billing account's admins
+# when spend crosses 50% / 90% / 100% of budget_amount_usd. Skipped entirely when
+# billing_account is empty (the default), so the existing deploy path is unchanged
+# and a budget is purely opt-in. The billing account id is NOT a project setting —
+# it is the account the project is linked to (e.g. "012345-6789AB-CDEF01").
+
+variable "billing_account" {
+  description = "Optional Cloud Billing account id (e.g. \"012345-6789AB-CDEF01\") to attach a monthly budget alert to. Empty (default) skips the budget entirely. The deploy-time credentials must have billing.budgets.create on this billing account."
+  type        = string
+  default     = ""
+}
+
+variable "budget_amount_usd" {
+  description = "Monthly budget amount in USD for the optional billing alert (only used when billing_account is set). Alerts fire at 50%, 90%, and 100% of this amount."
+  type        = number
+  default     = 50
+}
+
 # --- API: OAuth sign-in (non-secret portion) + CORS --------------------------
 #
 # The OAuth *client secret* and the *session secret* are Secret Manager secrets

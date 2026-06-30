@@ -48,3 +48,17 @@ output "secret_ids" {
   description = "Secret Manager secret IDs created empty by this module. Add a version to each out-of-band before the corresponding feature works (see README.md)."
   value       = [for s in google_secret_manager_secret.secrets : s.secret_id]
 }
+
+output "gate_mode" {
+  description = "Access gate this deployment enforces (\"workspace-oauth\" or \"product-key\")."
+  value       = var.gate_mode
+}
+
+output "product_key_next_step" {
+  description = "Post-apply reminder. In product-key mode you must mint the first access key with the kaimi-key CLI and send its magic link; in workspace-oauth mode no key is needed."
+  value = var.gate_mode == "product-key" ? format(
+    "Mint the first access key: kaimi-key -project %s mint --tester \"<name>\" --days <n> --url %s   (then send the printed magic link)",
+    var.project_id,
+    google_cloud_run_v2_service.api.uri,
+  ) : "gate_mode is workspace-oauth: sign in with a Workspace account in the allowed domain; no product key needed."
+}
