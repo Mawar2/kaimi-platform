@@ -63,6 +63,14 @@ module "kaimi" {
   outline_model     = var.outline_model
   finalreview_model = var.finalreview_model
 
+  # --- Access gate (workspace-oauth default, or product-key magic-link sign-ups) ---
+  gate_mode          = var.gate_mode
+  firestore_location = var.firestore_location
+
+  # --- Optional monthly budget alert (skipped when billing_account is "") ---
+  billing_account   = var.billing_account
+  budget_amount_usd = var.budget_amount_usd
+
   # --- Sign-in OAuth (non-secret parts; secrets seeded out-of-band) ---
   oauth_client_id          = var.oauth_client_id
   oauth_redirect_url       = var.oauth_redirect_url
@@ -113,6 +121,23 @@ variable "outline_model" {
 variable "finalreview_model" {
   type    = string
   default = "gemini-2.5-pro"
+}
+
+variable "gate_mode" {
+  type    = string
+  default = "workspace-oauth"
+}
+variable "firestore_location" {
+  type    = string
+  default = ""
+}
+variable "billing_account" {
+  type    = string
+  default = ""
+}
+variable "budget_amount_usd" {
+  type    = number
+  default = 50
 }
 
 variable "oauth_client_id" {
@@ -181,3 +206,5 @@ output "artifact_registry_repository" { value = module.kaimi.artifact_registry_r
 output "queue_bucket" { value = module.kaimi.queue_bucket }
 output "solicitations_bucket" { value = module.kaimi.solicitations_bucket }
 output "secret_ids" { value = module.kaimi.secret_ids }
+output "gate_mode" { value = module.kaimi.gate_mode }
+output "product_key_next_step" { value = module.kaimi.product_key_next_step }

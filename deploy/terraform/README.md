@@ -41,6 +41,8 @@ deploy/terraform/
 | Cloud Run **Service** `kaimi-api` | `google_cloud_run_v2_service.api` | **NEW** (not in the script) |
 | Cloud Scheduler `kaimi-pipeline-schedule` (cron `0 7,12,17 * * *`) | `google_cloud_scheduler_job.pipeline_schedule` | Step 10 |
 | Run-invoker IAM (scheduler → job; optional public → API) | `google_cloud_run_v2_job_iam_member` / `..._service_iam_member` | Step 10 |
+| **Product-key only** (when `gate_mode = "product-key"`): Firestore Native DB `(default)` for the key registry; runtime SA IAM `datastore.user` (registry R/W) + `run.developer` (run.jobs.run) + `iam.serviceAccountUser` actAs on itself (on-SAM-key-save instant hunts) | `google_firestore_database.product_keys`, `google_project_iam_member.runtime_{firestore_user,run_developer}`, `google_service_account_iam_member.runtime_act_as_self` | **NEW** (magic-link sign-up gate) |
+| **Optional** (when `billing_account` set): monthly budget alert at 50/90/100% | `google_billing_budget.monthly` | **NEW** |
 
 ### Security improvements over the script
 - **No service-account JSON key** is created. Cloud Run uses the attached SA's
@@ -165,12 +167,65 @@ Environment variables the images read (set by this module): `MODE`, `STORE_PATH`
 `GCP_PROJECT_ID`, `GCP_REGION`, `GEMINI_MODEL`, `OUTLINE_MODEL`,
 `FINALREVIEW_MODEL`, `TENANT_ID`, `TENANT_DISPLAY_NAME`,
 `ELIGIBILITY_PROFILE_PATH`, `NAICS_CODES`, `GCS_SOLICITATIONS_BUCKET`,
-`API_HOST`, `CORS_ALLOWED_ORIGINS`, `KAIMI_INSECURE_NO_AUTH`, `OAUTH_CLIENT_ID`,
+`API_HOST`, `CORS_ALLOWED_ORIGINS`, `KAIMI_INSECURE_NO_AUTH`, `KAIMI_GATE_MODE`,
+`HUNT_PIPELINE_JOB` (product-key mode only), `OAUTH_CLIENT_ID`,
 `OAUTH_REDIRECT_URL`, `OAUTH_ALLOWED_DOMAIN`, `DRIVE_OAUTH_CLIENT_ID`,
 `DRIVE_OAUTH_REDIRECT_URL`, `DOCUMENTAI_PROCESSOR_ID`, `DOCUMENTAI_LOCATION`, and
 the secret-sourced `SAM_API_KEY`, `OAUTH_CLIENT_SECRET`, `SESSION_SECRET`,
 `DRIVE_OAUTH_CLIENT_SECRET`. `$PORT` is injected by Cloud Run and honored by the
 API binary automatically.
+
+## Access gate: Workspace OAuth (default) vs. product-key sign-ups
+
+Kaimi gates access two ways, chosen at deploy time with `gate_mode` (the app reads
+`KAIMI_GATE_MODE`):
+
+### `gate_mode = "workspace-oauth"` (default)
+Google Workspace sign-in — any verified account in `allowed_workspace_domain`.
+This is the established path; follow steps 5–6 above (OAuth client id + domain +
+the `oauth-client-secret`/`session-secret` Secret Manager values). Nothing about
+this path changed.
+
+### `gate_mode = "product-key"` (magic-link sign-ups)
+Time-limited `KAIMI-XXXX-XXXX-XXXX` product keys handed out via magic links — the
+flow a self-serve sign-up customer uses. Setting `gate_mode = "product-key"` makes
+a single `terraform apply` additionally:
+
+- provision a **Firestore Native database** (`(default)`) for the per-deployment
+  key registry (collection `product_keys`, in this project);
+- grant the runtime SA **`roles/datastore.user`** so the API can read/write that
+  registry;
+- grant the runtime SA **`roles/run.developer`** + **`roles/iam.serviceAccountUser`**
+  (actAs on itself) so the API can **execute the pipeline Job** for an instant
+  first hunt the moment a tenant saves their SAM.gov key; and
+- set **`KAIMI_GATE_MODE=product-key`** and **`HUNT_PIPELINE_JOB=<this deploy's
+  pipeline job>`** on the API service.
+
+Then one CLI call mints the first access key and prints its magic link:
+
+```sh
+# project + api url come from terraform output (api_service_url)
+kaimi-key -project acme-kaimi-prod mint --tester "Jane (Acme)" --days 30 \
+  --url https://kaimi-api-xxxxx-uc.a.run.app
+# → prints a magic link; send it to the customer to sign in.
+```
+
+`terraform output product_key_next_step` prints this exact command pre-filled with
+your project id and API URL after apply.
+
+> **Firestore location is permanent.** Set `firestore_location` deliberately
+> (defaults to `region`); a Firestore database's location cannot be changed after
+> creation without deleting the database. In workspace-oauth mode no Firestore
+> database is created (the resources are `count`-gated), so that path is unchanged.
+
+## Optional: monthly budget alert
+
+Set `billing_account` (the account this project is linked to, e.g.
+`012345-6789AB-CDEF01`) to attach a Cloud Billing budget that emails the billing
+admins at 50% / 90% / 100% of `budget_amount_usd` (default $50/mo). Leave
+`billing_account` empty (the default) to skip it entirely. The budget lives under
+the billing account, so the deploy-time credentials need `billing.budgets.create`
+on that account.
 
 ## Deploying into a shared project (`name_prefix`)
 
