@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   push:
     branches: [ '**' ]  # Run on all branches for early feedback
+    tags: [ 'release-*', 'v*' ]  # Release tags publish the central images (see publish-release-images)
 
 # Prevent concurrent runs on the same PR
 concurrency:
@@ -663,6 +664,126 @@ jobs:
         fi
 
         echo "✓ All required checks passed!"
+
+  # Central release registry — the source-of-truth images a NEW customer is
+  # provisioned from (scripts/provision-customer.sh copies these into each
+  # customer's own Artifact Registry repo). This builds the api + pipeline images
+  # ONCE and pushes them to a CENTRAL repo in BlueMeta's project (kaimi-seeker),
+  # SEPARATE from the per-tenant `kaimi` repo the dogfood deploy-to-gcp job uses,
+  # so this is purely ADDITIVE — it does not touch or break the dogfood deploy.
+  #
+  #   Central repo:  us-east4-docker.pkg.dev/kaimi-seeker/kaimi-release
+  #   Images:        .../kaimi-release/api        .../kaimi-release/pipeline
+  #   Tags:          <git-sha> (immutable, what a customer pins)
+  #                  latest    (moving pointer to newest main build)
+  #                  <tag>     (the release tag name, when triggered by a tag push)
+  #
+  # Runs on push to main and on release tags (release-*, v*). The repo + region
+  # live under BlueMeta's kaimi-seeker project; GCP_RELEASE_PROJECT overrides the
+  # project via secret if the central registry ever moves, defaulting to the
+  # dogfood GCP_PROJECT_ID so nothing breaks if that secret is unset.
+  publish-release-images:
+    name: Publish Central Release Images
+    runs-on: ubuntu-latest
+    needs: [all-checks-pass]
+    if: |
+      always() &&
+      needs.all-checks-pass.result == 'success' &&
+      github.repository == 'Mawar2/Kaimi' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/release-') || startsWith(github.ref, 'refs/tags/v'))
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    - name: Resolve central registry coordinates
+      id: reg
+      run: |
+        # The central release repo lives in BlueMeta's project. Default to the
+        # dogfood project (GCP_PROJECT_ID = kaimi-seeker) so this works with the
+        # existing secrets; GCP_RELEASE_PROJECT can override it later if desired.
+        RELEASE_PROJECT="${{ secrets.GCP_RELEASE_PROJECT }}"
+        if [ -z "$RELEASE_PROJECT" ]; then RELEASE_PROJECT="${{ secrets.GCP_PROJECT_ID }}"; fi
+        REGION="${{ secrets.GCP_REGION }}"
+        REPO="kaimi-release"
+        BASE="${REGION}-docker.pkg.dev/${RELEASE_PROJECT}/${REPO}"
+        echo "release_project=$RELEASE_PROJECT" >> "$GITHUB_OUTPUT"
+        echo "region=$REGION" >> "$GITHUB_OUTPUT"
+        echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+        echo "base=$BASE" >> "$GITHUB_OUTPUT"
+        echo "Central release base: $BASE"
+
+    - name: Ensure central Artifact Registry repo exists (idempotent)
+      run: |
+        gcloud artifacts repositories describe "${{ steps.reg.outputs.repo }}" \
+          --project="${{ steps.reg.outputs.release_project }}" \
+          --location="${{ steps.reg.outputs.region }}" >/dev/null 2>&1 \
+        || gcloud artifacts repositories create "${{ steps.reg.outputs.repo }}" \
+          --project="${{ steps.reg.outputs.release_project }}" \
+          --location="${{ steps.reg.outputs.region }}" \
+          --repository-format=docker \
+          --description="Kaimi central release images (source of truth for per-customer provisioning)"
+
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker "${{ steps.reg.outputs.region }}-docker.pkg.dev" --quiet
+
+    - name: Compute image tags
+      id: tags
+      run: |
+        SHA="${{ github.sha }}"
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        # When triggered by a tag push, also publish the human-readable tag name.
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "reltag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        else
+          echo "reltag=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build and push pipeline image (central)
+      run: |
+        IMG="${{ steps.reg.outputs.base }}/pipeline"
+        EXTRA=()
+        if [ -n "${{ steps.tags.outputs.reltag }}" ]; then EXTRA=(-t "${IMG}:${{ steps.tags.outputs.reltag }}"); fi
+        docker build -f cmd/pipeline/Dockerfile \
+          -t "${IMG}:${{ steps.tags.outputs.sha }}" \
+          -t "${IMG}:latest" \
+          "${EXTRA[@]}" \
+          .
+        docker push "${IMG}:${{ steps.tags.outputs.sha }}"
+        docker push "${IMG}:latest"
+        if [ -n "${{ steps.tags.outputs.reltag }}" ]; then docker push "${IMG}:${{ steps.tags.outputs.reltag }}"; fi
+
+    - name: Build and push api image (central)
+      run: |
+        IMG="${{ steps.reg.outputs.base }}/api"
+        EXTRA=()
+        if [ -n "${{ steps.tags.outputs.reltag }}" ]; then EXTRA=(-t "${IMG}:${{ steps.tags.outputs.reltag }}"); fi
+        docker build -f cmd/api/Dockerfile \
+          -t "${IMG}:${{ steps.tags.outputs.sha }}" \
+          -t "${IMG}:latest" \
+          "${EXTRA[@]}" \
+          .
+        docker push "${IMG}:${{ steps.tags.outputs.sha }}"
+        docker push "${IMG}:latest"
+        if [ -n "${{ steps.tags.outputs.reltag }}" ]; then docker push "${IMG}:${{ steps.tags.outputs.reltag }}"; fi
+
+    - name: Publish summary
+      run: |
+        BASE="${{ steps.reg.outputs.base }}"
+        echo "Published central release images (provision a customer from these):"
+        echo "  ${BASE}/api:${{ steps.tags.outputs.sha }}      (+ :latest${{ steps.tags.outputs.reltag && format(' + :{0}', steps.tags.outputs.reltag) || '' }})"
+        echo "  ${BASE}/pipeline:${{ steps.tags.outputs.sha }} (+ :latest${{ steps.tags.outputs.reltag && format(' + :{0}', steps.tags.outputs.reltag) || '' }})"
 
   # Manual deployment to GCP (Phase 1+)
   # Requires manual approval via GitHub environment

@@ -30,8 +30,8 @@ output "service_account_email" {
 }
 
 output "artifact_registry_repository" {
-  description = "Fully-qualified Artifact Registry repo path to push pipeline/api images to (REGION-docker.pkg.dev/PROJECT/kaimi)."
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.kaimi.repository_id}"
+  description = "Fully-qualified Artifact Registry repo path for the pipeline/api images (REGION-docker.pkg.dev/PROJECT/kaimi). Computed from region/project/repo-id so it is identical whether the repo was created by this module (create_artifact_registry = true) or pre-created out-of-band (false)."
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${local.artifact_repo}"
 }
 
 output "queue_bucket" {

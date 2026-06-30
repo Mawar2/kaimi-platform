@@ -90,6 +90,25 @@ variable "api_image" {
   type        = string
 }
 
+# --- Artifact Registry: create vs. reference an existing repo ----------------
+#
+# By default (true) this module CREATES the per-customer Artifact Registry repo,
+# preserving the original self-serve behavior: a customer applies, then builds and
+# pushes images into the repo Terraform made. Set it FALSE when the repo already
+# exists and was populated out-of-band BEFORE apply — this is what
+# scripts/provision-customer.sh does: it pre-creates the customer's AR repo and
+# COPIES the central release images in, so the Cloud Run Job/Service can reference
+# them on the very first apply (full per-project image isolation, no first-apply
+# chicken-and-egg). When false, pipeline_image/api_image must point at images that
+# already exist in the (pre-created) repo. The artifact_registry_repository output
+# is computed the same way in both modes, so downstream steps are unchanged.
+
+variable "create_artifact_registry" {
+  description = "When true (default), the module creates the per-customer Artifact Registry repo (original self-serve flow: apply, then push images). Set false when the repo is pre-created and images are copied in BEFORE apply (the provision-customer.sh flow) — the module then only REFERENCES the repo via pipeline_image/api_image and creates no AR resource. The artifact_registry_repository output is identical either way."
+  type        = bool
+  default     = true
+}
+
 # --- Model selection (mirrors internal/config defaults) ----------------------
 
 variable "gemini_model" {
