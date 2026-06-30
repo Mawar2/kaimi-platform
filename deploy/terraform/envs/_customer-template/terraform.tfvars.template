@@ -1,0 +1,39 @@
+# terraform.tfvars.template — placeholders filled by scripts/provision-customer.sh.
+#
+# DO NOT edit the copied terraform.tfvars by hand during provisioning; the script
+# renders it from this template by substituting the __TOKENS__ below. Secret
+# VALUES never appear here (the SAM.gov key, OAuth/session/Drive secrets live in
+# Secret Manager, added out-of-band by the script / the customer onboarding flow).
+#
+# The double-underscore tokens in the VALUES below are replaced with sed by
+# provision-customer.sh (PROJECT_ID, REGION, TENANT_ID, TENANT_DISPLAY_NAME,
+# PIPELINE_IMAGE, API_IMAGE, FIRESTORE_LOCATION, BILLING_ACCOUNT,
+# BUDGET_AMOUNT_USD). These comment lines contain no tokens, so the rendered
+# header stays readable.
+
+project_id          = "__PROJECT_ID__"
+region              = "__REGION__"
+tenant_id           = "__TENANT_ID__"
+tenant_display_name = "__TENANT_DISPLAY_NAME__"
+
+# Images already COPIED into this project's Artifact Registry repo by the script,
+# so create_artifact_registry stays false (the module references, never creates).
+pipeline_image           = "__PIPELINE_IMAGE__"
+api_image                = "__API_IMAGE__"
+create_artifact_registry = false
+
+# Product-key (magic-link sign-up) gate. A single apply also provisions the
+# Firestore key registry + the on-SAM-key-save instant-hunt IAM.
+gate_mode          = "product-key"
+firestore_location = "__FIRESTORE_LOCATION__"
+
+# Optional monthly budget alert (the billing account this project is linked to).
+billing_account   = "__BILLING_ACCOUNT__"
+budget_amount_usd = __BUDGET_AMOUNT_USD__
+
+# Resource labels for cost attribution / inventory.
+labels = {
+  product  = "kaimi"
+  tenant   = "__TENANT_ID__"
+  provisioner = "provision-customer.sh"
+}

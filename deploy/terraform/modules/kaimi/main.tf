@@ -138,8 +138,19 @@ resource "google_project_iam_member" "runtime_roles" {
 # -----------------------------------------------------------------------------
 # 4. Artifact Registry repository for container images
 #    Mirrors setup-gcp.sh Step 10 (lines 211-215).
+#
+#    count-gated on var.create_artifact_registry (default true = original
+#    self-serve flow: Terraform creates the repo, the customer pushes images
+#    afterward). When false the module creates NO AR resource — the repo was
+#    pre-created and the central release images copied in BEFORE apply (the
+#    scripts/provision-customer.sh flow), so the Cloud Run Job/Service just
+#    reference pipeline_image/api_image from the already-populated repo. Either
+#    way the artifact_registry_repository OUTPUT is computed identically from the
+#    region/project/repo-id (see outputs.tf), so downstream steps don't branch.
 # -----------------------------------------------------------------------------
 resource "google_artifact_registry_repository" "kaimi" {
+  count = var.create_artifact_registry ? 1 : 0
+
   project       = var.project_id
   location      = var.region
   repository_id = local.artifact_repo

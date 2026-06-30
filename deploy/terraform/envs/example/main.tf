@@ -58,6 +58,9 @@ module "kaimi" {
   # --- Shared-project coexistence (default "" = greenfield, unchanged names) ---
   name_prefix = var.name_prefix
 
+  # --- Artifact Registry: create here (default) or reference a pre-created repo ---
+  create_artifact_registry = var.create_artifact_registry
+
   # --- Models (defaults match internal/config; override if desired) ---
   gemini_model      = var.gemini_model
   outline_model     = var.outline_model
@@ -109,6 +112,10 @@ variable "name_prefix" {
 }
 variable "pipeline_image" { type = string }
 variable "api_image" { type = string }
+variable "create_artifact_registry" {
+  type    = bool
+  default = true
+}
 
 variable "gemini_model" {
   type    = string

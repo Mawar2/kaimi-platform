@@ -7,3 +7,6 @@ go.mod text eol=lf
 go.sum text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+# Shell scripts must stay LF: a CRLF shebang line breaks execution under bash
+# (e.g. scripts/provision-customer.sh, deploy/scripts/*.sh) on Linux/macOS/CI.
+*.sh text eol=lf
