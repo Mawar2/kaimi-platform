@@ -236,6 +236,10 @@ jobs:
     name: Verify Acceptance Criteria
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    # Informational only: surfaces whether a PR links an approved issue, but does NOT block
+    # the merge (the team reviews ACs manually and merges agent-built PRs without a formal
+    # ticket). continue-on-error keeps the check green; the step's findings stay in the log.
+    continue-on-error: true
 
     steps:
     - name: Check PR references an issue
@@ -255,10 +259,12 @@ jobs:
           const hasIssueInBranch = issueInBranchPattern.test(branchName);
 
           if (!hasIssueInText && !hasIssueInBranch) {
-            core.setFailed(
-              'PR must reference a GitHub Issue.\n' +
-              'Include "#N" in title/body or use branch format "N_feature_name".\n' +
-              'See WORKFLOW.md for requirements.'
+            // Informational only (not a hard gate): warn, do not fail the check. The team
+            // reviews acceptance criteria manually and merges agent-built PRs without a
+            // formal ticket. Re-tighten to core.setFailed if issue-per-PR is adopted.
+            core.warning(
+              'PR does not reference a GitHub Issue (informational, not blocking).\n' +
+              'Include "#N" in title/body or use branch format "N_feature_name" if you want it linked.'
             );
           } else {
             if (hasIssueInBranch) {
@@ -645,10 +651,12 @@ jobs:
           exit 1
         fi
 
-        # verify-acceptance-criteria can be skipped (on direct push) but not failed
+        # verify-acceptance-criteria is INFORMATIONAL: it checks for a linked approved
+        # issue, but the team reviews ACs manually and merges agent-built PRs without a
+        # formal ticket. The hard merge gate is tests + lint + security + terraform above.
+        # A failure (e.g. a PR with no linked issue) warns but does NOT block the merge.
         if [[ "${{ needs.verify-acceptance-criteria.result }}" == "failure" ]]; then
-          echo "::error::Acceptance criteria verification failed"
-          exit 1
+          echo "::warning::Acceptance-criteria check did not pass (informational; not blocking the merge)"
         fi
 
         # ai-code-review can be skipped (on forks, draft PRs, direct push, or missing secrets) but not failed
@@ -686,10 +694,14 @@ jobs:
     name: Publish Central Release Images
     runs-on: ubuntu-latest
     needs: [all-checks-pass]
+    # Opt-in via the RELEASE_PUBLISH repository variable (Settings → Variables).
+    # Set it to 'true' AFTER adding the GCP_SA_KEY + GCP_PROJECT_ID secrets, so the
+    # job only runs when it can actually authenticate (a missing secret would fail
+    # the build). Unset/false → skips cleanly, keeping CI green.
     if: |
       always() &&
       needs.all-checks-pass.result == 'success' &&
-      github.repository == 'Mawar2/Kaimi' &&
+      vars.RELEASE_PUBLISH == 'true' &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/release-') || startsWith(github.ref, 'refs/tags/v'))
 
@@ -796,10 +808,16 @@ jobs:
     # all-checks-pass (ai-code-review, auto-fix) are skipped, which makes the
     # implicit success() false and silently skips this job (seen on the #127
     # merge). Gate explicitly on all-checks-pass succeeding instead.
+    # Opt-in via the ENABLE_CI_DEPLOY repository variable. CI auto-deploy is OFF by
+    # default: the productized model provisions customers with scripts/provision-customer.sh,
+    # and the dogfood is deployed manually — so a main merge must NOT auto-deploy (and would
+    # fail here anyway with no GCP_SA_KEY). Set the var to 'true' (and the GCP secrets) only
+    # if you want continuous deploy of a specific environment.
     if: |
       always() &&
       needs.all-checks-pass.result == 'success' &&
-      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      vars.ENABLE_CI_DEPLOY == 'true'
     environment:
       name: production
       # NOTE: environment.url cannot reference the `secrets` context (GitHub
