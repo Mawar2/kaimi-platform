@@ -255,6 +255,11 @@ func loadFile(path string, cfg *Config) error {
 func applyEnv(cfg *Config) {
 	envInto(&cfg.Mode, "MODE")
 	envInto(&cfg.Store.Path, "STORE_PATH")
+	// Per-deployment tenant identity. The Terraform module sets these on both the api and
+	// pipeline so a customer's deployment is branded with their name (shown in the dashboard
+	// sidebar). Without reading them here the display name silently falls back to "Kaimi".
+	envInto(&cfg.Tenant.ID, "TENANT_ID")
+	envInto(&cfg.Tenant.DisplayName, "TENANT_DISPLAY_NAME")
 	// One company profile now feeds both the Hunter gate and the Scorer (WS-A3).
 	// ELIGIBILITY_PROFILE_PATH is the canonical env var; PROFILE_PATH is honored as
 	// a backward-compatible alias for it (it formerly set the now-removed separate
